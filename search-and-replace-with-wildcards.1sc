@@ -1,0 +1,125 @@
+//---------------------------------------------------------------------------
+/*
+  010 Editor Script to search and replace with a wildcard in the middle
+  2013/04/15 v0.0.1
+
+  Source code put in public domain by Didier Stevens, no Copyright
+  https://DidierStevens.com
+  Use at your own risk
+
+  History:
+    2013/03/24: start development with 010 Editor v4.0.3
+    2013/03/25: added HexToString
+    2013/04/15: Refactoring, cleanup
+
+  Todo:
+
+*/
+//---------------------------------------------------------------------------
+
+#define TITLE "Search and replace with wildcards"
+
+int HexDigitToInt(int digit)
+{
+    if (digit >= '0' && digit <= '9')
+        return digit - '0';
+    if (digit >= 'a' && digit <= 'f')
+        return digit - 'a' + 10;
+    if (digit >= 'A' && digit <= 'F')
+        return digit - 'A' + 10;
+    return -1;
+}
+
+int HexToBytes(string hexvalues, uchar ucBytes[])
+{
+    int iIter;
+    int iFirstNibbleRead = FALSE;
+    int iByte;
+    int iHexDigit;
+    int iCount;
+
+    iCount = 0;
+    for (iIter = 0; iIter < Strlen(hexvalues); iIter ++)
+    {
+        if (hexvalues[iIter] == ' ')
+            continue;
+        iHexDigit = HexDigitToInt(hexvalues[iIter]);
+        if (iHexDigit == -1)
+            return "";
+        if (iFirstNibbleRead)
+        {
+            iFirstNibbleRead = FALSE;
+            ucBytes[iCount++] = iByte | iHexDigit;
+        }
+        else
+        {
+            iFirstNibbleRead = TRUE;
+            iByte = iHexDigit << 4;
+        }
+    }
+    return iCount;
+}
+
+int SearchAndReplaceWildcard(string sSearch, string sReplace)
+{
+    uchar ucReplaceBegin[Strlen(sReplace)];
+    int iReplaceBeginSize;
+    uchar ucReplaceEnd[Strlen(sReplace)];
+    int iReplaceEndSize;
+    int iFound;
+    int iIter1;
+    int iIter2;
+
+    iFound = Strchr(sReplace, '*');
+    if (iFound == -1)
+        return -1;
+    iReplaceBeginSize = HexToBytes(SubStr(sReplace, 0, iFound), ucReplaceBegin);
+    if (iReplaceBeginSize == 0)
+        return -1;
+    iReplaceEndSize = HexToBytes(SubStr(sReplace, iFound + 1), ucReplaceEnd);
+    if (iReplaceEndSize == 0)
+        return -1;
+
+    TFindResults stOTF = FindAll(sSearch + ",h", false, false, true);
+    for (iIter1 = 0; iIter1 < stOTF.count; iIter1++)
+    {
+        Printf("0x%08X %02Ld:", stOTF.start[iIter1], stOTF.size[iIter1]);
+        for (iIter2 = 0; iIter2 < stOTF.size[iIter1]; iIter2++)
+            Printf(" %02x", ReadUByte(stOTF.start[iIter1] + iIter2));
+        Printf(" ->");
+        WriteBytes(ucReplaceBegin, stOTF.start[iIter1], iReplaceBeginSize);
+        WriteBytes(ucReplaceEnd, stOTF.start[iIter1] + stOTF.size[iIter1] - iReplaceEndSize, iReplaceEndSize);
+        for (iIter2 = 0; iIter2 < stOTF.size[iIter1]; iIter2++)
+            Printf(" %02x", ReadUByte(stOTF.start[iIter1] + iIter2));
+        Printf("\n");
+    }
+    Printf("Found and replaced: %d\n", stOTF.count);
+
+    return 0;
+}
+
+int SearchAndReplaceWildcardGUI(string sSearch, string sReplace)
+{
+    string sSearchInput = InputString(TITLE, "Search:", sSearch);
+    if (!Strcmp(sSearchInput, ""))
+        return -1;
+    string sReplaceInput = InputString(TITLE, "Replace:", sReplace);
+    if (!Strcmp(sReplaceInput, ""))
+        return -1;
+    return SearchAndReplaceWildcard(sSearchInput, sReplaceInput);
+}
+
+void Main(void)
+{
+    if (FileCount() == 0)
+    {
+        MessageBox(idOk, TITLE, "At least one file needs to be open.");
+        return;
+    }
+
+// Example
+//    SearchAndReplaceWildcardGUI("FD01 * 10DF", "FC02 * 20CF");
+    SearchAndReplaceWildcardGUI("", "");
+}
+
+Main();

@@ -1,0 +1,92 @@
+//---------------------------------------------------------------------------
+/*
+  010 Editor Script to shift bytes in a file or a selection
+  2013/04/15 v0.0.1
+
+  Source code put in public domain by Didier Stevens, no Copyright
+  https://DidierStevens.com
+  Use at your own risk
+
+  History:
+    2013/03/26: start development with 010 Editor v4.0.2
+    2013/04/15: cleanup
+
+  Todo:
+
+*/
+//---------------------------------------------------------------------------
+
+#define TITLE "Shift"
+
+uchar ShiftByte(uchar ucByte, int iBits, int iShiftLeft)
+{
+    if (iShiftLeft)
+        return ucByte << iBits;
+    else
+        return ucByte >> iBits;
+}
+
+void Shift(int64 iStart, int64 iSize, int iBits, int iShiftLeft)
+{
+    int64 iIter;
+    int64 iBegin;
+    int64 iEnd;
+    int64 iStep;
+    uchar ucByteSave;
+    uchar ucByteIter;
+
+    if (iShiftLeft)
+    {
+        iBegin = iStart;
+        iEnd = iStart + iSize - 1;
+        iStep = 1;
+    }
+    else
+    {
+        iBegin = iStart + iSize - 1;
+        iEnd = iStart;
+        iStep = -1;
+    }
+    ucByteSave = ReadUByte(iBegin);
+    for (iIter = iBegin; iIter != iEnd; iIter += iStep)
+    {
+        ucByteIter = ShiftByte(ReadUByte(iIter), iBits, iShiftLeft) | ShiftByte(ReadUByte(iIter + iStep), 8 - iBits, !iShiftLeft);
+        WriteUByte(iIter, ucByteIter);
+    }
+    ucByteIter = ShiftByte(ReadUByte(iEnd), iBits, iShiftLeft) | ShiftByte(ucByteSave, 8 - iBits, !iShiftLeft);
+    WriteUByte(iEnd, ucByteIter);
+}
+
+void Main(void)
+{
+    int64 iStart;
+    int64 iSize;
+    int iInput;
+
+    if (FileCount() == 0)
+    {
+        MessageBox(idOk, TITLE, "At least one file needs to be open.");
+        return;
+    }
+
+    iInput = InputNumber("Shift (positive is left shift, negative is right shift)", "Number of bits to shift", "1");
+    if (BAD_VALUE == iInput)
+        return;
+    if (iInput == 0 || iInput > 8 || iInput < -8)
+    {
+        MessageBox(idOk, TITLE, "Input error");
+        return;
+    }
+
+    iSize = GetSelSize();
+    if (0 == iSize)
+    {
+        iStart = 0;
+        iSize = FileSize();
+    }
+    else
+        iStart = GetSelStart();
+    Shift(iStart, iSize, Abs(iInput), iInput > 0);
+}
+
+Main();

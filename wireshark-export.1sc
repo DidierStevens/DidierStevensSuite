@@ -1,0 +1,163 @@
+//---------------------------------------------------------------------------
+/*
+  010 Editor Script to export a file to be imported in Wireshark
+  2014/05/31 v0.0.1
+
+  Source code put in public domain by Didier Stevens, no Copyright
+  https://DidierStevens.com
+  Use at your own risk
+
+  History:
+    2014/05/30: start development with 010 Editor v5.0.0
+    2014/05/31: continue
+
+  Todo:
+*/
+//---------------------------------------------------------------------------
+
+#define TITLE "Wireshark export"
+#define HEADER "#Packet data from file '"
+
+int IsWhitespace(uchar ucByte)
+{
+    return ucByte >= 0x09 && ucByte <= 0x0D || ucByte == 0x20;
+}
+
+int ConvertHexDigit(uchar ucByte)
+{
+    if (ucByte >= '0' && ucByte <= '9')
+        return ucByte - '0';
+    if (ucByte >= 'a' && ucByte <= 'f')
+        return ucByte - 'a' + 10;
+    if (ucByte >= 'A' && ucByte <= 'F')
+        return ucByte - 'A' + 10;
+    return -1;
+}
+
+string GetHex(int64 iStart, int64 iSize)
+{
+    int iIter;
+    uchar ucByte;
+    string sHex = "";
+
+    for (iIter = iStart; iIter < iStart + iSize; iIter++)
+    {
+        ucByte = ReadUByte(iIter);
+        if (IsWhitespace(ucByte))
+            continue;
+        if (ConvertHexDigit(ucByte) == -1)
+            return "";
+        Strcat(sHex, ReadString(iIter, 1));
+    }
+    if (Strlen(sHex) % 2 != 0)
+        return "";
+    return sHex;
+}
+
+int FindExportFile()
+{
+    int iIter;
+    int iFileSave;
+    int iFile = -1;
+    string sHeader;
+
+    iFileSave = GetFileNum();
+    for (iIter = 0; iIter < FileCount(); iIter++)
+    {
+        FileSelect(iIter);
+        sHeader = ReadString(0, Strlen(HEADER));
+        FileSelect(iFileSave);
+        if (!Strcmp(sHeader, HEADER))
+        {
+            if (iFile == -1)
+                iFile = iIter;
+            else
+                return -2;
+        }
+    }
+    return iFile;
+}
+
+void WiresharkExport(int64 iStart, int64 iSize)
+{
+    int iIter;
+    uchar ucByte;
+    int iCountBytesPerLine = 0;
+    int iCountLines = 0;
+    string sExport;
+    string sBuffer;
+    int iExportFile;
+    string sHex;
+    int iSizeBytes;
+
+    iSizeBytes = iSize;
+    sHex = GetHex(iStart, iSize);
+    if (Strcmp(sHex, ""))
+    {
+        if (MessageBox(idYes | idNo, TITLE, "Hexadecimal content found. Convert to bytes?") == idYes)
+            iSizeBytes = Strlen(sHex) / 2;
+        else
+            sHex = "";
+    }
+    SPrintf(sExport, "%s%s' position: 0x%08X size: 0x%04X hex: %d\n", HEADER, GetFileName(), iStart, iSize, Strcmp(sHex, "") != 0);
+    for (iIter = iStart; iIter < iStart + iSizeBytes; iIter++)
+    {
+        if (Strcmp(sHex, ""))
+            ucByte = ConvertHexDigit(sHex[(iIter - iStart) * 2]) * 0x10 + ConvertHexDigit(sHex[(iIter - iStart) * 2 + 1]);
+        else
+            ucByte = ReadByte(iIter);
+        if (iCountBytesPerLine == 0)
+        {
+            SPrintf(sBuffer, "%06X ", iCountLines * 0x10);
+            Strcat(sExport, sBuffer);
+            iCountLines++;
+        }
+        SPrintf(sBuffer, " %02X", ucByte);
+        Strcat(sExport, sBuffer);
+        iCountBytesPerLine++;
+        if (iCountBytesPerLine == 0x10)
+        {
+            iCountBytesPerLine = 0;
+            Strcat(sExport, "\n");
+        }
+    }
+    if (iCountBytesPerLine < 0x10)
+        Strcat(sExport, "\n");
+    iExportFile = FindExportFile();
+    if (iExportFile == -1)
+    {
+        FileSelect(FileNew());
+        WriteString(0, sExport);
+    }
+    else if (iExportFile == -2)
+        MessageBox(idOk, TITLE, "There is more than one open Wireshark export file");
+    else
+    {
+        FileSelect(iExportFile);
+        WriteString(FileSize(), sExport);
+    }
+}
+
+void Main(void)
+{
+    int64 iStart;
+    int64 iSize;
+
+    if (FileCount() == 0)
+    {
+      MessageBox (idOk, TITLE, "At least one file needs to be open");
+      return;
+    }
+    iSize = GetSelSize();
+    if (0 == iSize)
+    {
+        iStart = 0;
+        iSize = FileSize();
+    }
+    else
+        iStart = GetSelStart();
+
+    WiresharkExport(iStart, iSize);
+}
+
+Main();

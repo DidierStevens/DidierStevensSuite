@@ -1,0 +1,98 @@
+//---------------------------------------------------------------------------
+/*
+  010 Editor Script to unescape a JavaScript Unicode string
+  2013/07/18 v0.0.2
+
+  Source code put in public domain by Didier Stevens, no Copyright
+  https://DidierStevens.com
+  Use at your own risk
+
+  History:
+    2013/04/05: start development with 010 Editor v4.0.2
+    2013/04/15: cleanup; added CopyToClipboard
+    2013/07/18: replaced CopyToClipboard with CopyBytesToClipboard
+
+  Todo:
+*/
+//---------------------------------------------------------------------------
+
+#define TITLE "js-unicode-unescape"
+
+int ConvertHexDigit(uchar ucByte)
+{
+    if (ucByte >= '0' && ucByte <= '9')
+        return ucByte - '0';
+    if (ucByte >= 'a' && ucByte <= 'f')
+        return ucByte - 'a' + 10;
+    if (ucByte >= 'A' && ucByte <= 'F')
+        return ucByte - 'A' + 10;
+    return -1;
+}
+
+void JSunescape(int64 iStart, int64 iSize)
+{
+    int iIter;
+    enum STATE {START, PERCENT_FOUND, U_FOUND} iState;
+    uchar ucByte;
+    int iCountDigits;
+    int aiDigits[4];
+    uchar aucResult[iSize / 3];
+    int iCountBytes;
+    
+    iState = START;
+    iCountDigits = 0;
+    iCountBytes = 0;
+    for (iIter = iStart; iIter < iStart + iSize; iIter++)
+    {
+        ucByte = ReadUByte(iIter);
+        if (iState == START && ucByte == '%')
+            iState = PERCENT_FOUND;
+        else if (iState == PERCENT_FOUND && ucByte == 'u')
+            iState = U_FOUND;
+        else if (iState == U_FOUND && ConvertHexDigit(ucByte) != -1)
+        {
+            if (iCountDigits < 4)
+                aiDigits[iCountDigits++] = ConvertHexDigit(ucByte);
+            if (iCountDigits == 4)
+            {
+                iState = START;
+                iCountDigits = 0;
+                aucResult[iCountBytes++] = aiDigits[2] * 0x10 + aiDigits[3];
+                aucResult[iCountBytes++] = aiDigits[0] * 0x10 + aiDigits[1];
+            }
+        }
+        else
+        {
+            Printf("Unexpected character at 0x%08x\n", iIter);
+            return;
+        }
+    }
+    if (iState != START)
+        Printf("Unexpected end of escape sequence\n");
+    CopyBytesToClipboard(aucResult, iCountBytes);
+    Printf("%s result copied to clipboard\n", TITLE);
+}
+
+void Main(void)
+{
+    int64 iStart;
+    int64 iSize;
+
+    if (FileCount() == 0)
+    {
+        MessageBox (idOk, TITLE, "At least one file needs to be open");
+        return;
+    }
+    iSize = GetSelSize();
+    if (0 == iSize)
+    {
+        iStart = 0;
+        iSize = FileSize();
+    }
+    else
+        iStart = GetSelStart();
+
+    JSunescape(iStart, iSize);
+}
+
+Main();

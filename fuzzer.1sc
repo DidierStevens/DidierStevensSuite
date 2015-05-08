@@ -1,0 +1,138 @@
+//---------------------------------------------------------------------------
+/*
+  010 Editor Script to fuzz a file by overwriting random locations with AAAA...
+  or other (random) bytes.
+  2013/04/15 v0.0.1
+
+  Source code put in public domain by Didier Stevens, no Copyright
+  https://DidierStevens.com
+  Use at your own risk
+
+  History:
+    2013/03/31: start development with 010 Editor v4.0.2
+    2013/04/02: refactoring (RandomNumber)
+    2013/04/15: cleanup; added hexvalue for fuzz character
+
+  Todo:
+    Random returns an int (32 bits), while a file position is an int64
+*/
+//---------------------------------------------------------------------------
+
+#define FUZZ_CHARACTER 'A'
+#define TITLE "Fuzzer"
+
+int RandomNumber(int iMinimum, int iMaximum)
+{
+    return Random(iMaximum - iMinimum + 1) + iMinimum;
+}
+
+int HexDigitToInt(int digit)
+{
+    if (digit >= '0' && digit <= '9')
+        return digit - '0';
+    if (digit >= 'a' && digit <= 'f')
+        return digit - 'a' + 10;
+    if (digit >= 'A' && digit <= 'F')
+        return digit - 'A' + 10;
+    return -1;
+}
+
+int HexToInt(string hexvalue)
+{
+    int iResult;
+    int iHexDigit;
+
+    if (4 != Strlen(hexvalue))
+        return -1;
+    if (Strcmp(SubStr(hexvalue, 0, 2), "0x"))
+        return -1;
+    iHexDigit = HexDigitToInt(hexvalue[2]);
+    if (iHexDigit == -1)
+        return -1;
+    iResult = iHexDigit * 0x10;
+    iHexDigit = HexDigitToInt(hexvalue[3]);
+    if (iHexDigit == -1)
+        return -1;
+    return iResult + iHexDigit;
+}
+
+void Main(void)
+{
+    int64 iStart;
+    int64 iSize;
+    int iCountOverwrites;
+    int iMinimumSize;
+    int iMaximumSize;
+    string sInputFuzzCharacter;
+    int iFlagRandom;
+    int iIter1;
+    int iIter2;
+    int iOverwriteSize;
+    int64 iOverwritePosition;
+
+    if (FileCount() == 0)
+    {
+        MessageBox(idOk, TITLE, "At least one file needs to be open.");
+        return;
+    }
+    iSize = GetSelSize();
+    if (0 == iSize)
+    {
+        iStart = 0;
+        iSize = FileSize();
+    }
+    else
+        iStart = GetSelStart();
+
+    iCountOverwrites = InputNumber(TITLE, "Number of times to overwrite random locations", "10");
+    if (BAD_VALUE == iCountOverwrites)
+        return;
+    if (iCountOverwrites < 1)
+    {
+        MessageBox(idOk, TITLE, "Input error");
+        return;
+    }
+
+    iMinimumSize = InputNumber(TITLE, "Minimum number of bytes to overwrite", "1");
+    if (BAD_VALUE == iMinimumSize)
+        return;
+    if (iMinimumSize < 1)
+    {
+        MessageBox(idOk, TITLE, "Input error");
+        return;
+    }
+
+    iMaximumSize = InputNumber(TITLE, "Maximum number of bytes to overwrite", "10");
+    if (BAD_VALUE == iMaximumSize)
+        return;
+    if (iMaximumSize < 1 || iMaximumSize > iSize || iMaximumSize < iMinimumSize)
+    {
+        MessageBox(idOk, TITLE, "Input error");
+        return;
+    }
+
+    iFlagRandom = false;
+    sInputFuzzCharacter = InputString(TITLE, "Fuzz character (use ** for random byte or 0x## for hex byte)", "A");
+    if ("" == sInputFuzzCharacter)
+        return;
+    else if ("**" == sInputFuzzCharacter)
+        iFlagRandom = true;
+    else if (-1 != HexToInt(sInputFuzzCharacter))
+        SPrintf(sInputFuzzCharacter, "%c", HexToInt(sInputFuzzCharacter));
+    else if (1 != Strlen(sInputFuzzCharacter))
+    {
+        MessageBox(idOk, TITLE, "Error input string.");
+        return;
+    }
+
+    for (iIter1 = 0; iIter1 < iCountOverwrites; iIter1++)
+    {
+        iOverwriteSize = RandomNumber(iMinimumSize, iMaximumSize);
+        iOverwritePosition = RandomNumber(iStart, iStart + iSize - iOverwriteSize);
+        Printf("0x%08x: overwriting with %d bytes\n", iOverwritePosition, iOverwriteSize);
+        for (iIter2 = 0; iIter2 < iOverwriteSize; iIter2++)
+            WriteByte(iOverwritePosition + iIter2, iFlagRandom ? Random(0x100) : sInputFuzzCharacter[0]);
+    }
+}
+
+Main();

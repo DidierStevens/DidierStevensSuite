@@ -1,0 +1,38 @@
+Function prolog signature:10:558BEC83C4
+Function prolog signature:10:558BEC81EC
+Function prolog signature:10:558BECEB
+Function prolog signature:10:558BECE8
+Function prolog signature:10:558BECE9
+Indirect function call tris:10:FFB7(B;????????)(B;????????)(B;????????)(B;????????)FF57(B;????????)
+GetEIP method 4 FLDZ/FSTENV [esp-12]:10:D9EED97424F4(B;01011???)
+GetEIP method 1:10:E800000000(B;01011???)
+GetEIP method 2:10:EB(J;1)E8(J;4)(B;01011???)
+GetEIP method 3:10:E9(J;4)E8(J;4)(B;01011???)
+GetEIP method 4:10:D9EE9BD97424F4(B;01011???)
+Find kernel32 base method 1:10:648B(B;00???101)30000000
+Find kernel32 base method 1bis:10:64A130000000
+Find kernel32 base method 2:10:31(B;11A??A??)(B;10100A??)30648B(B;00B??A??)
+Find kernel32 base method 3:10:6830000000(B;01011A??)648B(B;00B??A??)
+Structured exception handling :10:648B(B;00???101)00000000
+Structured exception handling bis:10:64A100000000
+API Hashing:10:AC84C07407C1CF0D01C7EBF481FF
+API Hashing bis:10:AC84C07407C1CF0701C7EBF481FF
+Indirect function call:10:FF75(B;A???????)FF55(B;A???????)
+Indirect function call bis:10:FFB5(B;A???????)(B;B???????)(B;C???????)(B;D???????)FF95(B;A???????)(B;B???????)(B;C???????)(B;D???????)
+OLE file magic number:10:D0CF11E0
+Suspicious strings:2:str=UrlDownloadToFile
+Suspicious strings:2:str=GetTempPath
+Suspicious strings:2:str=GetWindowsDirectory
+Suspicious strings:2:str=GetSystemDirectory
+Suspicious strings:2:str=WinExec
+Suspicious strings:2:str=ShellExecute
+Suspicious strings:2:str=IsBadReadPtr
+Suspicious strings:2:str=IsBadWritePtr
+Suspicious strings:2:str=CreateFile
+Suspicious strings:2:str=CloseHandle
+Suspicious strings:2:str=ReadFile
+Suspicious strings:2:str=WriteFile
+Suspicious strings:2:str=SetFilePointer
+Suspicious strings:2:str=VirtualAlloc
+Suspicious strings:2:str=GetProcAddr
+Suspicious strings:2:str=LoadLibrary

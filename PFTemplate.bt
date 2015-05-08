@@ -1,0 +1,121 @@
+//---------------------------------------------------------------------------
+/*
+	010 Editor Template for Prefetch (PF) file format
+	2013/12/21 v0.0.2
+
+	http://www.forensicswiki.org/wiki/Windows_Prefetch_File_Format
+
+	Source code put in public domain by Didier Stevens, no Copyright
+	https://DidierStevens.com
+	Use at your own risk
+
+	History:
+		2012/06/22: start development with 010 Editor v4.0.1
+		2012/06/30: added LittleEndian
+		2013/12/21: added sections A, B, C and D
+
+	Todo:
+		Change code SectionD for multiple volumes
+		Test with different Windows versions
+*/
+//---------------------------------------------------------------------------
+
+typedef union
+{
+	wstring Wstring;
+	WORD Characters[30];
+} USTRING30;
+
+wstring USTRING30ToWstring(USTRING30 &arg)
+{
+	return arg.Wstring;
+}
+
+typedef struct
+{
+	DWORD Version;
+	DWORD Magic;
+	DWORD Unknown1;
+	DWORD FileSize;
+	USTRING30 ExecutableName <read=USTRING30ToWstring>;
+	DWORD Hash <format=hex>;
+	DWORD Unknown2;
+	DWORD SectionAOffset <format=hex>;
+	DWORD SectionANumberOfEntries;
+	DWORD SectionBOffset <format=hex>;
+	DWORD SectionBNumberOfEntries;
+	DWORD SectionCOffset <format=hex>;
+	DWORD SectionCLength;
+	DWORD SectionDOffset <format=hex>;
+	DWORD SectionDNumberOfEntries;
+	DWORD SectionDLength;
+	FILETIME LatestExecution;
+	DWORD Unknown3[4];
+	DWORD ExecutionCounter;
+	DWORD Unknown4;
+} PFHEAD;
+
+typedef struct
+{
+	wstring File;
+} FILE <read=ReadWstring>;
+
+wstring ReadWstring(FILE &File)
+{
+	return File.File;
+}
+
+typedef struct
+{
+	BYTE array[header.Version == 17 ? 20 : 32];
+} ENTRYA;
+
+typedef struct
+{
+	local int iIter;
+	for (iIter = 0; iIter < header.SectionANumberOfEntries; iIter++)
+		ENTRYA EntryA;
+} SECTIONA;
+
+typedef struct
+{
+	BYTE array[12];
+} ENTRYB;
+
+typedef struct
+{
+	local int iIter;
+	for (iIter = 0; iIter < header.SectionBNumberOfEntries; iIter++)
+		ENTRYB EntryB;
+} SECTIONB;
+
+typedef struct
+{
+	while (FTell() - header.SectionCOffset < header.SectionCLength)
+		FILE File;
+} SECTIONC;
+
+typedef struct
+{
+	local int64 iHere = FTell();
+	
+	DWORD OffsetVolumeString;
+	DWORD LengthVolumeString;
+	FILETIME VolumeCreationTime;
+	DWORD VolumeSerialNumber <format=hex>;
+	FSeek(iHere + OffsetVolumeString);
+	wstring VolumeString;
+} SECTIOND;
+
+// Main
+
+LittleEndian();
+PFHEAD header;
+FSeek(header.SectionAOffset);
+SECTIONA SectionA;
+FSeek(header.SectionBOffset);
+SECTIONB SectionB;
+FSeek(header.SectionCOffset);
+SECTIONC SectionC;
+FSeek(header.SectionDOffset);
+SECTIOND SectionD;

@@ -1,0 +1,428 @@
+//--------------------------------------
+//--- 010 Editor v2.1.3 Binary Template
+//
+// File: WMFTemplate.bt
+// Author: Didier Stevens (https://DidierStevens.com)
+// Revision: 0.3, prototype, only tested on 1 placeable WMF file and 1 WMF file
+// Date: 2007/08/09 - 2007/08/20
+// Purpose:  Defines a template for parsing WMF files.
+// References:
+//  http://wvware.sourceforge.net/caolan/ora-wmf.html
+//--------------------------------------
+
+
+typedef struct
+{
+  DWORD Key;           /* Magic number (always 9AC6CDD7h) */
+  WORD  Handle;        /* Metafile HANDLE number (always 0) */
+  SHORT Left;          /* Left coordinate in metafile units */
+  SHORT Top;           /* Top coordinate in metafile units */
+  SHORT Right;         /* Right coordinate in metafile units */
+  SHORT Bottom;        /* Bottom coordinate in metafile units */
+  WORD  Inch;          /* Number of metafile units per inch */
+  DWORD Reserved;      /* Reserved (always 0) */
+  WORD  Checksum <read=CalcCheckSum>;      /* Checksum value for previous 10 WORDs */
+} WMFSPECIAL;
+
+typedef struct
+{
+  WORD  FileType;       /* Type of metafile (1=memory, 2=disk) */
+  WORD  HeaderSize;     /* Size of header in WORDS (always 9) */
+  WORD  Version;        /* Version of Microsoft Windows used */
+  DWORD FileSize <read=CheckFileSize>;       /* Total size of the metafi+le in WORDs */
+  WORD  NumOfObjects;   /* Number of objects in the file */
+  DWORD MaxRecordSize;  /* The size of largest record in WORDs */
+  WORD  NoParameters;   /* Not Used (always 0) */
+} WMFHEAD;
+
+typedef struct
+{
+  DWORD Size;          /* Total size of the record in WORDs */
+  WORD  Function <read=ReadFunction>;      /* Function number (defined in WINDOWS.H) */
+  WORD  Parmeters[Size-3];   /* Parameter values passed to function */
+} WMFRECORD;
+
+// Source: http://wvware.sourceforge.net/caolan/ora-wmf.html
+string ReadFunction( WORD function )
+{
+  string result;
+
+  switch (function)
+  {
+    case 0x0000:
+      result = "EOF";
+      break;
+
+    case 0x001E:
+      result = "SaveDC";
+      break;
+      
+    case 0x0035:
+      result = "RealizePalette";
+      break;
+      
+    case 0x0037:
+      result = "SetPalEntries";
+      break;
+      
+    case 0x004F:
+      result = "StartPage";
+      break;
+      
+    case 0x0050:
+      result = "EndPage";
+      break;
+      
+    case 0x0052:
+      result = "AbortDoc";
+      break;
+      
+    case 0x005E:
+      result = "EndDoc";
+      break;
+      
+    case 0x00F7:
+      result = "CreatePalette";
+      break;
+      
+    case 0x00F8:
+      result = "CreateBrush";
+      break;
+      
+    case 0x0102:
+      result = "SetBkMode";
+      break;
+      
+    case 0x0103:
+      result = "SetMapMode";
+      break;
+      
+    case 0x0104:
+      result = "SetROP2";
+      break;
+      
+    case 0x0105:
+      result = "SetRelabs";
+      break;
+      
+    case 0x0106:
+      result = "SetPolyFillMode";
+      break;
+      
+    case 0x0107:
+      result = "SetStretchBltMode";
+      break;
+      
+    case 0x0108:
+      result = "SetTextCharExtra";
+      break;
+      
+    case 0x0127:
+      result = "RestoreDC";
+      break;
+      
+    case 0x012A:
+      result = "InvertRegion";
+      break;
+      
+    case 0x012B:
+      result = "PaintRegion";
+      break;
+      
+    case 0x012C:
+      result = "SelectClipRegion";
+      break;
+      
+    case 0x012D:
+      result = "SelectObject";
+      break;
+      
+    case 0x012E:
+      result = "SetTextAlign";
+      break;
+      
+    case 0x0139:
+      result = "ResizePalette";
+      break;
+      
+    case 0x0142:
+      result = "DibCreatePatternBrush";
+      break;
+      
+    case 0x014C:
+      result = "ResetDc";
+      break;
+      
+    case 0x014D:
+      result = "StartDoc";
+      break;
+      
+    case 0x01F0:
+      result = "DeleteObject";
+      break;
+      
+    case 0x01F9:
+      result = "CreatePatternBrush";
+      break;
+      
+    case 0x01f0:
+      result = "DeleteObject";
+      break;
+      
+    case 0x0201:
+      result = "SetBkColor";
+      break;
+      
+    case 0x0209:
+      result = "SetTextColor";
+      break;
+      
+    case 0x020A:
+      result = "SetTextJustification";
+      break;
+      
+    case 0x020B:
+      result = "SetWindowOrg";
+      break;
+      
+    case 0x020C:
+      result = "SetWindowExt";
+      break;
+      
+    case 0x020D:
+      result = "SetViewportOrg";
+      break;
+      
+    case 0x020E:
+      result = "SetViewportExt";
+      break;
+      
+    case 0x020F:
+      result = "OffsetWindowOrg";
+      break;
+      
+    case 0x0211:
+      result = "OffsetViewportOrg";
+      break;
+      
+    case 0x0213:
+      result = "LineTo";
+      break;
+      
+    case 0x0214:
+      result = "MoveTo";
+      break;
+      
+    case 0x0220:
+      result = "OffsetClipRgn";
+      break;
+      
+    case 0x0228:
+      result = "FillRegion";
+      break;
+      
+    case 0x0231:
+      result = "SetMapperFlags";
+      break;
+      
+    case 0x0234:
+      result = "SelectPalette";
+      break;
+      
+    case 0x02FA:
+      result = "CreatePenIndirect";
+      break;
+      
+    case 0x02FB:
+      result = "CreateFontIndirect";
+      break;
+      
+    case 0x02FC:
+      result = "CreateBrushIndirect";
+      break;
+      
+    case 0x02FD:
+      result = "CreateBitmapIndirect";
+      break;
+      
+    case 0x0324:
+      result = "Polygon";
+      break;
+      
+    case 0x0325:
+      result = "Polyline";
+      break;
+      
+    case 0x0410:
+      result = "ScaleWindowExt";
+      break;
+      
+    case 0x0412:
+      result = "ScaleViewportExt";
+      break;
+      
+    case 0x0415:
+      result = "ExcludeClipRect";
+      break;
+      
+    case 0x0416:
+      result = "IntersectClipRect";
+      break;
+      
+    case 0x0418:
+      result = "Ellipse";
+      break;
+      
+    case 0x0419:
+      result = "FloodFill";
+      break;
+      
+    case 0x041B:
+      result = "Rectangle";
+      break;
+      
+    case 0x041F:
+      result = "SetPixel";
+      break;
+      
+    case 0x0429:
+      result = "FrameRegion";
+      break;
+      
+    case 0x0436:
+      result = "AnimatePalette";
+      break;
+      
+    case 0x0521:
+      result = "TextOut";
+      break;
+      
+    case 0x0538:
+      result = "PolyPolygon";
+      break;
+      
+    case 0x0548:
+      result = "ExtFloodFill";
+      break;
+      
+    case 0x061C:
+      result = "RoundRect";
+      break;
+      
+    case 0x061D:
+      result = "PatBlt";
+      break;
+      
+    case 0x0626:
+      result = "Escape";
+      break;
+      
+    case 0x062F:
+      result = "DrawText";
+      break;
+      
+    case 0x06FE:
+      result = "CreateBitmap";
+      break;
+      
+    case 0x06FF:
+      result = "CreateRegion";
+      break;
+      
+    case 0x0817:
+      result = "Arc";
+      break;
+      
+    case 0x081A:
+      result = "Pie";
+      break;
+      
+    case 0x0830:
+      result = "Chord";
+      break;
+      
+    case 0x0922:
+      result = "BitBlt";
+      break;
+      
+    case 0x0940:
+      result = "DibBitblt";
+      break;
+      
+    case 0x0A32:
+      result = "ExtTextOut";
+      break;
+      
+    case 0x0B23:
+      result = "StretchBlt";
+      break;
+      
+    case 0x0B41:
+      result = "DibStretchBlt";
+      break;
+      
+    case 0x0F43:
+      result = "StretchDIBits";
+      break;
+      
+    case 0x0d33:
+      result = "SetDibToDev";
+      break;
+
+    default:
+      SPrintf(result, "0x%04X", function);
+  }
+  return result;
+}
+
+string CalcCheckSum(WORD checksum)
+{
+  string result;
+  int i;
+  WORD calculatedchecksum = 0;
+
+  for (i = 0; i < 10; i++)
+    calculatedchecksum ^= ReadUInt(i*2);
+
+  if (checksum == calculatedchecksum)
+    SPrintf(result, "%04X", checksum);
+  else
+    SPrintf(result, "NOK: stored: 0x%04X calculated: 0x%04X", checksum, calculatedchecksum);
+
+  return result;
+}
+
+string CheckFileSize(WORD FileSize)
+{
+  string result;
+  WORD actualFileSize = FileSize()/2;
+
+  if (IsSpecial)
+    actualFileSize -= 11;
+  if (FileSize == actualFileSize)
+    SPrintf(result, "0x%04X", FileSize);
+  else
+    SPrintf(result, "NOK: stored: 0x%04X actual: 0x%04X", FileSize, actualFileSize);
+
+  return result;
+}
+
+// Define the headers
+LittleEndian();
+local int IsSpecial = 0;
+if (0x9AC6CDD7 == ReadQuad(0))
+{
+  WMFSPECIAL special;
+  IsSpecial = 1;
+}
+WMFHEAD header;
+
+local int recCnt = 0;
+while( !FEof() )
+{
+  WMFRECORD record;
+  recCnt++;
+}
+
+if (recCnt != header.NumOfObjects)
+  Warning("%d objects declared and %d objects counted", header.NumOfObjects, recCnt);

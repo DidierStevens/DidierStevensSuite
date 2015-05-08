@@ -1,0 +1,565 @@
+//---------------------------------------------------------------------------
+/*
+	010 Editor Template for PDF file format
+	2010/08/06 v0.0.1
+
+	As the PDF file format is not your usual binary file format for which it is easy to create
+	010 templates, I had to resort to unusual template programming techniques.
+	Some limitations of the 010 scripting language (like not being able to create local structures)
+	also explain the unusual style.
+	Summary of the algorithm used by this template:
+		- search for keywords with FindAll (%PDF, %%EOF, obj, endobj): FindAllKeywords()
+		- merge all found keywords into one array, and filter out found keywords that are not actual
+		  PDF structures (like obj without preceding index and version): MergeAndFilterAllKeywords()
+		- loop over all keywords and prepare data needed to create PDF structures: PrepareStructures()
+		- create PDF structures: CreatePDFStructures()
+
+	Source code put in public domain by Didier Stevens, no Copyright
+	https://DidierStevens.com
+	Use at your own risk
+
+	History:
+		2010/08/03: start development with 010 Editor v3.0.6
+		2010/08/04: continue
+		2010/08/05: continue
+		2010/08/06: refactoring, cleanup
+*/
+//---------------------------------------------------------------------------
+
+local int iCOLOR = 0x95E8FF; // Color used for highlighting PDF structures
+
+enum int {TYPE_UNKNOWN, TYPE_HEADER, TYPE_TRAILER, TYPE_OBJ, TYPE_ENDOBJ};
+
+// Global variables
+
+local int iKeywordCount;
+local int iStructureCount;
+local TFindResults tfrHeaders;
+local TFindResults tfrTrailers;
+local TFindResults tfrObjs;
+local TFindResults tfrEndobjs;
+
+local int iPDFHeaderCount = 0;
+local int iPDFTrailerCount = 0;
+local int iPDFUnknownCount = 0;
+local int iPDFCommentCount = 0;
+local int iPDFWhitespaceCount = 0;
+local int iPDFXrefCount = 0;
+local int iPDFObjectCount = 0;
+
+// Structures
+
+local int iIndexLength;
+local int iWhiteSpace1Length;
+local int iVersionLength;
+local int iWhiteSpace2Length;
+local int iDataLength;
+local int iFoundEndobj;
+local int iWhiteSpace3Length;
+typedef struct {
+	BYTE Index[iIndexLength];
+	BYTE WhiteSpace1[iWhiteSpace1Length];
+	BYTE Version[iVersionLength];
+	BYTE WhiteSpace2[iWhiteSpace2Length];
+	BYTE Object[3];
+	BYTE Data[iDataLength];
+	if (iFoundEndobj)
+		BYTE EndObject[6];
+	BYTE WhiteSpace3[iWhiteSpace3Length];
+} PDFObj <read=ReadPDFObj>;
+
+string ReadPDFObj(PDFObj &sPDFObj)
+{
+	local string sResult;
+	SPrintf(sResult, "%s %s obj %s", sPDFObj.Index, sPDFObj.Version, sPDFObj.Data);
+	return sResult;
+}
+
+local int iHeaderSize;
+typedef struct {
+	BYTE Header[iHeaderSize];
+} PDFHeader;
+
+local int iTrailerSize;
+typedef struct {
+	BYTE Trailer[iTrailerSize];
+} PDFTrailer;
+
+local int iUnknownSize;
+typedef struct {
+	BYTE Data[iUnknownSize];
+} PDFUnknown;
+
+local int iCommentSize;
+typedef struct {
+	BYTE Comment[iCommentSize];
+} PDFComment;
+
+local int iWhitespaceSize;
+typedef struct {
+	BYTE Whitespace[iWhitespaceSize];
+} PDFWhitespace;
+
+local int iXrefSize;
+typedef struct {
+	BYTE Data[iXrefSize];
+} PDFXref;
+
+// Functions
+
+int64 FindStartOfObj(int64 iStart, int &iIndexLength, int &iWhiteSpace1Length, int &iVersionLength, int &iWhiteSpace2Length)
+{
+	local int iIter;
+	local BYTE bChar;
+	local int64 iIndex;
+	local int64 iStartIndex = -1;
+	local int64 iEndIndex = -1;
+	local int64 iStartVersion = -1;
+	local int64 iEndVersion = -1;
+
+	for(iIter = 1; iIter <= 20; iIter++)
+	{
+		iIndex = iStart - iIter;
+		if (iIndex < 0)
+			break;
+		bChar = ReadByte(iIndex);
+		if (iEndVersion == -1)
+		{
+			if (bChar == ' ')
+				;
+			else if (bChar >= '0' && bChar <= '9')
+				iEndVersion = iIndex;
+			else
+				break;
+		}
+		else if (iStartVersion == -1)
+		{
+			if (bChar >= '0' && bChar <= '9')
+				;
+			else if (bChar == ' ')
+				iStartVersion = iIndex + 1;
+			else
+				break;
+		}
+		else if (iEndIndex == -1)
+		{
+			if (bChar == ' ')
+				;
+			else if (bChar >= '0' && bChar <= '9')
+				iEndIndex = iIndex;
+			else
+				break;
+		}
+		else if (iStartIndex == -1)
+		{
+			if (bChar < '0' || bChar > '9')
+			{
+				iStartIndex = iIndex + 1;
+				break;
+			}
+		}
+	}
+
+	if (iEndIndex != -1 && iStartVersion != -1 && iEndVersion != -1)
+	{
+		if (iStartIndex == -1)
+		{
+			if (iIndex == -1)
+				iStartIndex = 0;
+			else
+				return -1;
+		}
+		iIndexLength = iEndIndex - iStartIndex + 1;
+		iWhiteSpace1Length = iStartVersion - iEndIndex - 1;
+		iVersionLength = iEndVersion - iStartVersion + 1;
+		iWhiteSpace2Length = iStart - iEndVersion;
+		return iStartIndex;
+	}
+	else
+		return -1;
+}
+
+int64 FindEOL(int64 iStart)
+{
+	local int64 iIter;
+	for(iIter = iStart; iIter < FileSize(); iIter++)
+		if (ReadByte(iIter) == 0x0D && iIter + 1 < FileSize() && ReadByte(iIter + 1) == 0x0A)
+			return iIter + 1;
+		else if (ReadByte(iIter) == 0x0D || ReadByte(iIter) == 0x0A)
+			return iIter;
+	return -1;
+}
+
+void FindAllKeywords(void)
+{
+	tfrHeaders = FindAll("%PDF");
+	tfrTrailers = FindAll("%%EOF");
+	tfrObjs = FindAll(" obj");
+	tfrEndobjs = FindAll("endobj");
+	iKeywordCount = tfrHeaders.count + tfrTrailers.count + tfrObjs.count + tfrEndobjs.count;
+}
+
+int MergeKeywords(int iMerge1Size, int iMerge2Size)
+{
+	local int64 iIndex1 = 0;
+	local int64 iIndex2 = 0;
+	local int64 iIndex3 = 0;
+
+	while (true)
+	{
+		if (iIndex1 == iMerge1Size)
+		{
+			while (iIndex2 < iMerge2Size)
+			{
+				aiMerge3KeywordType[iIndex3] = aiMerge2KeywordType[iIndex2];
+				aiMerge3KeywordStart[iIndex3] = aiMerge2KeywordStart[iIndex2];
+				aiMerge3KeywordSize[iIndex3] = aiMerge2KeywordSize[iIndex2];
+				iIndex2++;
+				iIndex3++;
+			}
+			break;
+		}
+		if (iIndex2 == iMerge2Size)
+		{
+			while (iIndex1 < iMerge1Size)
+			{
+				aiMerge3KeywordType[iIndex3] = aiMerge1KeywordType[iIndex1];
+				aiMerge3KeywordStart[iIndex3] = aiMerge1KeywordStart[iIndex1];
+				aiMerge3KeywordSize[iIndex3] = aiMerge1KeywordSize[iIndex1];
+				iIndex1++;
+				iIndex3++;
+			}
+			break;
+		}
+		if (aiMerge1KeywordStart[iIndex1] < aiMerge2KeywordStart[iIndex2])
+		{
+			aiMerge3KeywordType[iIndex3] = aiMerge1KeywordType[iIndex1];
+			aiMerge3KeywordStart[iIndex3] = aiMerge1KeywordStart[iIndex1];
+			aiMerge3KeywordSize[iIndex3] = aiMerge1KeywordSize[iIndex1];
+			iIndex1++;
+			iIndex3++;
+		}
+		else
+		{
+			aiMerge3KeywordType[iIndex3] = aiMerge2KeywordType[iIndex2];
+			aiMerge3KeywordStart[iIndex3] = aiMerge2KeywordStart[iIndex2];
+			aiMerge3KeywordSize[iIndex3] = aiMerge2KeywordSize[iIndex2];
+			iIndex2++;
+			iIndex3++;
+		}
+	}
+	for(iIndex1 = 0; iIndex1 < iMerge1Size + iMerge2Size; iIndex1++)
+	{
+		aiMerge1KeywordType[iIndex1] = aiMerge3KeywordType[iIndex1];
+		aiMerge1KeywordStart[iIndex1] = aiMerge3KeywordStart[iIndex1];
+		aiMerge1KeywordSize[iIndex1] = aiMerge3KeywordSize[iIndex1];
+	}
+	return iMerge1Size + iMerge2Size;
+}
+
+void MergeAndFilterAllKeywords(void)
+{
+	local int iIter;
+	local int iIter2;
+	local int iTempCount;
+
+	for(iIter = 0; iIter < tfrHeaders.count; iIter++)
+	{
+		aiMerge1KeywordType[iIter] = TYPE_HEADER;
+		aiMerge1KeywordStart[iIter] = tfrHeaders.start[iIter];
+		aiMerge1KeywordSize[iIter] = tfrHeaders.size[iIter];
+	}
+	for(iIter = 0; iIter < tfrTrailers.count; iIter++)
+	{
+		aiMerge2KeywordType[iIter] = TYPE_TRAILER;
+		aiMerge2KeywordStart[iIter] = tfrTrailers.start[iIter];
+		aiMerge2KeywordSize[iIter] = tfrTrailers.size[iIter];
+	}
+	iTempCount = MergeKeywords(tfrHeaders.count, tfrTrailers.count);
+	iIter2 = 0;
+	for(iIter = 0; iIter < tfrObjs.count; iIter++)
+	{
+		if (-1 != FindStartOfObj(tfrObjs.start[iIter], iIndexLength, iWhiteSpace1Length, iVersionLength, iWhiteSpace2Length))
+		{
+			aiMerge2KeywordType[iIter2] = TYPE_OBJ;
+			aiMerge2KeywordStart[iIter2] = tfrObjs.start[iIter];
+			aiMerge2KeywordSize[iIter2] = tfrObjs.size[iIter];
+			iIter2++;
+		}
+	}
+	iTempCount = MergeKeywords(iTempCount, iIter2);
+	for(iIter = 0; iIter < tfrEndobjs.count; iIter++)
+	{
+		aiMerge2KeywordType[iIter] = TYPE_ENDOBJ;
+		aiMerge2KeywordStart[iIter] = tfrEndobjs.start[iIter];
+		aiMerge2KeywordSize[iIter] = tfrEndobjs.size[iIter];
+	}
+	iKeywordCount = MergeKeywords(iTempCount, tfrEndobjs.count);
+}
+
+int CalculateSizeWithEOL(int64 iStart)
+{
+	local int64 iIndexEOL;
+
+	iIndexEOL = FindEOL(iStart);
+	if (iIndexEOL == -1)
+		return -1;
+	else
+		return iIndexEOL - iStart + 1;
+}
+
+void PrepareStructures(void)
+{
+	local int iIter;
+	local int64 iEndPreviousStructure = 0;
+	local int iSize;
+	local int64 iStartIndirectObject;
+	local BYTE bRead;
+	local int iWhitespaceCount;
+	iStructureCount = 0;
+
+	for(iIter = 0; iIter < iKeywordCount; iIter++)
+	{
+		if (aiMerge1KeywordType[iIter] == TYPE_OBJ)
+			iStartIndirectObject = FindStartOfObj(aiMerge1KeywordStart[iIter], iIndexLength, iWhiteSpace1Length, iVersionLength, iWhiteSpace2Length);
+		else
+			iStartIndirectObject = aiMerge1KeywordStart[iIter];
+
+		if (iStartIndirectObject != iEndPreviousStructure && aiMerge1KeywordType[iIter] != TYPE_ENDOBJ)
+		{
+			aiStructureType[iStructureCount] = TYPE_UNKNOWN;
+			aiStructureStart[iStructureCount] = iEndPreviousStructure;
+			aiStructureSize[iStructureCount] = iStartIndirectObject - iEndPreviousStructure;
+			iStructureCount++;
+		}
+
+		if (aiMerge1KeywordType[iIter] == TYPE_HEADER)
+		{
+			iSize = CalculateSizeWithEOL(aiMerge1KeywordStart[iIter]);
+			if (iSize == -1)
+				iSize = aiMerge1KeywordSize[iIter];
+			aiStructureType[iStructureCount] = TYPE_HEADER;
+			aiStructureStart[iStructureCount] = aiMerge1KeywordStart[iIter];
+			aiStructureSize[iStructureCount] = iSize;
+			iEndPreviousStructure = aiStructureStart[iStructureCount] + aiStructureSize[iStructureCount];
+			iStructureCount++;
+		}
+		else if (aiMerge1KeywordType[iIter] == TYPE_TRAILER)
+		{
+			iSize = CalculateSizeWithEOL(aiMerge1KeywordStart[iIter]);
+			if (iSize == -1)
+				iSize = aiMerge1KeywordSize[iIter];
+			aiStructureType[iStructureCount] = TYPE_TRAILER;
+			aiStructureStart[iStructureCount] = aiMerge1KeywordStart[iIter];
+			aiStructureSize[iStructureCount] = iSize;
+			iEndPreviousStructure = aiStructureStart[iStructureCount] + aiStructureSize[iStructureCount];
+			iStructureCount++;
+		}
+		else if (aiMerge1KeywordType[iIter] == TYPE_OBJ)
+		{
+			iSize = aiMerge1KeywordStart[iIter + 1] - iStartIndirectObject;
+			if (aiMerge1KeywordType[iIter + 1] == TYPE_ENDOBJ)
+				iSize += 6;
+			iWhitespaceCount = 0;
+			bRead = ReadByte(iStartIndirectObject + iSize);
+			while (bRead == 0x0D || bRead == 0x0A || bRead == 0x20)
+			{
+				iWhitespaceCount++;
+				bRead = ReadByte(iStartIndirectObject + iSize + iWhitespaceCount);
+			}
+			iSize += iWhitespaceCount;
+			aiStructureType[iStructureCount] = TYPE_OBJ;
+			aiStructureStart[iStructureCount] = iStartIndirectObject;
+			aiStructureSize[iStructureCount] = iSize;
+			aiStructureExtraParameter1[iStructureCount] = iIndexLength;
+			aiStructureExtraParameter2[iStructureCount] = iWhiteSpace1Length;
+			aiStructureExtraParameter3[iStructureCount] = iVersionLength;
+			aiStructureExtraParameter4[iStructureCount] = iWhiteSpace2Length;
+			aiStructureExtraParameter5[iStructureCount] = aiMerge1KeywordType[iIter + 1] == TYPE_ENDOBJ;
+			aiStructureExtraParameter6[iStructureCount] = iWhitespaceCount;
+			iEndPreviousStructure = aiStructureStart[iStructureCount] + aiStructureSize[iStructureCount];
+			iStructureCount++;
+		}
+	}
+
+	// code for unknown structure after last keyword
+	if (FileSize() - aiStructureStart[iStructureCount - 1] - aiStructureSize[iStructureCount - 1] != 0)
+	{
+		aiStructureType[iStructureCount] = TYPE_UNKNOWN;
+		aiStructureStart[iStructureCount] = aiStructureStart[iStructureCount - 1] + aiStructureSize[iStructureCount - 1];
+		aiStructureSize[iStructureCount] = FileSize() - aiStructureStart[iStructureCount - 1] - aiStructureSize[iStructureCount - 1];
+		iStructureCount++;
+	}
+}
+
+void CreatePDFHeader(int64 iStart, int iSize)
+{
+	iPDFHeaderCount++;
+	FSeek(iStart);
+	iHeaderSize = iSize;
+	PDFHeader sPDFHeader;
+}
+
+void CreatePDFTrailer(int64 iStart, int iSize)
+{
+	iPDFTrailerCount++;
+	FSeek(iStart);
+	iTrailerSize = iSize;
+	PDFTrailer sPDFTrailer;
+}
+
+void CreatePDFUnknown(int64 iStart, int iSize)
+{
+	iPDFUnknownCount++;
+	FSeek(iStart);
+	iUnknownSize = iSize;
+	PDFUnknown sPDFUnknown;
+}
+
+void CreatePDFComment(int64 iStart, int iSize)
+{
+	iPDFCommentCount++;
+	FSeek(iStart);
+	iCommentSize = iSize;
+	PDFComment sPDFComment;
+}
+
+int IsWhitespace(int64 iStart, int iSize)
+{
+	local int64 iIter;
+	local BYTE bRead;
+
+	for(iIter = iStart; iIter < iStart + iSize; iIter++)
+	{
+		bRead = ReadByte(iIter);
+		if (bRead != 0x09 && bRead != 0x0A && bRead != 0x0D && bRead != 0x20)
+			return false;
+	}
+	return true;
+}
+
+void CreatePDFWhitespace(int64 iStart, int iSize)
+{
+	iPDFWhitespaceCount++;
+	FSeek(iStart);
+	iWhitespaceSize = iSize;
+	PDFWhitespace sPDFWhitespace;
+}
+
+int StartsWith(int64 iStart, int iSize, string sData)
+{
+	local int64 iIter;
+
+	if (Strlen(sData) > iSize)
+		return false;
+
+	for(iIter = 0; iIter < Strlen(sData); iIter++)
+		if (ReadByte(iStart + iIter) != sData[iIter])
+			return false;
+	return true;
+}
+
+void CreatePDFXref(int64 iStart, int iSize)
+{
+	iPDFXrefCount++;
+	FSeek(iStart);
+	iXrefSize = iSize;
+	PDFXref sPDFXref;
+}
+
+void CreatePDFObject(int64 iStart, int iSize, int iIndexLengthArg, int iWhiteSpace1LengthArg, int iVersionLengthArg, int iWhiteSpace2LengthArg, int iFoundEndobjArg, int iWhiteSpace3LengthArg)
+{
+	iPDFObjectCount++;
+	iIndexLength = iIndexLengthArg;
+	iWhiteSpace1Length = iWhiteSpace1LengthArg;
+	iVersionLength = iVersionLengthArg;
+	iWhiteSpace2Length = iWhiteSpace2LengthArg;
+	iFoundEndobj = iFoundEndobjArg;
+	iWhiteSpace3Length = iWhiteSpace3LengthArg;
+	FSeek(iStart);
+	iDataLength = iSize - iIndexLength - iWhiteSpace1Length - iVersionLength - iWhiteSpace2Length - 6 - 3 - iWhiteSpace3LengthArg;
+	PDFObj sPDFObj;
+}
+
+local int iToggleColor = iCOLOR;
+void ToggleBackColor()
+{
+	if (iToggleColor == iCOLOR)
+		iToggleColor = cNone;
+	else
+		iToggleColor = iCOLOR;
+	SetBackColor(iToggleColor);
+}
+
+void CreatePDFStructures(void)
+{
+	local int iIter;
+	for(iIter = 0; iIter < iStructureCount; iIter++)
+	{
+		ToggleBackColor();
+		if (aiStructureType[iIter] == TYPE_UNKNOWN && StartsWith(aiStructureStart[iIter], aiStructureSize[iIter], "%"))
+			CreatePDFComment(aiStructureStart[iIter], aiStructureSize[iIter]);
+		else if (aiStructureType[iIter] == TYPE_UNKNOWN && StartsWith(aiStructureStart[iIter], aiStructureSize[iIter], "xref"))
+			CreatePDFXref(aiStructureStart[iIter], aiStructureSize[iIter]);
+		else if (aiStructureType[iIter] == TYPE_UNKNOWN && IsWhitespace(aiStructureStart[iIter], aiStructureSize[iIter]))
+			CreatePDFWhitespace(aiStructureStart[iIter], aiStructureSize[iIter]);
+		else if (aiStructureType[iIter] == TYPE_UNKNOWN)
+			CreatePDFUnknown(aiStructureStart[iIter], aiStructureSize[iIter]);
+		else if (aiStructureType[iIter] == TYPE_HEADER)
+			CreatePDFHeader(aiStructureStart[iIter], aiStructureSize[iIter]);
+		else if (aiStructureType[iIter] == TYPE_TRAILER)
+			CreatePDFTrailer(aiStructureStart[iIter], aiStructureSize[iIter]);
+		else if (aiStructureType[iIter] == TYPE_OBJ)
+			CreatePDFObject(aiStructureStart[iIter], aiStructureSize[iIter], aiStructureExtraParameter1[iIter], aiStructureExtraParameter2[iIter], aiStructureExtraParameter3[iIter], aiStructureExtraParameter4[iIter], aiStructureExtraParameter5[iIter], aiStructureExtraParameter6[iIter]);
+	}
+	SetBackColor(cNone);
+}
+
+void PrintPDFCounters(void)
+{
+	Printf("Structure counts:\n");
+	Printf("  PDFHeader     = %5d\n", iPDFHeaderCount);
+	Printf("  PDFTrailer    = %5d\n", iPDFTrailerCount);
+	Printf("  PDFObject     = %5d\n", iPDFObjectCount);
+	Printf("  PDFComment    = %5d\n", iPDFCommentCount);
+	Printf("  PDFXref       = %5d\n", iPDFXrefCount);
+	Printf("  PDFWhitespace = %5d\n", iPDFWhitespaceCount);
+	Printf("  PDFUnknown    = %5d\n", iPDFUnknownCount);
+}
+
+// Main
+
+FindAllKeywords();
+if (iKeywordCount == 0)
+{
+	Printf("Keywords not found, not a PDF file!\n");
+	return;
+}
+
+local int aiMerge1KeywordType[iKeywordCount];
+local int64 aiMerge1KeywordStart[iKeywordCount];
+local int aiMerge1KeywordSize[iKeywordCount];
+local int aiMerge2KeywordType[iKeywordCount];
+local int64 aiMerge2KeywordStart[iKeywordCount];
+local int aiMerge2KeywordSize[iKeywordCount];
+local int aiMerge3KeywordType[iKeywordCount];
+local int64 aiMerge3KeywordStart[iKeywordCount];
+local int aiMerge3KeywordSize[iKeywordCount];
+
+MergeAndFilterAllKeywords();
+
+local int aiStructureType[iKeywordCount * 2 + 1];
+local int64 aiStructureStart[iKeywordCount * 2 + 1];
+local int aiStructureSize[iKeywordCount * 2 + 1];
+local int aiStructureExtraParameter1[iKeywordCount * 2 + 1];
+local int aiStructureExtraParameter2[iKeywordCount * 2 + 1];
+local int aiStructureExtraParameter3[iKeywordCount * 2 + 1];
+local int aiStructureExtraParameter4[iKeywordCount * 2 + 1];
+local int aiStructureExtraParameter5[iKeywordCount * 2 + 1];
+local int aiStructureExtraParameter6[iKeywordCount * 2 + 1];
+
+PrepareStructures();
+
+CreatePDFStructures();
+
+PrintPDFCounters();

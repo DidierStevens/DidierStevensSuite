@@ -1,0 +1,99 @@
+/*
+  XORSelection.1sc: 010 Editor Script to XOR the current selection with a set of bytes
+  Version 3.0 2014/12/11
+  Source code put in public domain by Didier Stevens, no Copyright
+  https://DidierStevens.com
+  Use at your own risk
+
+  Shortcomings, or todo's ;-)
+
+  History:
+    2009/05/26: v1.0 start
+    2014/12/11: v3.0 Added hex processing; refactoring
+*/
+
+#define TITLE "XORSelection"
+
+int HexDigitToInt(int digit)
+{
+    if (digit >= '0' && digit <= '9')
+        return digit - '0';
+    if (digit >= 'a' && digit <= 'f')
+        return digit - 'a' + 10;
+    if (digit >= 'A' && digit <= 'F')
+        return digit - 'A' + 10;
+    return -1;
+}
+
+string HexToString(string sHex)
+{
+    int iIter;
+    int iHexDigit1;
+    int iHexDigit2;
+    string sResult;
+    uchar uacCharacter[2];
+
+    if (Strlen(sHex) % 2 != 0)
+        return "";
+    for (iIter = 0; iIter < Strlen(sHex); iIter += 2)
+    {
+        iHexDigit1 = HexDigitToInt(sHex[iIter]);
+        if (iHexDigit1 == -1)
+            return "";
+        iHexDigit2 = HexDigitToInt(sHex[iIter + 1]);
+        if (iHexDigit2 == -1)
+            return "";
+        uacCharacter[0] = iHexDigit1 * 0x10 + iHexDigit2;
+        uacCharacter[1] = 0;
+        sResult += uacCharacter;
+    }
+    return sResult;
+}
+
+void Main(void)
+{
+    int iIter, iStart, iSize, iKeyLength;
+    string sKey;
+
+    // Check that a file is open
+    if(FileCount() == 0)
+    {
+        MessageBox(idOk, TITLE, "XORSelection can only be executed when a file is loaded.");
+        return;
+    }
+
+    // Initializes the variables
+    iSize = GetSelSize();
+    iStart = GetSelStart();
+
+    // Check that bytes were selected
+    if(iSize == 0)
+    {
+        iSize = FileSize();
+        iStart = 0;
+    }
+
+    sKey = InputString(TITLE, "Input the XOR key (start with 0x for hex)", "");
+    if (sKey == "")
+    {
+        MessageBox(idOk, TITLE, "Please enter a valid key.");
+        return;
+    }
+    else if (SubStr(sKey, 0, 2) == "0x")
+    {
+        sKey = HexToString(SubStr(sKey, 2));
+        if (sKey == "")
+        {
+            MessageBox(idOk, TITLE, "Please enter a valid hex value.");
+            return;
+        }
+    }
+    iKeyLength = Strlen(sKey);
+
+    // Modify the selection
+    for (iIter = 0; iIter < iSize; iIter++)
+        // Modify the current byte
+        WriteUByte(iStart + iIter, ReadUByte(iStart + iIter) ^ sKey[iIter % iKeyLength]);
+}
+
+Main();

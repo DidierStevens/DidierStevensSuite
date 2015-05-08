@@ -1,0 +1,424 @@
+//---------------------------------------------------------------------------
+/*
+	010 Editor Template for LNK file format
+	2010/08/11 v0.0.4
+
+	http://msdn.microsoft.com/en-us/library/dd871305%28PROT.10%29.aspx
+
+	Source code put in public domain by Didier Stevens, no Copyright
+	https://DidierStevens.com
+	Use at your own risk
+
+	History:
+		2010/07/23: start development with 010 Editor v3.0.6
+		2010/07/27: continue
+		2010/07/30: added CommonNetworkRelativeLink
+		2010/08/11: v0.0.4 added GUID processing to IDList
+
+	Todo:
+		Read functions for HotKeyFlags and NetworkProviderType
+		ExtraData structures for:
+			ConsoleDataBlock structure (section 2.5.1).
+			ConsoleFEDataBlock structure (section 2.5.2).
+			DarwinDataBlock structure (section 2.5.3).
+			EnvironmentVariableDataBlock structure (section 2.5.4).
+			IconEnvironmentDataBlock structure (section 2.5.5).
+			KnownFolderDataBlock structure (section 2.5.6).
+			PropertyStoreDataBlock structure (section 2.5.7).
+			ShimDataBlock structure (section 2.5.8).
+			SpecialFolderDataBlock structure (section 2.5.9).
+			VistaAndAboveIDListDataBlock structure (section 2.5.11).
+
+*/
+//---------------------------------------------------------------------------
+
+local int iCOLOR = 0x95E8FF;
+
+local int iToggleColor = iCOLOR;
+
+void ToggleBackColor()
+{
+	if (iToggleColor == iCOLOR)
+		iToggleColor = cNone;
+	else
+		iToggleColor = iCOLOR;
+	SetBackColor(iToggleColor);
+}
+
+typedef struct
+{
+	int HasLinkTargetIDList : 1;
+	int HasLinkInfo : 1;
+	int HasName : 1;
+	int HasRelativePath : 1;
+	int HasWorkingDir : 1;
+	int HasArguments : 1;
+	int HasIconLocation : 1;
+	int IsUnicode : 1;
+	int ForceNoLinkInfo : 1;
+	int HasExpString : 1;
+	int RunInSeparateProcess : 1;
+	int Unused1 : 1;
+	int HasDarwinID : 1;
+	int RunAsUser : 1;
+	int HasExpIcon : 1;
+	int NoPidlAlias : 1;
+	int Unused2 : 1;
+	int RunWithShimLayer : 1;
+	int ForceNoLinkTrack : 1;
+	int EnableTargetMetadata : 1;
+	int DisableLinkPathTracking : 1;
+	int DisableKnownFolderTracking : 1;
+	int DisableKnownFolderAlias : 1;
+	int AllowLinkToLink : 1;
+	int UnaliasOnSave : 1;
+	int PreferEnvironmentPath : 1;
+	int KeepLocalIDListForUNCTarget : 1;
+	int Unused3 : 5;
+} LinkFlags;
+
+typedef struct
+{
+	int FILE_ATTRIBUTE_READONLY : 1;
+	int FILE_ATTRIBUTE_HIDDEN : 1;
+	int FILE_ATTRIBUTE_SYSTEM : 1;
+	int Reserved1 : 1;
+	int FILE_ATTRIBUTE_DIRECTORY : 1;
+	int FILE_ATTRIBUTE_ARCHIVE : 1;
+	int FILE_ATTRIBUTE_NORMAL : 1;
+	int FILE_ATTRIBUTE_TEMPORARY : 1;
+	int FILE_ATTRIBUTE_SPARSE_FILE : 1;
+	int FILE_ATTRIBUTE_REPARSE_POINT : 1;
+	int FILE_ATTRIBUTE_COMPRESSED : 1;
+	int FILE_ATTRIBUTE_OFFLINE : 1;
+	int FILE_ATTRIBUTE_NOT_CONTENT_INDEXED : 1;
+	int FILE_ATTRIBUTE_ENCRYPTED : 1;
+	int Unused1 : 18;
+} FileAttributes;
+
+typedef struct
+{
+	DWORD HeaderSize <read=ReadCheckHeaderSize>;					/* Must be 0x0000004C */
+	BYTE LinkCLSID[16]; 																	/* This value MUST be 00021401-0000-0000-C000-000000000046. */
+	LinkFlags sLinkFlags;
+	FileAttributes sFileAttributes;
+	FILETIME CreationTime;
+	FILETIME AccessTime;
+	FILETIME WriteTime;
+ 	DWORD FileSize;
+	DWORD IconIndex;
+	DWORD ShowCommand <read=ReadShowCommand>;
+	WORD HotKey;
+	WORD Reserved1;
+	DWORD Reserved2;
+	DWORD Reserved3;
+} ShellLinkHeader;
+
+string ReadCheckHeaderSize(DWORD data)
+{
+	string result;
+
+	switch (data)
+	{
+		case 0x0000004C:
+			result = "76";
+			break;
+
+		default:
+			SPrintf(result, "Unexpected headersize: 0x%08X", data);
+	}
+
+	return result;
+}
+
+string ReadShowCommand(DWORD function)
+{
+	string result;
+
+	switch (function)
+	{
+		case 0x00000001:
+			result = "SW_SHOWNORMAL";
+			break;
+
+		case 0x00000003:
+			result = "SW_SHOWMAXIMIZED";
+			break;
+
+		case 0x00000007:
+			result = "SW_SHOWMINNOACTIVE";
+			break;
+
+		default:
+			SPrintf(result, "0x%08X", function);
+	}
+
+	return result;
+}
+
+// http://msdn.microsoft.com/en-us/library/cc144089%28VS.85%29.aspx#unknown_74413
+typedef struct
+{
+	WORD ItemIDSize;
+	if (ItemIDSize == 0x14)
+	{
+		BYTE Type;
+		BYTE Unknown;
+		BYTE GUID[ItemIDSize - 4];
+	}
+	else
+		BYTE Data[ItemIDSize - 2];
+} IDList <read=ReadIDList>;
+
+string ReadIDList(IDList &sIDList)
+{
+	string sGUID;
+
+	if (sIDList.ItemIDSize == 0x14)
+	{
+		SPrintf(sGUID, "{%02X%02X%02X%02X-%02X%02X-%02X%02X-%02X%02X-%02X%02X%02X%02X%02X%02X}", sIDList.GUID[3], sIDList.GUID[2], sIDList.GUID[1], sIDList.GUID[0], sIDList.GUID[5], sIDList.GUID[4], sIDList.GUID[7], sIDList.GUID[6], sIDList.GUID[8], sIDList.GUID[9], sIDList.GUID[10], sIDList.GUID[11], sIDList.GUID[12], sIDList.GUID[13], sIDList.GUID[14], sIDList.GUID[15]);
+		return LookupGUID(sGUID);
+	}
+	else
+		return "";
+}
+
+// GUIDs found in shlguid.h
+string LookupGUID(string sGUID)
+{
+	if (!Stricmp(sGUID, "{208D2C60-3AEA-1069-A2D7-08002B30309D}"))
+		return "CLSID_NetworkPlaces";
+	else if (!Stricmp(sGUID, "{46e06680-4bf0-11d1-83ee-00a0c90dc849}"))
+		return "CLSID_NetworkDomain";
+	else if (!Stricmp(sGUID, "{c0542a90-4bf0-11d1-83ee-00a0c90dc849}"))
+		return "CLSID_NetworkServer";
+	else if (!Stricmp(sGUID, "{54a754c0-4bf1-11d1-83ee-00a0c90dc849}"))
+		return "CLSID_NetworkShare";
+	else if (!Stricmp(sGUID, "{20D04FE0-3AEA-1069-A2D8-08002B30309D}"))
+		return "CLSID_MyComputer";
+	else if (!Stricmp(sGUID, "{871C5380-42A0-1069-A2EA-08002B30309D}"))
+		return "CLSID_Internet";
+	else if (!Stricmp(sGUID, "{F3364BA0-65B9-11CE-A9BA-00AA004AE837}"))
+		return "CLSID_ShellFSFolder";
+	else if (!Stricmp(sGUID, "{645FF040-5081-101B-9F08-00AA002F954E}"))
+		return "CLSID_RecycleBin";
+	else if (!Stricmp(sGUID, "{21EC2020-3AEA-1069-A2DD-08002B30309D}"))
+		return "CLSID_ControlPanel";
+	else if (!Stricmp(sGUID, "{450D8FBA-AD25-11D0-98A8-0800361B1103}"))
+		return "CLSID_MyDocuments";
+	else
+		return sGUID;
+}
+
+typedef struct
+{
+	WORD IDListSize;
+
+	while(ReadUShort(FTell()) != 0x0000)
+	{
+		IDList sIDList;
+	}
+	WORD TerminalID;
+} LinkTargetIDList;
+
+typedef struct
+{
+	int VolumeIDAndLocalBasePath : 1;
+	int CommonNetworkRelativeLinkAndPathSuffix : 1;
+	int Unused1 : 30;
+} LinkInfoFlags;
+
+typedef struct
+{
+	DWORD VolumeIDSize;
+	DWORD DriveType <read=ReadDriveType>;;
+	DWORD DriveSerialNumber;
+	DWORD VolumeLabelOffset;
+	if (VolumeLabelOffset == 0x00000014)
+	{
+		DWORD VolumeLabelOffsetUnicode;
+	}
+	string Data;
+} VolumeID;
+
+typedef struct
+{
+	DWORD CommonNetworkRelativeLinkSize;
+	DWORD CommonNetworkRelativeLinkFlags;
+	DWORD NetNameOffset;
+	DWORD DeviceNameOffset;
+	DWORD NetworkProviderType;
+	if (NetNameOffset > 0x14)
+	{
+		DWORD NetNameOffsetUnicode;
+		DWORD DeviceNameOffsetUnicode;
+	}
+	string NetName;
+	string DeviceName;
+	if (NetNameOffset > 0x14)
+	{
+		string NetNameUnicode;			// Must be UNICODE
+		string DeviceNameUnicode;		// Must be UNICODE
+	}
+} CommonNetworkRelativeLink;
+
+string ReadDriveType(DWORD function)
+{
+	string result;
+
+	switch (function)
+	{
+		case 0x00000000:
+			result = "DRIVE_UNKNOWN";
+			break;
+
+		case 0x00000001:
+			result = "DRIVE_NO_ROOT_DIR";
+			break;
+
+		case 0x00000002:
+			result = "DRIVE_REMOVABLE";
+			break;
+
+		case 0x00000003:
+			result = "DRIVE_FIXED";
+			break;
+
+		case 0x00000004:
+			result = "DRIVE_REMOTE";
+			break;
+
+		case 0x00000005:
+			result = "DRIVE_CDROM";
+			break;
+
+		case 0x00000006:
+			result = "DRIVE_RAMDISK";
+			break;
+
+		default:
+			SPrintf(result, "0x%08X", function);
+	}
+
+	return result;
+}
+
+typedef struct
+{
+	DWORD LinkInfoSize;
+	DWORD LinkInfoHeaderSize;
+	LinkInfoFlags sLinkInfoFlags;
+	DWORD VolumeIDOffset;
+	DWORD LocalBasePathOffset;
+	DWORD CommonNetworkRelativeLinkOffset;
+	DWORD CommonPathSuffixOffset;
+	if (LinkInfoHeaderSize >= 0x00000024 )
+	{
+		DWORD LocalBasePathOffsetUnicode;
+		DWORD CommonPathSuffixOffsetUnicode;
+	}
+	if (sLinkInfoFlags.VolumeIDAndLocalBasePath == 1)
+	{
+		VolumeID sVolumeID;
+		string LocalBasePath;
+		string CommonPathSuffix;
+	}
+	if (sLinkInfoFlags.CommonNetworkRelativeLinkAndPathSuffix == 1)
+	{
+		CommonNetworkRelativeLink sCommonNetworkRelativeLink;
+	}
+} LinkInfo;
+
+typedef struct
+{
+	WORD CountCharacters;
+	BYTE String[CountCharacters * 2];
+} StringData;
+
+typedef struct
+{
+	DWORD BlockSize;
+	DWORD BlockSignature;
+	BYTE BlockData[BlockSize - 8];
+} ExtraDataBlock;
+
+typedef struct
+{
+	DWORD BlockSize;
+	DWORD BlockSignature;
+	DWORD Length;
+	DWORD Version;
+	BYTE MachineID[16];
+	BYTE Droid[32];
+	BYTE DroidBirth[32];
+} TrackerDataBlock;
+
+typedef struct
+{
+	while(ReadUInt(FTell()) >= 0x00000004)
+	{
+		switch (ReadUInt(FTell() + 4))
+		{
+			case 0xA0000003:
+				TrackerDataBlock sTrackerDataBlock;
+				break;
+
+			default:
+				ExtraDataBlock sExtraDataBlock;
+		}
+	}
+	DWORD TerminalBlock;
+} ExtraData;
+
+// Start
+LittleEndian();
+
+SetBackColor(iToggleColor);
+ShellLinkHeader sShellLinkHeader;
+
+if (sShellLinkHeader.sLinkFlags.HasLinkTargetIDList == 1)
+{
+	ToggleBackColor();
+	LinkTargetIDList sLinkTargetIDList;
+}
+
+if (sShellLinkHeader.sLinkFlags.HasLinkInfo == 1)
+{
+	ToggleBackColor();
+	LinkInfo sLinkInfo;
+}
+
+if (sShellLinkHeader.sLinkFlags.HasName == 1)
+{
+	ToggleBackColor();
+	StringData NAME_STRING;
+}
+
+if (sShellLinkHeader.sLinkFlags.HasRelativePath == 1)
+{
+	ToggleBackColor();
+	StringData RELATIVE_PATH;
+}
+
+if (sShellLinkHeader.sLinkFlags.HasWorkingDir == 1)
+{
+	ToggleBackColor();
+	StringData WORKING_DIR;
+}
+
+if (sShellLinkHeader.sLinkFlags.HasArguments == 1)
+{
+	ToggleBackColor();
+	StringData COMMAND_LINE_ARGUMENTS;
+}
+
+if (sShellLinkHeader.sLinkFlags.HasIconLocation == 1)
+{
+	ToggleBackColor();
+	StringData ICON_LOCATION;
+}
+
+ToggleBackColor();
+ExtraData sExtraData;
+
+SetBackColor(cNone);

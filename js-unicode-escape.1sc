@@ -1,0 +1,64 @@
+/*
+  js-unicode-escape.1sc: 010 Editor Script File to %u encode selected bytes (little endian) for JavaScript's unescape("%uDEAD")
+  and copy the result to the clipboard
+  Version 0.0.3 2013/04/15
+  Source code put in public domain by Didier Stevens, no Copyright
+  https://DidierStevens.com
+  Use at your own risk
+
+  Shortcomings, or todo's ;-)
+
+  History:
+    2009/10/22: v0.0.1 start
+    2010/02/13: v0.0.2 included CopyStringToClipboard (requires v3.1 at least, since prior versions don't include function CopyStringToClipboard)
+    2013/04/15: v0.0.3 Refactoring & cleanup
+*/
+
+#define TITLE "js-unicode-escape"
+
+void Main(void)
+{
+    int iIter;
+    int iStart;
+    int iSize;
+    string sToClipboard;
+    string sTemp;
+
+    if (FileCount() == 0)
+    {
+        MessageBox(idOk, TITLE, "At least one file needs to be open.");
+        return;
+    }
+
+    // Initializes the variables
+    iSize = GetSelSize();
+    iStart = GetSelStart();
+
+    // Check that bytes were selected, otherwise process complete file
+    if (iSize == 0)
+    {
+      iSize = FileSize();
+      iStart = 0;
+    }
+
+    if (iSize > 10000 && MessageBox(idYes | idNo, TITLE, "It could take a long time to process %d bytes, do you want to continue?", iSize) == idNo)
+      return;
+
+    // Process and output bytes in %u format
+    Strcat(sToClipboard, "");
+    LittleEndian();
+    for (iIter = 0; iIter < iSize / 2; iIter++)
+    {
+      SPrintf(sTemp, "%%u%04x", ReadUShort(iStart + 2 * iIter));
+      Strcat(sToClipboard, sTemp);
+    }
+    if (iSize % 2 == 1)
+    {
+      SPrintf(sTemp, "%%u%04x", ReadUByte(iStart + iSize - 1));
+      Strcat(sToClipboard, sTemp);
+    }
+    CopyStringToClipboard(sToClipboard);
+    Printf("%s result copied to clipboard\n", TITLE);
+}
+
+Main();
