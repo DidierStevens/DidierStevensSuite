@@ -2,7 +2,7 @@
 
 __description__ = 'EML dump utility'
 __author__ = 'Didier Stevens'
-__version__ = '0.0.1'
+__version__ = '0.0.2'
 __date__ = '2015/03/01'
 
 """
@@ -14,6 +14,7 @@ Use at your own risk
 History:
   2014/02/01: start
   2015/03/01: added Multipart flag
+  2015/05/08: 0.0.2 added ZIP support
 
 Todo:
 """
@@ -24,6 +25,16 @@ import hashlib
 import signal
 import sys
 import os
+import zipfile
+
+MALWARE_PASSWORD = 'infected'
+
+#Convert 2 Bytes If Python 3
+def C2BIP3(string):
+    if sys.version_info[0] > 2:
+        return bytes([ord(x) for x in string])
+    else:
+        return string
 
 def File2String(filename):
     try:
@@ -115,6 +126,12 @@ def EMLDump(emlfilename, options):
             import msvcrt
             msvcrt.setmode(sys.stdin.fileno(), os.O_BINARY)
         data = sys.stdin.read()
+    elif emlfilename.lower().endswith('.zip'):
+        oZipfile = zipfile.ZipFile(emlfilename, 'r')
+        oZipContent = oZipfile.open(oZipfile.infolist()[0], 'r', C2BIP3(MALWARE_PASSWORD))
+        data = oZipContent.read()
+        oZipContent.close()
+        oZipfile.close()
     else:
         data = File2String(emlfilename)
     if options.header:
@@ -143,7 +160,7 @@ def EMLDump(emlfilename, options):
             counter += 1
 
 def Main():
-    oParser = optparse.OptionParser(usage='usage: %prog [options] zipfile [filename]\n' + __description__, version='%prog ' + __version__)
+    oParser = optparse.OptionParser(usage='usage: %prog [options] mimefile\n' + __description__, version='%prog ' + __version__)
     oParser.add_option('-d', '--dump', action='store_true', default=False, help='perform dump')
     oParser.add_option('-x', '--hexdump', action='store_true', default=False, help='perform hex dump')
     oParser.add_option('-a', '--asciidump', action='store_true', default=False, help='perform ascii dump')
