@@ -2,8 +2,8 @@
 
 __description__ = 'Analyze OLE files (Compound Binary Files)'
 __author__ = 'Didier Stevens'
-__version__ = '0.0.15'
-__date__ = '2015/05/08'
+__version__ = '0.0.16'
+__date__ = '2015/05/13'
 
 """
 
@@ -45,6 +45,7 @@ History:
   2015/03/26: changed --raw option
   2015/04/10: 0.0.14: fixed bug SearchAndDecompressSub
   2015/05/08: 0.0.15: added direct support for ActiveMime files
+  2015/05/13: 0.0.16: changed HeuristicDecompress with findall; renamed MacrosContainsOnlyAttributes to MacrosContainsOnlyAttributesOrOptions; added missing option verbose
 
 Todo:
 """
@@ -154,7 +155,7 @@ Sub Workbook_Open()
     MsgBox "VBA macro"
 End Sub
 
-If the VBA macro code is only composed of Attribute statements, and no other statements, then the indicator is a lower case letter m. Example:
+If the VBA macro code is only composed of Attribute or Option statements, and no other statements, then the indicator is a lower case letter m. Example:
 C:\Demo>oledump.py -s 8 -v Book2-vba.xls
 Attribute VB_Name = "Sheet2"
 Attribute VB_Base = "0{00020820-0000-0000-C000-000000000046}"
@@ -165,7 +166,7 @@ Attribute VB_Exposed = True
 Attribute VB_TemplateDerived = False
 Attribute VB_Customizable = True
 
-If the VBA code contains other statements than Attribute statements, then the indicator is a upper case letter M.
+If the VBA code contains other statements than Attribute or Options statements, then the indicator is a upper case letter M.
 This M/m indicator allows you to focus first on interesting VBA macros.
 
 Option -r can be used together with option -v to decompress a VBA macro stream that was extracted through some other mean than oledump. In such case, you provide the file that contains the compressed macro, instead of the OLE file.
@@ -708,10 +709,10 @@ def DecodeFunction(decoders, options, stream):
         return stream
     return decoders[0](stream, options.decoderoptions).Decode()
 
-def MacrosContainsOnlyAttributes(stream):
+def MacrosContainsOnlyAttributesOrOptions(stream):
     lines = SearchAndDecompress(stream).split('\n')
     for line in [line.strip() for line in lines]:
-        if line != '' and not line.startswith('Attribute '):
+        if line != '' and not line.startswith('Attribute ') and not line == 'Option Explicit':
             return False
     return True
 
@@ -884,15 +885,23 @@ def MyRepr(stringArg):
     else:
         return stringArg
 
+def FindAll(data, sub):
+    result = []
+    start = 0
+    while True:
+        position = data.find(sub, start)
+        if position == -1:
+            return result
+        result.append(position)
+        start = position + 1
+        
 def HeuristicDecompress(data):
-    position = data.find('\x78')
-    if position == -1:
-        return data
-    else:
+    for position in FindAll(data, '\x78'):
         try:
             return zlib.decompress(data[position:])
         except:
-            return data
+            pass
+    return data
 
 def OLESub(ole, prefix, rules, options):
     global plugins
@@ -936,7 +945,7 @@ def OLESub(ole, prefix, rules, options):
                         indicator = 'E'
                     else:
                         indicator = 'M'
-                        if MacrosContainsOnlyAttributes(stream):
+                        if MacrosContainsOnlyAttributesOrOptions(stream):
                             indicator = 'm'
             if not options.quiet:
                 line = '%3s: %s %s %s' % (('%s%d' % (prefix, counter)), indicator, lenghString, PrintableName(fname))
@@ -1130,7 +1139,7 @@ def OLEDump(filename, options):
                         data = ''
                     content = data
                     if content.startswith(ACTIVEMIME_MAGIC):
-                        content = zlib.decompress(data[50:])
+                        content = HeuristicDecompress(content)
                     if content[0:4] == OLEFILE_MAGIC:
                         letter = chr(ord('A') + counter)
                         counter += 1
@@ -1146,7 +1155,7 @@ def OLEDump(filename, options):
                         OLESub(ole, letter, rules, options)
                         ole.close()
         elif data.startswith(ACTIVEMIME_MAGIC):
-            content = zlib.decompress(data[50:])
+            content = HeuristicDecompress(data)
             if content[0:4] == OLEFILE_MAGIC:
                 ole = OleFileIO_PL.OleFileIO(cStringIO.StringIO(content))
                 OLESub(ole, '', rules, options)
@@ -1175,6 +1184,7 @@ def Main():
     oParser.add_option('-M', '--metadata', action='store_true', default=False, help='Print metadata')
     oParser.add_option('-c', '--calc', action='store_true', default=False, help='Add extra calculated data to output, like hashes')
     oParser.add_option('--decompress', action='store_true', default=False, help='Search for compressed data in the stream and decompress it')
+    oParser.add_option('--verbose', action='store_true', default=False, help='verbose output for plugins and decoders')
     (options, args) = oParser.parse_args()
 
     if options.man:
