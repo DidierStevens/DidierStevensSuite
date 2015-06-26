@@ -2,8 +2,8 @@
 
 __description__ = 'Analyze OLE files (Compound Binary Files)'
 __author__ = 'Didier Stevens'
-__version__ = '0.0.16'
-__date__ = '2015/05/13'
+__version__ = '0.0.17'
+__date__ = '2015/06/14'
 
 """
 
@@ -45,7 +45,9 @@ History:
   2015/03/26: changed --raw option
   2015/04/10: 0.0.14: fixed bug SearchAndDecompressSub
   2015/05/08: 0.0.15: added direct support for ActiveMime files
-  2015/05/13: 0.0.16: changed HeuristicDecompress with findall; renamed MacrosContainsOnlyAttributes to MacrosContainsOnlyAttributesOrOptions; added missing option verbose
+  2015/05/13: 0.0.16: changed HeuristicDecompress with findall; renamed MacrosContainsOnlyAttributes to MacrosContainsOnlyAttributesOrOptions
+  2015/06/08: 0.0.17: Fix HexAsciiDump
+  2015/06/14: Added exit code
 
 Todo:
 """
@@ -353,6 +355,7 @@ oledump also supports input/output redirection. This way, oledump can be used in
 Say for example that the sample OLE file is GZIP compressed. oledump can not handle GZIP files directly, but you can decompress and cat it with zcat and then pipe it into oledump for analysis, like this:
 zcat sample.gz | oledump.py
 
+The return code of oledump is 0, except when you use no options and the analyzed file contains macros. When macros are found, the return code is 1.
 '''
     for line in manual.split('\n'):
         print(textwrap.fill(line))
@@ -428,7 +431,7 @@ def HexAsciiDump(data):
             hexDump = '%08X:' % i
             asciiDump = ''
         hexDump+= ' %02X' % ord(b)
-        asciiDump += IFF(ord(b) >= 32 and ord(b), b, '.')
+        asciiDump += IFF(ord(b) >= 32, b, '.')
     oDumpStream.Addline(CombineHexAscii(hexDump, asciiDump))
     return oDumpStream.Content()
 
@@ -528,6 +531,12 @@ def FindCompression(data):
     if position != -1 and data[position + len(searchString)] == 'e':
         position = -1
     return position
+
+def NoneToEmptyString(data):
+    if data == None:
+        return ''
+    else:
+        return data
 
 def SearchAndDecompressSub(data):
     position = FindCompression(data)
@@ -894,7 +903,7 @@ def FindAll(data, sub):
             return result
         result.append(position)
         start = position + 1
-        
+
 def HeuristicDecompress(data):
     for position in FindAll(data, '\x78'):
         try:
@@ -906,6 +915,8 @@ def HeuristicDecompress(data):
 def OLESub(ole, prefix, rules, options):
     global plugins
     global decoders
+
+    returnCode = 0
 
     if options.metadata:
         metadata = ole.get_metadata()
@@ -925,7 +936,7 @@ def OLESub(ole, prefix, rules, options):
                     print(' %s: %s %s' % (attribute, value, LookupCodepage(value)))
                 else:
                     print(' %s: %s' % (attribute, value))
-        return
+        return returnCode
 
     if options.select == '':
         counter = 1
@@ -941,6 +952,7 @@ def OLESub(ole, prefix, rules, options):
                 lenghString = '%7d' % len(stream)
                 macroPresent = FindCompression(stream) != -1
                 if macroPresent:
+                    returnCode = 1
                     if SearchAndDecompressSub(stream) == None:
                         indicator = 'E'
                     else:
@@ -964,7 +976,7 @@ def OLESub(ole, prefix, rules, options):
                     print('Error instantiating plugin: %s' % cPlugin.name)
                     if options.verbose:
                         raise e
-                    return
+                    return returnCode
                 if oPlugin != None:
                     result = oPlugin.Analyze()
                     if oPlugin.ran:
@@ -986,7 +998,7 @@ def OLESub(ole, prefix, rules, options):
                         print('Error instantiating decoder: %s' % cDecoder.name)
                         if options.verbose:
                             raise e
-                        return
+                        return returnCode
                 for oDecoder in oDecoders:
                     while oDecoder.Available():
                         for result in rules.match(data=oDecoder.Decode()):
@@ -999,7 +1011,7 @@ def OLESub(ole, prefix, rules, options):
     else:
         if len(decoders) > 1:
             print('Error: provide only one decoder when using option select')
-            return
+            return returnCode
         if options.decompress:
             DecompressFunction = HeuristicDecompress
         else:
@@ -1010,7 +1022,10 @@ def OLESub(ole, prefix, rules, options):
         elif options.hexdump:
             DumpFunction = HexDump
         elif options.vbadecompress:
-            DumpFunction = SearchAndDecompress
+            if options.select == 'a':
+                DumpFunction = lambda x: NoneToEmptyString(SearchAndDecompressSub(x))
+            else:
+                DumpFunction = SearchAndDecompress
         elif options.extract:
             DumpFunction = Extract
             IfWIN32SetBinary(sys.stdout)
@@ -1025,6 +1040,8 @@ def OLESub(ole, prefix, rules, options):
                 if options.select != 'a':
                     break
             counter += 1
+
+    return returnCode
 
 def YARACompile(fileordirname):
     dFilepaths = {}
@@ -1047,6 +1064,8 @@ def OLEDump(filename, options):
     decoders = []
     LoadDecoders(options.decoders, True)
 
+    returnCode = 0
+
     if options.raw:
         if filename == '':
             IfWIN32SetBinary(sys.stdin)
@@ -1055,7 +1074,7 @@ def OLEDump(filename, options):
             data = File2String(filename)
         if options.vbadecompress:
             print(SearchAndDecompress(data))
-            return
+            return returnCode
         for cPlugin in plugins:
             try:
                 if cPlugin.macroOnly:
@@ -1068,7 +1087,7 @@ def OLEDump(filename, options):
                 print('Error instantiating plugin: %s' % cPlugin.name)
                 if options.verbose:
                     raise e
-                return
+                return returnCode
             if oPlugin != None:
                 result = oPlugin.Analyze()
                 if oPlugin.ran:
@@ -1079,13 +1098,13 @@ def OLEDump(filename, options):
                         print('Plugin: %s ' % oPlugin.name)
                         for line in result:
                             print(' ' + MyRepr(line))
-        return
+        return returnCode
 
     rules = None
     if options.yara != None:
         if not 'yara' in sys.modules:
             print('Error: option yara requires the YARA Python module.')
-            return
+            return returnCode
         rules = YARACompile(options.yara)
 
     if filename == '':
@@ -1104,7 +1123,7 @@ def OLEDump(filename, options):
     oStringIO.seek(0)
     if magic[0:4] == OLEFILE_MAGIC:
         ole = OleFileIO_PL.OleFileIO(oStringIO)
-        OLESub(ole, '', rules, options)
+        returnCode = OLESub(ole, '', rules, options)
         ole.close()
     elif magic[0:2] == 'PK':
         oZipfile = zipfile.ZipFile(oStringIO, 'r')
@@ -1119,7 +1138,7 @@ def OLEDump(filename, options):
                     if not options.quiet:
                         print('%s: %s' % (letter, info.filename))
                 ole = OleFileIO_PL.OleFileIO(cStringIO.StringIO(content))
-                OLESub(ole, letter, rules, options)
+                returnCode = OLESub(ole, letter, rules, options)
                 ole.close()
             oZipContent.close()
         oZipfile.close()
@@ -1152,16 +1171,18 @@ def OLEDump(filename, options):
                                         break
                                 print('%s: %s' % (letter, nameValue))
                         ole = OleFileIO_PL.OleFileIO(cStringIO.StringIO(content))
-                        OLESub(ole, letter, rules, options)
+                        returnCode = OLESub(ole, letter, rules, options)
                         ole.close()
         elif data.startswith(ACTIVEMIME_MAGIC):
             content = HeuristicDecompress(data)
             if content[0:4] == OLEFILE_MAGIC:
                 ole = OleFileIO_PL.OleFileIO(cStringIO.StringIO(content))
-                OLESub(ole, '', rules, options)
+                returnCode = OLESub(ole, '', rules, options)
                 ole.close()
         else:
             print('Error: %s is not a valid OLE file.' % filename)
+
+    return returnCode
 
 def Main():
     oParser = optparse.OptionParser(usage='usage: %prog [options] [file]\n' + __description__, version='%prog ' + __version__)
@@ -1184,13 +1205,13 @@ def Main():
     oParser.add_option('-M', '--metadata', action='store_true', default=False, help='Print metadata')
     oParser.add_option('-c', '--calc', action='store_true', default=False, help='Add extra calculated data to output, like hashes')
     oParser.add_option('--decompress', action='store_true', default=False, help='Search for compressed data in the stream and decompress it')
-    oParser.add_option('--verbose', action='store_true', default=False, help='verbose output for plugins and decoders')
+    oParser.add_option('-V', '--verbose', action='store_true', default=False, help='verbose output with decoder errors')
     (options, args) = oParser.parse_args()
 
     if options.man:
         oParser.print_help()
         PrintManual()
-        return
+        return 0
 
     if len(args) > 1:
         oParser.print_help()
@@ -1198,11 +1219,11 @@ def Main():
         print('  Source code put in the public domain by Didier Stevens, no Copyright')
         print('  Use at your own risk')
         print('  https://DidierStevens.com')
-        return
+        return 0
     elif len(args) == 0:
-        OLEDump('', options)
+        return OLEDump('', options)
     else:
-        OLEDump(args[0], options)
+        return OLEDump(args[0], options)
 
 if __name__ == '__main__':
-    Main()
+    sys.exit(Main())
