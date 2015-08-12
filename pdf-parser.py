@@ -2,10 +2,10 @@
 
 __description__ = 'pdf-parser, use it to parse a PDF document'
 __author__ = 'Didier Stevens'
-__version__ = '0.6.3'
-__date__ = '2015/04/24'
+__version__ = '0.6.4'
+__date__ = '2015/08/12'
 __minimum_python_version__ = (2, 5, 1)
-__maximum_python_version__ = (3, 4, 2)
+__maximum_python_version__ = (3, 4, 3)
 
 """
 Source code put in public domain by Didier Stevens, no Copyright
@@ -54,6 +54,7 @@ History:
   2015/04/05: V0.6.2 Added generateembedded
   2015/04/06: fixed bug reported by Kurt for stream produced by Ghostscript where endstream is not preceded by whitespace; fixed prettyprint bug
   2015/04/24: V0.6.3 when option dump's filename is -, content is dumped to stdout
+  2015/08/12: V0.6.4 option hash now also calculates hashes of streams when selecting or searching objects; and displays hexasciidump first line
 
 Todo:
   - handle printf todo
@@ -98,6 +99,8 @@ PDF_ELEMENT_XREF = 3
 PDF_ELEMENT_TRAILER = 4
 PDF_ELEMENT_STARTXREF = 5
 PDF_ELEMENT_MALFORMED = 6
+
+dumplinelength = 16
 
 #Convert 2 Bytes If Python 3
 def C2BIP3(string):
@@ -767,6 +770,16 @@ def PrintOutputObject(object, options):
         if options.debug:
             print(' %s' % FormatOutput(dataPrecedingStream, options.raw))
         oPDFParseDictionary = cPDFParseDictionary(dataPrecedingStream, options.nocanonicalizedoutput)
+        if options.hash:
+            streamContent = object.Stream(False)
+            print('  unfiltered')
+            print('   len: %6d md5: %s' % (len(streamContent), hashlib.md5(streamContent).hexdigest()))
+            print('   %s' % HexAsciiDumpLine(streamContent))
+            streamContent = object.Stream(True)
+            print('  filtered')
+            print('   len: %6d md5: %s' % (len(streamContent), hashlib.md5(streamContent).hexdigest()))
+            print('   %s' % HexAsciiDumpLine(streamContent))
+            streamContent = None
     else:
         if options.debug or options.raw:
             print(' %s' % FormatOutput(object.content, options.raw))
@@ -1082,6 +1095,51 @@ def DecodeFunction(decoders, options, stream):
         return stream
     return decoders[0](stream, options.decoderoptions).Decode()
 
+class cDumpStream():
+    def __init__(self):
+        self.text = ''
+
+    def Addline(self, line):
+        if line != '':
+            self.text += line + '\n'
+
+    def Content(self):
+        return self.text
+
+def HexDump(data):
+    oDumpStream = cDumpStream()
+    hexDump = ''
+    for i, b in enumerate(data):
+        if i % dumplinelength == 0 and hexDump != '':
+            oDumpStream.Addline(hexDump)
+            hexDump = ''
+        hexDump += IFF(hexDump == '', '', ' ') + '%02X' % ord(b)
+    oDumpStream.Addline(hexDump)
+    return oDumpStream.Content()
+
+def CombineHexAscii(hexDump, asciiDump):
+    if hexDump == '':
+        return ''
+    return hexDump + '  ' + (' ' * (3 * (dumplinelength - len(asciiDump)))) + asciiDump
+
+def HexAsciiDump(data):
+    oDumpStream = cDumpStream()
+    hexDump = ''
+    asciiDump = ''
+    for i, b in enumerate(data):
+        if i % dumplinelength == 0:
+            if hexDump != '':
+                oDumpStream.Addline(CombineHexAscii(hexDump, asciiDump))
+            hexDump = '%08X:' % i
+            asciiDump = ''
+        hexDump+= ' %02X' % ord(b)
+        asciiDump += IFF(ord(b) >= 32, b, '.')
+    oDumpStream.Addline(CombineHexAscii(hexDump, asciiDump))
+    return oDumpStream.Content()
+
+def HexAsciiDumpLine(data):
+    return HexAsciiDump(data[0:16])[10:-1]
+    
 def Main():
     """pdf-parser, use it to parse a PDF document
     """
