@@ -2,8 +2,8 @@
 
 __description__ = 'Analyze OLE files (Compound Binary Files)'
 __author__ = 'Didier Stevens'
-__version__ = '0.0.17'
-__date__ = '2015/06/14'
+__version__ = '0.0.18'
+__date__ = '2015/09/22'
 
 """
 
@@ -48,6 +48,12 @@ History:
   2015/05/13: 0.0.16: changed HeuristicDecompress with findall; renamed MacrosContainsOnlyAttributes to MacrosContainsOnlyAttributesOrOptions
   2015/06/08: 0.0.17: Fix HexAsciiDump
   2015/06/14: Added exit code
+  2015/07/26: 0.0.18: Added option --vbadecompresscorrupt
+  2015/09/12: added option --cut
+  2015/09/13: changed exit code to 2 when macros detected
+  2015/09/16: Rename old OleFileIO_PL to new olefile so that local copy of the module can be used
+  2015/09/17: added help for pip install olefile
+  2015/09/22: fixed os.path.isfile(filename) bug
 
 Todo:
 """
@@ -63,6 +69,7 @@ import xml.dom.minidom
 import zlib
 import hashlib
 import textwrap
+import re
 
 try:
     import yara
@@ -70,9 +77,11 @@ except:
     pass
 
 try:
-    import OleFileIO_PL
+    import olefile
 except:
-    print('This program requires module OleFileIO_PL.\nhttp://www.decalage.info/python/olefileio\n')
+    print('This program requires module olefile.\nhttp://www.decalage.info/python/olefileio\n')
+    if sys.version >= '2.7.9':
+        print("You can use PIP to install olefile like this: pip install olefile\npip is located in Python's Scripts folder.\n")
     exit(-1)
 
 dumplinelength = 16
@@ -87,8 +96,8 @@ Manual:
 oledump is a tool to analyze OLE files (also known as Compound File Binary). Many file formats are in fact OLE files, like Microsoft Office files, MSI files, ... Even the new Microsoft Office Open XML format uses OLE files for VBA macros.
 oledump can analyze OLE files directly, or indirectly when then are contained in some form or other (like .docm, .xml, ...).
 
-oledump uses 2 modules that are not part of Python 2: OleFileIO_PL (http://www.decalage.info/python/olefileio) and YARA.
-You need to install the OleFileIO_PL module for this program to work.
+oledump uses 2 modules that are not part of Python 2: olefile (http://www.decalage.info/python/olefileio) and YARA.
+You need to install the olefile module for this program to work.
 The YARA module is not mandatory if you don't use YARA rules.
 
 Running oledump with a spreadsheet (.xls binary format) lists al the streams found in the OLE file (an OLE file is a virtual filesystem with folders and files, known as streams), like this:
@@ -125,6 +134,28 @@ C:\Demo>oledump.py -s 1 -d Book1.xls > content.bin
 
 or it can be piped into another command, like this:
 C:\Demo>oledump.py -s 1 -d Book1.xls | pdfid.py -f
+
+Option -C (--cut) allows for the partial selection of a stream. Use this option to "cut out" part of the stream.
+The --cut option takes an argument to specify which section of bytes to select from the stream. This argument is composed of 2 terms separated by a colon (:), like this:
+termA:termB
+termA and termB can be:
+- nothing (an empty string)
+- a positive number; example: 10
+- an hexadecimal number (to be preceded by 0x); example: 0x10
+- a case sensitive string to search for (surrounded by square brackets and single quotes); example: ['MZ']
+- an hexadecimal string to search for (surrounded by square brackets); example: [d0cf11e0]
+If termA is nothing, then the cut section of bytes starts with the byte at position 0.
+If termA is a number, then the cut section of bytes starts with the byte at the position given by the number (first byte has index 0).
+If termA is a string to search for, then the cut section of bytes starts with the byte at the position where the string is first found. If the string is not found, the cut is empty (0 bytes).
+If termB is nothing, then the cut section of bytes ends with the last byte.
+If termB is a number, then the cut section of bytes ends with the byte at the position given by the number (first byte has index 0).
+When termB is a number, it can have suffix letter l. This indicates that the number is a length (number of bytes), and not a position.
+If termB is a string to search for, then the cut section of bytes ends with the last byte at the position where the string is first found. If the string is not found, the cut is empty (0 bytes).
+No checks are made to assure that the position specified by termA is lower than the position specified by termB. This is left up to the user.
+Examples:
+This argument can be used to dump the first 256 bytes of a PE file located inside the stream: ['MZ']:0x100l
+This argument can be used to dump the OLE file located inside the stream: [d0cf11e0]:
+When this option is not used, the complete stream is selected. 
 
 When analyzing a Microsoft Office document with VBA macros, you will see output similar to this:
 
@@ -170,6 +201,24 @@ Attribute VB_Customizable = True
 
 If the VBA code contains other statements than Attribute or Options statements, then the indicator is a upper case letter M.
 This M/m indicator allows you to focus first on interesting VBA macros.
+
+When compressed VBA code is corrupted, the status indicatore will be E (error).
+C:\Demo>oledump.py Book2-vba.xls
+  1:       109 '\\x01CompObj'
+  2:       276 '\\x05DocumentSummaryInformation'
+  3:       224 '\\x05SummaryInformation'
+  4:      2484 'Workbook'
+  5:       529 '_VBA_PROJECT_CUR/PROJECT'
+  6:       104 '_VBA_PROJECT_CUR/PROJECTwm'
+  7: E    1196 '_VBA_PROJECT_CUR/VBA/Sheet1'
+  8: m     977 '_VBA_PROJECT_CUR/VBA/Sheet2'
+  9: m     977 '_VBA_PROJECT_CUR/VBA/Sheet3'
+ 10: m     985 '_VBA_PROJECT_CUR/VBA/ThisWorkbook'
+ 11:      2651 '_VBA_PROJECT_CUR/VBA/_VBA_PROJECT'
+ 12:       549 '_VBA_PROJECT_CUR/VBA/dir'
+
+To view the VBA code up til the corruption, use option --vbadecompresscorrupt.
+C:\Demo>oledump.py -s 7 --vbadecompresscorrupt Book2-vba.xls
 
 Option -r can be used together with option -v to decompress a VBA macro stream that was extracted through some other mean than oledump. In such case, you provide the file that contains the compressed macro, instead of the OLE file.
 
@@ -355,7 +404,7 @@ oledump also supports input/output redirection. This way, oledump can be used in
 Say for example that the sample OLE file is GZIP compressed. oledump can not handle GZIP files directly, but you can decompress and cat it with zcat and then pipe it into oledump for analysis, like this:
 zcat sample.gz | oledump.py
 
-The return code of oledump is 0, except when you use no options and the analyzed file contains macros. When macros are found, the return code is 1.
+The return code of oledump is 0, except when you use no options and the analyzed file contains macros. When macros are found, the return code is 2.
 '''
     for line in manual.split('\n'):
         print(textwrap.fill(line))
@@ -515,15 +564,15 @@ def DecompressChunk(compressedChunk):
 
 def Decompress(compressedData):
     if compressedData[0] != chr(1):
-        return None
+        return (False, None)
     remainder = compressedData[1:]
     decompressed = ''
     while len(remainder) != 0:
         decompressedChunk, remainder = DecompressChunk(remainder)
         if decompressedChunk == None:
-            return None
+            return (False, decompressed)
         decompressed += decompressedChunk
-    return decompressed
+    return (True, decompressed)
 
 def FindCompression(data):
     searchString = '\x00Attribut'
@@ -532,26 +581,22 @@ def FindCompression(data):
         position = -1
     return position
 
-def NoneToEmptyString(data):
-    if data == None:
-        return ''
-    else:
-        return data
-
 def SearchAndDecompressSub(data):
     position = FindCompression(data)
     if position == -1:
-        return None
+        return (False, '')
     else:
         compressedData = data[position - 3:]
     return Decompress(compressedData)
 
-def SearchAndDecompress(data):
-    result = SearchAndDecompressSub(data)
-    if result == None:
-        return 'Error: unable to decompress'
+def SearchAndDecompress(data, ifError='Error: unable to decompress\n'):
+    result, decompress = SearchAndDecompressSub(data)
+    if result:
+        return decompress
+    elif ifError == None:
+        return decompress
     else:
-        return result
+        return ifError
 
 def ReadWORD(data):
     if len(data) < 2:
@@ -912,6 +957,94 @@ def HeuristicDecompress(data):
             pass
     return data
 
+CUTTERM_NOTHING = 0
+CUTTERM_POSITION = 1
+CUTTERM_FIND = 2
+CUTTERM_LENGTH = 3
+
+def ParseCutTerm(argument):
+    if argument == '':
+        return CUTTERM_NOTHING, None, ''
+    oMatch = re.match(r'0x([0-9a-f]+)', argument, re.I)
+    if oMatch == None:
+        oMatch = re.match(r'(\d+)', argument)    
+    else:
+        return CUTTERM_POSITION, int(oMatch.group(1), 16), argument[len(oMatch.group(0)):]
+    if oMatch == None:
+        oMatch = re.match(r'\[([0-9a-f]+)\]', argument, re.I)
+    else:
+        return CUTTERM_POSITION, int(oMatch.group(1)), argument[len(oMatch.group(0)):]
+    if oMatch == None:
+        oMatch = re.match(r"\[\'(.+)\'\]", argument)
+    else:
+        if len(oMatch.group(1)) % 2 == 1:
+            raise
+        else:
+            return CUTTERM_FIND, binascii.a2b_hex(oMatch.group(1)), argument[len(oMatch.group(0)):]
+    if oMatch == None:
+        return None, None, argument
+    else:
+        return CUTTERM_FIND, oMatch.group(1), argument[len(oMatch.group(0)):]
+
+def ParseCutArgument(argument):
+    type, value, remainder = ParseCutTerm(argument.strip())
+    if type == CUTTERM_NOTHING:
+        return CUTTERM_NOTHING, None, CUTTERM_NOTHING, None
+    elif type == None:
+        if remainder.startswith(':'):
+            typeLeft = CUTTERM_NOTHING
+            valueLeft = None
+            remainder = remainder[1:]
+        else:
+            return None, None, None, None
+    else:
+        typeLeft = type
+        valueLeft = value
+        if remainder.startswith(':'):
+            remainder = remainder[1:]
+        else:
+            return None, None, None, None
+    type, value, remainder = ParseCutTerm(remainder)
+    if type == CUTTERM_POSITION and remainder == 'l':
+        return typeLeft, valueLeft, CUTTERM_LENGTH, value
+    elif type == None or remainder != '':
+        return None, None, None, None
+    else:
+        return typeLeft, valueLeft, type, value
+
+def CutData(stream, cutArgument):
+    if cutArgument == '':
+        return stream
+
+    typeLeft, valueLeft, typeRight, valueRight = ParseCutArgument(cutArgument)
+
+    if typeLeft == None:
+        return stream
+
+    if typeLeft == CUTTERM_NOTHING:
+        positionBegin = 0
+    elif typeLeft == CUTTERM_POSITION:
+        positionBegin = valueLeft
+    else:
+        positionBegin = stream.find(valueLeft)
+        if positionBegin == -1:
+            return ''
+
+    if typeRight == CUTTERM_NOTHING:
+        positionEnd = len(stream)
+    elif typeRight == CUTTERM_POSITION:
+        positionEnd = valueRight + 1
+    elif typeRight == CUTTERM_LENGTH:
+        positionEnd = positionBegin + valueRight
+    else:
+        positionEnd = stream.find(valueRight)
+        if positionEnd == -1:
+            return ''
+        else:
+            positionEnd += len(valueRight)
+
+    return stream[positionBegin:positionEnd]
+
 def OLESub(ole, prefix, rules, options):
     global plugins
     global decoders
@@ -952,8 +1085,8 @@ def OLESub(ole, prefix, rules, options):
                 lenghString = '%7d' % len(stream)
                 macroPresent = FindCompression(stream) != -1
                 if macroPresent:
-                    returnCode = 1
-                    if SearchAndDecompressSub(stream) == None:
+                    returnCode = 2
+                    if not SearchAndDecompressSub(stream)[0]:
                         indicator = 'E'
                     else:
                         indicator = 'M'
@@ -1023,9 +1156,11 @@ def OLESub(ole, prefix, rules, options):
             DumpFunction = HexDump
         elif options.vbadecompress:
             if options.select == 'a':
-                DumpFunction = lambda x: NoneToEmptyString(SearchAndDecompressSub(x))
+                DumpFunction = lambda x: SearchAndDecompress(x, '')
             else:
                 DumpFunction = SearchAndDecompress
+        elif options.vbadecompresscorrupt:
+            DumpFunction = lambda x: SearchAndDecompress(x, None)
         elif options.extract:
             DumpFunction = Extract
             IfWIN32SetBinary(sys.stdout)
@@ -1036,7 +1171,7 @@ def OLESub(ole, prefix, rules, options):
         counter = 1
         for fname in ole.listdir():
             if options.select == 'a' or ('%s%d' % (prefix, counter)) == options.select:
-                StdoutWriteChunked(DumpFunction(DecompressFunction(DecodeFunction(decoders, options, ole.openstream(fname).read()))))
+                StdoutWriteChunked(DumpFunction(DecompressFunction(DecodeFunction(decoders, options, CutData(ole.openstream(fname).read(), options.cut)))))
                 if options.select != 'a':
                     break
             counter += 1
@@ -1056,6 +1191,12 @@ def YARACompile(fileordirname):
     return yara.compile(filepaths=dFilepaths)
 
 def OLEDump(filename, options):
+    returnCode = 0
+
+    if filename != '' and not os.path.isfile(filename):
+        print('Error: %s is not a file.' % filename)
+        return returnCode
+
     global plugins
     plugins = []
     LoadPlugins(options.plugins, True)
@@ -1063,8 +1204,6 @@ def OLEDump(filename, options):
     global decoders
     decoders = []
     LoadDecoders(options.decoders, True)
-
-    returnCode = 0
 
     if options.raw:
         if filename == '':
@@ -1122,7 +1261,7 @@ def OLEDump(filename, options):
     magic = oStringIO.read(6)
     oStringIO.seek(0)
     if magic[0:4] == OLEFILE_MAGIC:
-        ole = OleFileIO_PL.OleFileIO(oStringIO)
+        ole = olefile.OleFileIO(oStringIO)
         returnCode = OLESub(ole, '', rules, options)
         ole.close()
     elif magic[0:2] == 'PK':
@@ -1137,7 +1276,7 @@ def OLEDump(filename, options):
                 if options.select == '':
                     if not options.quiet:
                         print('%s: %s' % (letter, info.filename))
-                ole = OleFileIO_PL.OleFileIO(cStringIO.StringIO(content))
+                ole = olefile.OleFileIO(cStringIO.StringIO(content))
                 returnCode = OLESub(ole, letter, rules, options)
                 ole.close()
             oZipContent.close()
@@ -1170,13 +1309,13 @@ def OLEDump(filename, options):
                                         nameValue = value
                                         break
                                 print('%s: %s' % (letter, nameValue))
-                        ole = OleFileIO_PL.OleFileIO(cStringIO.StringIO(content))
+                        ole = olefile.OleFileIO(cStringIO.StringIO(content))
                         returnCode = OLESub(ole, letter, rules, options)
                         ole.close()
         elif data.startswith(ACTIVEMIME_MAGIC):
             content = HeuristicDecompress(data)
             if content[0:4] == OLEFILE_MAGIC:
-                ole = OleFileIO_PL.OleFileIO(cStringIO.StringIO(content))
+                ole = olefile.OleFileIO(cStringIO.StringIO(content))
                 returnCode = OLESub(ole, '', rules, options)
                 ole.close()
         else:
@@ -1192,6 +1331,7 @@ def Main():
     oParser.add_option('-x', '--hexdump', action='store_true', default=False, help='perform hex dump')
     oParser.add_option('-a', '--asciidump', action='store_true', default=False, help='perform ascii dump')
     oParser.add_option('-v', '--vbadecompress', action='store_true', default=False, help='VBA decompression')
+    oParser.add_option('--vbadecompresscorrupt', action='store_true', default=False, help='VBA decompression, display beginning if corrupted')
     oParser.add_option('-r', '--raw', action='store_true', default=False, help='read raw file (use with options -v or -p')
     oParser.add_option('-e', '--extract', action='store_true', default=False, help='extract OLE embedded file')
     oParser.add_option('-i', '--info', action='store_true', default=False, help='print extra info for selected item')
@@ -1206,11 +1346,16 @@ def Main():
     oParser.add_option('-c', '--calc', action='store_true', default=False, help='Add extra calculated data to output, like hashes')
     oParser.add_option('--decompress', action='store_true', default=False, help='Search for compressed data in the stream and decompress it')
     oParser.add_option('-V', '--verbose', action='store_true', default=False, help='verbose output with decoder errors')
+    oParser.add_option('-C', '--cut', type=str, default='', help='cut data')
     (options, args) = oParser.parse_args()
 
     if options.man:
         oParser.print_help()
         PrintManual()
+        return 0
+
+    if ParseCutArgument(options.cut)[0] == None:
+        print('Error: the expression of the cut option (-C) is invalid: %s' % options.cut)
         return 0
 
     if len(args) > 1:
