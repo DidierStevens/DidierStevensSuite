@@ -2,8 +2,8 @@
 
 __description__ = 'Extract base64 strings from file'
 __author__ = 'Didier Stevens'
-__version__ = '0.0.2'
-__date__ = '2015/07/28'
+__version__ = '0.0.3'
+__date__ = '2015/09/12'
 
 """
 
@@ -16,6 +16,7 @@ History:
   2015/07/01: added header
   2015/07/14: 0.0.2: added option -n
   2015/07/28: fixed option -n
+  2015/09/12: 0.0.3: added option -c
 
 Todo:
 """
@@ -76,6 +77,28 @@ Here is an example of an ascii dump (-s 2 -a):
 00000010: 73 74 65 6D 4F 62 6A 65 63 74                    stemObject
 
 You can also specify the minimum length of the decoded base64 datastream with option -n. 
+
+Option -c (--cut) allows for the partial selection of a stream. Use this option to "cut out" part of the stream.
+The --cut option takes an argument to specify which section of bytes to select from the stream. This argument is composed of 2 terms separated by a colon (:), like this:
+termA:termB
+termA and termB can be:
+- nothing (an empty string)
+- a positive number; example: 10
+- an hexadecimal number (to be preceded by 0x); example: 0x10
+- a case sensitive string to search for (surrounded by square brackets and single quotes); example: ['MZ']
+- an hexadecimal string to search for (surrounded by square brackets); example: [d0cf11e0]
+If termA is nothing, then the cut section of bytes starts with the byte at position 0.
+If termA is a number, then the cut section of bytes starts with the byte at the position given by the number (first byte has index 0).
+If termA is a string to search for, then the cut section of bytes starts with the byte at the position where the string is first found. If the string is not found, the cut is empty (0 bytes).
+If termB is nothing, then the cut section of bytes ends with the last byte.
+If termB is a number, then the cut section of bytes ends with the byte at the position given by the number (first byte has index 0).
+When termB is a number, it can have suffix letter l. This indicates that the number is a length (number of bytes), and not a position.
+If termB is a string to search for, then the cut section of bytes ends with the last byte at the position where the string is first found. If the string is not found, the cut is empty (0 bytes).
+No checks are made to assure that the position specified by termA is lower than the position specified by termB. This is left up to the user.
+Examples:
+This argument can be used to dump the first 256 bytes of a PE file located inside the stream: ['MZ']:0x100l
+This argument can be used to dump the OLE file located inside the stream: [d0cf11e0]:
+When this option is not used, the complete stream is selected. 
 '''
     for line in manual.split('\n'):
         print(textwrap.fill(line, 78))
@@ -245,6 +268,94 @@ def CalculateFileMetaData(data):
     magicPrintable, magicHex = Magic(data[0:4])
     return hashlib.md5(data).hexdigest(), magicPrintable, magicHex, fileSize, entropy, countNullByte, countControlBytes, countWhitespaceBytes, countPrintableBytes, countHighBytes
 
+CUTTERM_NOTHING = 0
+CUTTERM_POSITION = 1
+CUTTERM_FIND = 2
+CUTTERM_LENGTH = 3
+
+def ParseCutTerm(argument):
+    if argument == '':
+        return CUTTERM_NOTHING, None, ''
+    oMatch = re.match(r'0x([0-9a-f]+)', argument, re.I)
+    if oMatch == None:
+        oMatch = re.match(r'(\d+)', argument)    
+    else:
+        return CUTTERM_POSITION, int(oMatch.group(1), 16), argument[len(oMatch.group(0)):]
+    if oMatch == None:
+        oMatch = re.match(r'\[([0-9a-f]+)\]', argument, re.I)
+    else:
+        return CUTTERM_POSITION, int(oMatch.group(1)), argument[len(oMatch.group(0)):]
+    if oMatch == None:
+        oMatch = re.match(r"\[\'(.+)\'\]", argument)
+    else:
+        if len(oMatch.group(1)) % 2 == 1:
+            raise
+        else:
+            return CUTTERM_FIND, binascii.a2b_hex(oMatch.group(1)), argument[len(oMatch.group(0)):]
+    if oMatch == None:
+        return None, None, argument
+    else:
+        return CUTTERM_FIND, oMatch.group(1), argument[len(oMatch.group(0)):]
+
+def ParseCutArgument(argument):
+    type, value, remainder = ParseCutTerm(argument.strip())
+    if type == CUTTERM_NOTHING:
+        return CUTTERM_NOTHING, None, CUTTERM_NOTHING, None
+    elif type == None:
+        if remainder.startswith(':'):
+            typeLeft = CUTTERM_NOTHING
+            valueLeft = None
+            remainder = remainder[1:]
+        else:
+            return None, None, None, None
+    else:
+        typeLeft = type
+        valueLeft = value
+        if remainder.startswith(':'):
+            remainder = remainder[1:]
+        else:
+            return None, None, None, None
+    type, value, remainder = ParseCutTerm(remainder)
+    if type == CUTTERM_POSITION and remainder == 'l':
+        return typeLeft, valueLeft, CUTTERM_LENGTH, value
+    elif type == None or remainder != '':
+        return None, None, None, None
+    else:
+        return typeLeft, valueLeft, type, value
+
+def CutData(stream, cutArgument):
+    if cutArgument == '':
+        return stream
+
+    typeLeft, valueLeft, typeRight, valueRight = ParseCutArgument(cutArgument)
+
+    if typeLeft == None:
+        return stream
+
+    if typeLeft == CUTTERM_NOTHING:
+        positionBegin = 0
+    elif typeLeft == CUTTERM_POSITION:
+        positionBegin = valueLeft
+    else:
+        positionBegin = stream.find(valueLeft)
+        if positionBegin == -1:
+            return ''
+
+    if typeRight == CUTTERM_NOTHING:
+        positionEnd = len(stream)
+    elif typeRight == CUTTERM_POSITION:
+        positionEnd = valueRight + 1
+    elif typeRight == CUTTERM_LENGTH:
+        positionEnd = positionBegin + valueRight
+    else:
+        positionEnd = stream.find(valueRight)
+        if positionEnd == -1:
+            return ''
+        else:
+            positionEnd += len(valueRight)
+
+    return stream[positionBegin:positionEnd]
+
 def BASE64Dump(filename, options):
     if filename == '':
         IfWIN32SetBinary(sys.stdin)
@@ -301,7 +412,7 @@ def BASE64Dump(filename, options):
                     print(' %s: %s' % ('Printable bytes', countPrintableBytes))
                     print(' %s: %s' % ('High bytes', countHighBytes))
                 else:
-                    StdoutWriteChunked(DumpFunction(base64data))
+                    StdoutWriteChunked(DumpFunction(CutData(base64data, options.cut)))
             counter += 1
 
     return 0
@@ -314,11 +425,16 @@ def Main():
     oParser.add_option('-x', '--hexdump', action='store_true', default=False, help='perform hex dump')
     oParser.add_option('-a', '--asciidump', action='store_true', default=False, help='perform ascii dump')
     oParser.add_option('-n', '--number', type=int, default=None, help='minimum number of bytes in decoded base64 data')
+    oParser.add_option('-c', '--cut', type=str, default='', help='cut data')
     (options, args) = oParser.parse_args()
 
     if options.man:
         oParser.print_help()
         PrintManual()
+        return 0
+
+    if ParseCutArgument(options.cut)[0] == None:
+        print('Error: the expression of the cut option (-c) is invalid: %s' % options.cut)
         return 0
 
     if len(args) > 1:
