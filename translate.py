@@ -2,8 +2,8 @@
 
 __description__ = 'Translate bytes according to a Python expression'
 __author__ = 'Didier Stevens'
-__version__ = '2.0.0'
-__date__ = '2014/02/27'
+__version__ = '2.1.0'
+__date__ = '2015/11/05'
 
 """
 
@@ -19,6 +19,8 @@ History:
   2007/08/20: start
   2014/02/24: rewrite
   2014/02/27: manual
+  2015/11/04: added option -f
+  2015/11/05: continue
 
 Todo:
 """
@@ -54,13 +56,15 @@ If only part of the file has to be manipulated, while leaving the rest unchanged
 
 This example will perform an XOR 0x10 operation from the 17th byte till the 32nd byte included. All other bytes remain unchanged.
 
-Because Python as built-in shift operators (<< and >>) but no rotate operators, I've defined 2 rotate functions that operate on a byte: rol (rotate left) and ror (rotate right). They accept 2 arguments: the byte to rotate and the number of bit positions to rotate. For example, rol(0x01, 2) gives 0x04.
+Because Python has built-in shift operators (<< and >>) but no rotate operators, I've defined 2 rotate functions that operate on a byte: rol (rotate left) and ror (rotate right). They accept 2 arguments: the byte to rotate and the number of bit positions to rotate. For example, rol(0x01, 2) gives 0x04.
 
 translate.py malware -o malware.decoded "rol(byte, 2)"
 
 Another function I defined is IFF (the IF Function): IFF(expression, valueTrue, valueFalse). This function allows you to write conditional code without an if statement. When expression evaluates to True, IFF returns valueTrue, otherwise it returns valueFalse.
 
 translate.py malware -o malware.decoded "IFF(position >= 0x10 and position < 0x20, byte ^ 0x10, byte)"
+
+By default this program translates individual bytes via the provided Python expression. With option -f (fullread), translate.py reads the input file as one byte sequence and passes it to the function specified by the expression. This function needs to take one string as an argument and return one string (the translated file).
 '''
     for line in manual.split('\n'):
         print(textwrap.fill(line))
@@ -102,10 +106,6 @@ def Transform(fIn, fOut, commandPython):
         outbyte = eval(commandPython)
         fOut.write(CS2BIP3(chr(outbyte)))
         position += 1
-    if fIn != sys.stdin:
-        fIn.close()
-    if fOut != sys.stdout:
-        fOut.close()
 
 def Translate(filenameInput, commandPython, options):
     if filenameInput == '':
@@ -125,9 +125,17 @@ def Translate(filenameInput, commandPython, options):
         fOut = open(options.output, 'wb')
 
     if options.script != '':
-        execfile(options.script)
+        execfile(options.script, globals())
 
-    Transform(fIn, fOut, commandPython)
+    if options.fullread:
+        fOut.write(eval(commandPython)(fIn.read()))
+    else:
+        Transform(fIn, fOut, commandPython)
+
+    if fIn != sys.stdin:
+        fIn.close()
+    if fOut != sys.stdout:
+        fOut.close()
 
 def Main():
     moredesc = '''
@@ -147,6 +155,7 @@ https://DidierStevens.com'''
     oParser = optparse.OptionParser(usage='usage: %prog [options] [file-in] [file-out] command [script]\n' + __description__ + moredesc, version='%prog ' + __version__)
     oParser.add_option('-o', '--output', default='', help='Output file (default is stdout)')
     oParser.add_option('-s', '--script', default='', help='Script with definitions to include')
+    oParser.add_option('-f', '--fullread', action='store_true', default=False, help='Full read of the file')
     oParser.add_option('-m', '--man', action='store_true', default=False, help='print manual')
     (options, args) = oParser.parse_args()
 
