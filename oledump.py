@@ -2,8 +2,8 @@
 
 __description__ = 'Analyze OLE files (Compound Binary Files)'
 __author__ = 'Didier Stevens'
-__version__ = '0.0.18'
-__date__ = '2015/09/22'
+__version__ = '0.0.19'
+__date__ = '2015/10/30'
 
 """
 
@@ -54,6 +54,7 @@ History:
   2015/09/16: Rename old OleFileIO_PL to new olefile so that local copy of the module can be used
   2015/09/17: added help for pip install olefile
   2015/09/22: fixed os.path.isfile(filename) bug
+  2015/10/30: 0.0.19 added option -E and environment variable OLEDUMP_EXTRA; added MD5 to option -i
 
 Todo:
 """
@@ -70,6 +71,7 @@ import zlib
 import hashlib
 import textwrap
 import re
+import string
 
 try:
     import yara
@@ -238,6 +240,7 @@ String 1: calc-rol3.exe
 String 2: C:\Demo\ole\CALC-R~1.EXE
 String 3: C:\Demo\ole\CALC-R~1.EXE
 Size embedded file: 114688
+MD5 embedded file: bef425b95e45c54d649a19a7c55556a0
 
 To extract the embedded file, use option -e and redirect the output to a file like this:
 C:\Demo>oledump.py -s 6 -e Book1-insert-object-calc-rol3.exe.xls > extracted.bin
@@ -654,7 +657,7 @@ def Info(data):
     result = ExtractOle10Native(data)
     if result == []:
         return 'Error: extraction failed'
-    return 'String 1: %s\nString 2: %s\nString 3: %s\nSize embedded file: %d\n' % (result[0], result[1], result[2], len(result[3]))
+    return 'String 1: %s\nString 2: %s\nString 3: %s\nSize embedded file: %d\nMD5 embedded file: %s\n' % (result[0], result[1], result[2], len(result[3]), hashlib.md5(result[3]).hexdigest())
 
 def IfWIN32SetBinary(io):
     if sys.platform == 'win32':
@@ -1045,6 +1048,110 @@ def CutData(stream, cutArgument):
 
     return stream[positionBegin:positionEnd]
 
+
+def ExtraInfoMD5(data):
+    return hashlib.md5(data).hexdigest()
+
+def ExtraInfoSHA1(data):
+    return hashlib.sha1(data).hexdigest()
+
+def ExtraInfoSHA256(data):
+    return hashlib.sha256(data).hexdigest()
+
+def CalculateByteStatistics(dPrevalence):
+    sumValues = sum(dPrevalence.values())
+    countNullByte = dPrevalence[0]
+    countControlBytes = 0
+    countWhitespaceBytes = 0
+    for iter in range(1, 0x21):
+        if chr(iter) in string.whitespace:
+            countWhitespaceBytes += dPrevalence[iter]
+        else:
+            countControlBytes += dPrevalence[iter]
+    countControlBytes += dPrevalence[0x7F]
+    countPrintableBytes = 0
+    for iter in range(0x21, 0x7F):
+        countPrintableBytes += dPrevalence[iter]
+    countHighBytes = 0
+    for iter in range(0x80, 0x100):
+        countHighBytes += dPrevalence[iter]
+    entropy = 0.0
+    for iter in range(0x100):
+        if dPrevalence[iter] > 0:
+            prevalence = float(dPrevalence[iter]) / float(sumValues)
+            entropy += - prevalence * math.log(prevalence, 2)
+    return sumValues, entropy, countNullByte, countControlBytes, countWhitespaceBytes, countPrintableBytes, countHighBytes
+
+def ExtraInfoENTROPY(data):
+    dPrevalence = {iter: 0 for iter in range(0x100)}
+    for char in data:
+        dPrevalence[ord(char)] += 1
+    sumValues, entropy, countNullByte, countControlBytes, countWhitespaceBytes, countPrintableBytes, countHighBytes = CalculateByteStatistics(dPrevalence)
+    return '%f' % entropy
+
+def ExtraInfoHEADHEX(data):
+    return binascii.hexlify(data[:16])
+
+def ExtraInfoHEADASCII(data):
+    return ''.join([IFF(ord(b) >= 32, b, '.') for b in data[:16]])
+
+def ExtraInfoTAILHEX(data):
+    return binascii.hexlify(data[-16:])
+
+def ExtraInfoTAILASCII(data):
+    return ''.join([IFF(ord(b) >= 32, b, '.') for b in data[-16:]])
+
+def ExtraInfoHISTOGRAM(data):
+    dPrevalence = {iter: 0 for iter in range(0x100)}
+    for char in data:
+        dPrevalence[ord(char)] += 1
+    result = []
+    count = 0
+    minimum = None
+    maximum = None
+    for iter in range(0x100):
+        if dPrevalence[iter] > 0:
+            result.append('0x%02x:%d' % (iter, dPrevalence[iter]))
+            count += 1
+            if minimum == None:
+                minimum = iter
+            else:
+                minimum = min(minimum, iter)
+            if maximum == None:
+                maximum = iter
+            else:
+                maximum = max(maximum, iter)
+    result.insert(0, '%d' % count)
+    result.insert(1, IFF(minimum == None, '', '0x%02x' % minimum))
+    result.insert(2, IFF(maximum == None, '', '0x%02x' % maximum))
+    return ','.join(result)
+
+def ExtraInfoBYTESTATS(data):
+    dPrevalence = {iter: 0 for iter in range(0x100)}
+    for char in data:
+        dPrevalence[ord(char)] += 1
+    sumValues, entropy, countNullByte, countControlBytes, countWhitespaceBytes, countPrintableBytes, countHighBytes = CalculateByteStatistics(dPrevalence)
+    return '%d,%d,%d,%d,%d' % (countNullByte, countControlBytes, countWhitespaceBytes, countPrintableBytes, countHighBytes)
+
+def GenerateExtraInfo(extra, stream):
+    if extra == '':
+        return ''
+    dExtras = {'%MD5%': ExtraInfoMD5,
+    	         '%SHA1%': ExtraInfoSHA1,
+    	         '%SHA256%': ExtraInfoSHA256,
+    	         '%ENTROPY%': ExtraInfoENTROPY,
+    	         '%HEADHEX%': ExtraInfoHEADHEX,
+    	         '%HEADASCII%': ExtraInfoHEADASCII,
+    	         '%TAILHEX%': ExtraInfoTAILHEX,
+    	         '%TAILASCII%': ExtraInfoTAILASCII,
+    	         '%HISTOGRAM%': ExtraInfoHISTOGRAM,
+    	         '%BYTESTATS%': ExtraInfoBYTESTATS,
+    	        }
+    for variable in dExtras:
+        if variable in extra:
+            extra = extra.replace(variable, dExtras[variable](stream))
+    return ' ' + extra.replace(r'\t', '\t').replace(r'\n', '\n')
+
 def OLESub(ole, prefix, rules, options):
     global plugins
     global decoders
@@ -1096,6 +1203,7 @@ def OLESub(ole, prefix, rules, options):
                 line = '%3s: %s %s %s' % (('%s%d' % (prefix, counter)), indicator, lenghString, PrintableName(fname))
                 if options.calc:
                     line += ' %s' % hashlib.md5(stream).hexdigest()
+                line += GenerateExtraInfo(options.extra, stream)
                 print(line)
             for cPlugin in plugins:
                 try:
@@ -1323,6 +1431,9 @@ def OLEDump(filename, options):
 
     return returnCode
 
+def OptionsEnvironmentVariables(options):
+    options.extra = os.getenv('OLEDUMP_EXTRA', options.extra)
+
 def Main():
     oParser = optparse.OptionParser(usage='usage: %prog [options] [file]\n' + __description__, version='%prog ' + __version__)
     oParser.add_option('-m', '--man', action='store_true', default=False, help='Print manual')
@@ -1347,6 +1458,7 @@ def Main():
     oParser.add_option('--decompress', action='store_true', default=False, help='Search for compressed data in the stream and decompress it')
     oParser.add_option('-V', '--verbose', action='store_true', default=False, help='verbose output with decoder errors')
     oParser.add_option('-C', '--cut', type=str, default='', help='cut data')
+    oParser.add_option('-E', '--extra', type=str, default='', help='add extra info (environment variable: OLEDUMP_EXTRA)')
     (options, args) = oParser.parse_args()
 
     if options.man:
@@ -1357,6 +1469,8 @@ def Main():
     if ParseCutArgument(options.cut)[0] == None:
         print('Error: the expression of the cut option (-C) is invalid: %s' % options.cut)
         return 0
+
+    OptionsEnvironmentVariables(options)
 
     if len(args) > 1:
         oParser.print_help()

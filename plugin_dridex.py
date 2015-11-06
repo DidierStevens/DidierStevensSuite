@@ -2,8 +2,8 @@
 
 __description__ = 'Dridex plugin for oledump.py'
 __author__ = 'Didier Stevens'
-__version__ = '0.0.8'
-__date__ = '2015/05/14'
+__version__ = '0.0.9'
+__date__ = '2015/11/06'
 
 """
 
@@ -20,12 +20,14 @@ History:
   2015/04/08: 0.0.6 added KALLKKKASKAJJAS, based on sample 491A146F5DE3592C7D959E2869F259EF
   2015/04/09: 0.0.7 used KALLKKKASKAJJAS, based on sample 14C2795BCC35C3180649494EC2BC7877
   2015/04/08: 0.0.8 added GQQSfwKSTdAvZbHNhpfK, based on sample 39B38CE4E2E8D843F88C3DF9124527FC
+  2015/11/06: 0.0.9 added chr support; added IpkfHKQ2Sd, based on sample 0E73D64FBDF6C87935C0CFF9E65FA3BE
 
 Todo:
 """
 
 import re
 import binascii
+import array
 
 def RoV(InputStringToBeDecrypted):
     strTempText = InputStringToBeDecrypted
@@ -147,6 +149,35 @@ def GQQSfwKSTdAvZbHNhpfK(strData, strKey):
 
     return result
 
+def IpkfHKQ2Sd(secret, key):
+    aTable = array.array('i', [0] * (285 + 1))
+    aSecret = array.array('i', [0] * len(secret))
+    keyLength = len(key) - 1
+    for iIter in range(0, 255 + 1):
+        aTable[iIter] = iIter
+    for iIter in range(256, 285 + 1):
+        aTable[iIter] = iIter ^ 256
+    for iIter in range(1, 6 + 1):
+        aTable[iIter + 249] = ord(key[keyLength - iIter])
+        aTable[iIter - 1] = ord(key[iIter - 1]) ^ (255 - ord(key[keyLength - iIter]))
+
+    bCondition = False
+    indexKey = 0
+    indexTable = 0
+    for iIter in range(0, len(secret) - 1 + 1):
+        if indexKey > keyLength:
+            indexKey = 0
+        if indexTable > 285 and bCondition == False:
+            indexTable = 0
+            bCondition = not bCondition
+        if indexTable > 285 and bCondition == True:
+            indexTable = 5
+            bCondition = not bCondition
+        aSecret[iIter] = ord(secret[iIter]) ^ (aTable[indexTable] ^ ord(key[indexKey]))
+        indexKey = indexKey + 1
+        indexTable = indexTable + 1
+    return ''.join(map(chr, aSecret))
+
 class cDridexDecoder(cPluginParent):
     macroOnly = True
     name = 'Dridex decoder'
@@ -162,6 +193,12 @@ class cDridexDecoder(cPluginParent):
 
         oREString = re.compile(r'"([^"\n]+)"')
         foundStrings = oREString.findall(self.stream)
+        oREChr = re.compile(r'((chr[w\$]?\(\d+\)(\s*[&+]\s*)?)+)', re.IGNORECASE)
+        oREDigits = re.compile(r'\d+')
+        for foundTuple in oREChr.findall(self.stream.replace('_\r\n', '')):
+            chrString = ''.join(map(lambda x: chr(int(x)), oREDigits.findall(foundTuple[0])))
+            if chrString != '':
+                foundStrings.append(chrString)
 
         for DecodingFunction in [RoV, lambda s:OlFdL0IOXbF(s, 61), NewQkeTzIIHM, lambda s:Xor(s, 0xFF), lambda s:Step(s, 2)]:
             result = []
@@ -177,7 +214,7 @@ class cDridexDecoder(cPluginParent):
         foundStringsSmall = [foundString for foundString in foundStrings if len(foundString) <= 10]
         foundStringsLarge = [foundString for foundString in foundStrings if len(foundString) > 10]
         for foundStringSmall in foundStringsSmall:
-            for DecodingFunction in [lqjWjFO, GQQSfwKSTdAvZbHNhpfK]:
+            for DecodingFunction in [lqjWjFO, GQQSfwKSTdAvZbHNhpfK, IpkfHKQ2Sd]:
                 result = []
                 for foundStringLarge in foundStringsLarge:
                     try:
