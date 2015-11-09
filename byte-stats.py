@@ -2,8 +2,8 @@
 
 __description__ = 'Calculate byte statistics'
 __author__ = 'Didier Stevens'
-__version__ = '0.0.2'
-__date__ = '2015/10/23'
+__version__ = '0.0.3'
+__date__ = '2015/11/08'
 
 """
 Source code put in public domain by Didier Stevens, no Copyright
@@ -16,6 +16,9 @@ History:
   2015/10/17: added buckets and properties
   2015/10/22: 0.0.2 added sequence detection
   2015/10/23: finished man
+  2015/10/31: 0.0.3 option -k also works for sequences (-s) now
+  2015/11/01: added option -f
+  2015/11/08: added position for minimum and maximum entropy
 
 Todo:
 """
@@ -101,14 +104,16 @@ Size: 74752  Bucket size: 10240  Bucket count: 7
 
                    File(s)           Minimum buckets   Maximum buckets
 Entropy:           7.997180          7.981543          7.984125
+                   Position:         0x0000f000        0x00005000
 NULL bytes:             303   0.41%        34   0.33%        44   0.43%
 Control bytes:         7888  10.55%      1046  10.21%      1117  10.91%
 Whitespace bytes:      1726   2.31%       220   2.15%       254   2.48%
 Printable bytes:      27278  36.49%      3680  35.94%      3812  37.23%
 High bytes:           37557  50.24%      5096  49.77%      5211  50.89%
 
-Besides the file size (74752), the size of the bucket (10240) and then number of buckets (7) is displayed.
+Besides the file size (74752), the size of the bucket (10240) and the number of buckets (7) is displayed.
 And next to the entropy and byte counters for the complete file, the entropy and byte counters are calculated for each bucket. The minimum values for the bucket entropy and byte counters are displayed (Minimum buckets), and also the maximum values (Maximum buckets).
+Position gives the start of the bucket with minimum entropy and maximum entropy in hexadecimal.
 A significant difference between the overal statistics and bucket statistics can indicate a file that is not uniform in its content.
 Like in this picture "encrypted" by ransomware:
 
@@ -131,6 +136,7 @@ Size: 877456  Bucket size: 10240  Bucket count: 85
 
                    File(s)           Minimum buckets   Maximum buckets
 Entropy:           7.815519          5.156678          7.981628
+                   Position:         0x00019000        0x00005000
 NULL bytes:           23873   2.72%         8   0.08%      1643  16.04%
 Control bytes:        92243  10.51%        98   0.96%      1275  12.45%
 Whitespace bytes:     16241   1.85%         1   0.01%       263   2.57%
@@ -186,6 +192,7 @@ Size: 877456  Bucket size: 10240  Bucket count: 85
 
                    File(s)           Minimum buckets   Maximum buckets
 Entropy:           7.815519          5.156678          7.981628
+                   Position:         0x00019000        0x00005000
 NULL bytes:           23873   2.72%         8   0.08%      1643  16.04%
 Control bytes:        92243  10.51%        98   0.96%      1275  12.45%
 Whitespace bytes:     16241   1.85%         1   0.01%       263   2.57%
@@ -205,7 +212,7 @@ Position    Length Diff Bytes
 0x0001c586:    196  128 0x8000800080008000800080008000800080008000...
 
 Position is the start of the detected sequence, Length is the number of bytes in the sequence, Diff is the difference (unsigned) between 2 consecutive bytes and Bytes displays the hex values of the start of the sequence.
-By default, the 10 longest sequences are displayed. All sequences (minimum 3 bytes long) can be displayed with option -a.
+By default, the 10 longest sequences are displayed. All sequences (minimum 3 bytes long) can be displayed with option -a. To sort the sequences by position use option -k (key). To filter the sequences by length, use option -f.
 
 Sequence detection is useful as an extra check when the entropy and byte counters indicate the file is random:
 
@@ -325,6 +332,24 @@ def ByteSub(byte1, byte2):
         diff += 256
     return diff
 
+def MinimumAndPosition(buckets, index):
+    valueMinimum = buckets[0][1][index]
+    positionMinimum = buckets[0][0]
+    for position, properties in buckets[1:]:
+        if properties[index] < valueMinimum:
+            valueMinimum = properties[index]
+            positionMinimum = position
+    return (valueMinimum, positionMinimum)
+
+def MaximumAndPosition(buckets, index):
+    valueMaximum = buckets[0][1][index]
+    positionMaximum = buckets[0][0]
+    for position, properties in buckets[1:]:
+        if properties[index] > valueMaximum:
+            valueMaximum = properties[index]
+            positionMaximum = position
+    return (valueMaximum, positionMaximum)
+
 def ByteStats(args, options):
     if options.bucket < 1:
         print('Bucket size must be at least 1, not %d' % options.bucket)
@@ -423,10 +448,15 @@ def ByteStats(args, options):
         print(line)
         line = 'Entropy:           %f' % entropy
         if len(buckets) > 0:
-            line += '          %f' % min([properties[1] for position, properties in buckets])
+            line += '          %f' % MinimumAndPosition(buckets, 1)[0]
             if len(buckets) > 1:
-                line += '          %f' % max([properties[1] for position, properties in buckets])
+                line += '          %f' % MaximumAndPosition(buckets, 1)[0]
         print(line)
+        if len(buckets) > 0:
+            line = '                     Position:       0x%08x' % MinimumAndPosition(buckets, 1)[1]
+            if len(buckets) > 1:
+                line += '        0x%08x' % MaximumAndPosition(buckets, 1)[1]
+            print(line)
         print(GenerateLine('NULL bytes', countNullByte, sumValues, buckets, 2, options))
         print(GenerateLine('Control bytes', countControlBytes, sumValues, buckets, 3, options))
         print(GenerateLine('Whitespace bytes', countWhitespaceBytes, sumValues, buckets, 4, options))
@@ -436,11 +466,15 @@ def ByteStats(args, options):
     if options.sequence:
         print('')
         print('Position    Length Diff Bytes')
-        sequences = sorted(dDiffs.items(), cmp=lambda x, y: IFF(len(x[1]) == len(y[1]), cmp(y[0], x[0]), cmp(len(x[1]), len(y[1]))), reverse=True)
+        if options.keys:
+            sequences = sorted(dDiffs.items())
+        else:
+            sequences = sorted(dDiffs.items(), cmp=lambda x, y: IFF(len(x[1]) == len(y[1]), cmp(y[0], x[0]), cmp(len(x[1]), len(y[1]))), reverse=True)
         if not options.all:
             sequences = sequences[:10]
         for sequence in sequences:
-            print('0x%08x: %6d %4d 0x%s' % (sequence[0], len(sequence[1]), ByteSub(sequence[1][1], sequence[1][0]), TruncateString(binascii.hexlify(''.join([chr(c) for c in sequence[1]])), 40)))
+            if len(sequence[1]) >= options.filter:
+                print('0x%08x: %6d %4d 0x%s' % (sequence[0], len(sequence[1]), ByteSub(sequence[1][1], sequence[1][0]), TruncateString(binascii.hexlify(''.join([chr(c) for c in sequence[1]])), 40)))
 
 def Main():
     moredesc = '''
@@ -462,6 +496,7 @@ https://DidierStevens.com'''
     oParser.add_option('-p', '--property', default='e', help='Property to list: encwph')
     oParser.add_option('-a', '--all', action='store_true', default=False, help='Print all byte stats')
     oParser.add_option('-s', '--sequence', action='store_true', default=False, help='Detect simple sequences')
+    oParser.add_option('-f', '--filter', type=int, default=0, help='Minimum length of sequence for displaying (default 0)')
     (options, args) = oParser.parse_args()
 
     if options.man:
