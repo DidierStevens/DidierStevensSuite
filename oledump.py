@@ -2,8 +2,8 @@
 
 __description__ = 'Analyze OLE files (Compound Binary Files)'
 __author__ = 'Didier Stevens'
-__version__ = '0.0.19'
-__date__ = '2015/10/30'
+__version__ = '0.0.20'
+__date__ = '2015/11/09'
 
 """
 
@@ -55,6 +55,8 @@ History:
   2015/09/17: added help for pip install olefile
   2015/09/22: fixed os.path.isfile(filename) bug
   2015/10/30: 0.0.19 added option -E and environment variable OLEDUMP_EXTRA; added MD5 to option -i
+  2015/11/08: 0.0.20 added man text for option -E; changed OptionsEnvironmentVariables so option takes precedence over environment variable
+  2015/11/09: continued -E
 
 Todo:
 """
@@ -157,7 +159,7 @@ No checks are made to assure that the position specified by termA is lower than 
 Examples:
 This argument can be used to dump the first 256 bytes of a PE file located inside the stream: ['MZ']:0x100l
 This argument can be used to dump the OLE file located inside the stream: [d0cf11e0]:
-When this option is not used, the complete stream is selected. 
+When this option is not used, the complete stream is selected.
 
 When analyzing a Microsoft Office document with VBA macros, you will see output similar to this:
 
@@ -372,12 +374,56 @@ Properties DocumentSummaryInformation:
  hlinks_changed: False
  version: 730895
 
-Option -c calculates extra data per stream. This data is displayed per stream. For the moment, only the MD5 hash of the content of the stream is calculated.
+Option -c calculates extra data per stream. This data is displayed per stream. Only the MD5 hash of the content of the stream is calculated.
 Example:
 C:\Demo>oledump.py -c Book1.xls
   1:      4096 '\\x05DocumentSummaryInformation' ff1773dce227027d410b09f8f3224a56
   2:      4096 '\\x05SummaryInformation' b46068f38a3294ca9163442cb8271028
   3:      4096 'Workbook' d6a5bebba74fb1adf84c4ee66b2bf8dd
+
+If you need more data than the MD5 of each stream, use option -E (extra). This option takes a parameter describing the extra data that needs to be calculated and displayed for each stream. The following variables are defined:
+  %INDEX%: the index of the stream
+  %INDICATOR%: macro indicator
+  %LENGTH%': the length of the stream
+  %NAME%: the printable name of the stream
+  %MD5%: calculates MD5 hash
+  %SHA1%: calculates SHA1 hash
+  %SHA256%: calculates SHA256 hash
+  %ENTROPY%: calculates entropy
+  %HEADHEX%: display first 20 bytes of the stream as hexadecimal
+  %HEADASCII%: display first 20 bytes of the stream as ASCII
+  %TAILHEX%: display last 20 bytes of the stream as hexadecimal
+  %TAILASCII%: display last 20 bytes of the stream as ASCII
+  %HISTOGRAM%: calculates a histogram
+                 this is the prevalence of each byte value (0x00 through 0xFF)
+                 at least 3 numbers are displayed separated by a comma:
+                 number of values with a prevalence > 0
+                 minimum values with a prevalence > 0
+                 maximum values with a prevalence > 0
+                 each value with a prevalence > 0
+  %BYTESTATS%: calculates byte statistics
+                 byte statistics are 5 numbers separated by a comma:
+                 number of NULL bytes
+                 number of control bytes
+                 number of whitespace bytes
+                 number of printable bytes
+                 number of high bytes
+
+The parameter for -E may contain other text than the variables, which will be printed. Escape characters \\n and \\t are supported.
+Example displaying the MD5 and SHA256 hash per stream, separated by a space character:
+C:\Demo>oledump.py -E "%MD5% %SHA256%" Book1.xls
+  1:      4096 '\\x05DocumentSummaryInformation' ff1773dce227027d410b09f8f3224a56 2817c0fbe2931a562be17ed163775ea5e0b12aac203a095f51ffdbd5b27e7737
+  2:      4096 '\\x05SummaryInformation' b46068f38a3294ca9163442cb8271028 2c3009a215346ae5163d5776ead3102e49f6b5c4d29bd1201e9a32d3bfe52723
+  3:      4096 'Workbook' d6a5bebba74fb1adf84c4ee66b2bf8dd 82157e87a4e70920bf8975625f636d84101bbe8f07a998bc571eb8fa32d3a498
+
+If the extra parameter starts with !, then it replaces the complete output line (in stead of being appended to the output line).
+Example:
+C:\Demo>oledump.py -E "!%INDEX% %MD5%" Book1.xls
+1 ff1773dce227027d410b09f8f3224a56
+2 b46068f38a3294ca9163442cb8271028
+3 d6a5bebba74fb1adf84c4ee66b2bf8dd
+
+To include extra data with each use of oledump, define environment variable OLEDUMP_EXTRA with the parameter that should be passed to -E. When environment variable OLEDUMP_EXTRA is defined, option -E can be ommited. When option -E is used together with environment variable OLEDUMP_EXTRA, the parameter of option -E is used and the environment variable is ignored.
 
 Sometimes during the analysis of an OLE file, you might come across compressed data inside the stream. For example, an indicator of ZLIB compressed DATA is byte 0x78.
 Option --decompress instructs oledump to search for compressed data inside the selected stream, and then decompress it. If this fails, the original data is displayed.
@@ -970,7 +1016,7 @@ def ParseCutTerm(argument):
         return CUTTERM_NOTHING, None, ''
     oMatch = re.match(r'0x([0-9a-f]+)', argument, re.I)
     if oMatch == None:
-        oMatch = re.match(r'(\d+)', argument)    
+        oMatch = re.match(r'(\d+)', argument)
     else:
         return CUTTERM_POSITION, int(oMatch.group(1), 16), argument[len(oMatch.group(0)):]
     if oMatch == None:
@@ -1133,24 +1179,35 @@ def ExtraInfoBYTESTATS(data):
     sumValues, entropy, countNullByte, countControlBytes, countWhitespaceBytes, countPrintableBytes, countHighBytes = CalculateByteStatistics(dPrevalence)
     return '%d,%d,%d,%d,%d' % (countNullByte, countControlBytes, countWhitespaceBytes, countPrintableBytes, countHighBytes)
 
-def GenerateExtraInfo(extra, stream):
+def GenerateExtraInfo(extra, index, indicator, name, stream):
     if extra == '':
         return ''
-    dExtras = {'%MD5%': ExtraInfoMD5,
-    	         '%SHA1%': ExtraInfoSHA1,
-    	         '%SHA256%': ExtraInfoSHA256,
-    	         '%ENTROPY%': ExtraInfoENTROPY,
-    	         '%HEADHEX%': ExtraInfoHEADHEX,
-    	         '%HEADASCII%': ExtraInfoHEADASCII,
-    	         '%TAILHEX%': ExtraInfoTAILHEX,
-    	         '%TAILASCII%': ExtraInfoTAILASCII,
-    	         '%HISTOGRAM%': ExtraInfoHISTOGRAM,
-    	         '%BYTESTATS%': ExtraInfoBYTESTATS,
-    	        }
+    if extra.startswith('!'):
+        extra = extra[1:]
+        prefix = ''
+    else:
+        prefix = ' '
+    if indicator == ' ':
+        indicator = ''
+    dExtras = {'%INDEX%': lambda x: index,
+               '%INDICATOR%': lambda x: indicator,
+               '%LENGTH%': lambda x: '%d' % len(stream),
+               '%NAME%': lambda x: name,
+               '%MD5%': ExtraInfoMD5,
+               '%SHA1%': ExtraInfoSHA1,
+               '%SHA256%': ExtraInfoSHA256,
+               '%ENTROPY%': ExtraInfoENTROPY,
+               '%HEADHEX%': ExtraInfoHEADHEX,
+               '%HEADASCII%': ExtraInfoHEADASCII,
+               '%TAILHEX%': ExtraInfoTAILHEX,
+               '%TAILASCII%': ExtraInfoTAILASCII,
+               '%HISTOGRAM%': ExtraInfoHISTOGRAM,
+               '%BYTESTATS%': ExtraInfoBYTESTATS,
+              }
     for variable in dExtras:
         if variable in extra:
             extra = extra.replace(variable, dExtras[variable](stream))
-    return ' ' + extra.replace(r'\t', '\t').replace(r'\n', '\n')
+    return prefix + extra.replace(r'\t', '\t').replace(r'\n', '\n')
 
 def OLESub(ole, prefix, rules, options):
     global plugins
@@ -1184,12 +1241,12 @@ def OLESub(ole, prefix, rules, options):
             stream = None
             indicator = ' '
             macroPresent = False
-            lenghString = '      '
+            lengthString = '      '
             if ole.get_type(fname) == 1:
                 indicator = '.'
             elif ole.get_type(fname) == 2:
                 stream = ole.openstream(fname).read()
-                lenghString = '%7d' % len(stream)
+                lengthString = '%7d' % len(stream)
                 macroPresent = FindCompression(stream) != -1
                 if macroPresent:
                     returnCode = 2
@@ -1200,10 +1257,13 @@ def OLESub(ole, prefix, rules, options):
                         if MacrosContainsOnlyAttributesOrOptions(stream):
                             indicator = 'm'
             if not options.quiet:
-                line = '%3s: %s %s %s' % (('%s%d' % (prefix, counter)), indicator, lenghString, PrintableName(fname))
+                index = '%s%d' % (prefix, counter)
+                line = '%3s: %s %s %s' % (index, indicator, lengthString, PrintableName(fname))
                 if options.calc:
                     line += ' %s' % hashlib.md5(stream).hexdigest()
-                line += GenerateExtraInfo(options.extra, stream)
+                if options.extra.startswith('!'):
+                    line = ''
+                line += GenerateExtraInfo(options.extra, index, indicator, PrintableName(fname), stream)
                 print(line)
             for cPlugin in plugins:
                 try:
@@ -1432,7 +1492,8 @@ def OLEDump(filename, options):
     return returnCode
 
 def OptionsEnvironmentVariables(options):
-    options.extra = os.getenv('OLEDUMP_EXTRA', options.extra)
+    if options.extra == '':
+        options.extra = os.getenv('OLEDUMP_EXTRA', options.extra)
 
 def Main():
     oParser = optparse.OptionParser(usage='usage: %prog [options] [file]\n' + __description__, version='%prog ' + __version__)
