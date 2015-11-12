@@ -2,8 +2,8 @@
 
 __description__ = 'EML dump utility'
 __author__ = 'Didier Stevens'
-__version__ = '0.0.3'
-__date__ = '2015/09/21'
+__version__ = '0.0.4'
+__date__ = '2015/11/09'
 
 """
 
@@ -20,6 +20,8 @@ History:
   2015/09/12: added option -c
   2015/09/14: added option -m
   2015/09/21: reviewed man
+  2015/11/08: 0.0.4 added option -E and environment variable EMLDUMP_EXTRA
+  2015/11/09: continue -E
 
 Todo:
 """
@@ -34,6 +36,8 @@ import zipfile
 import re
 import binascii
 import textwrap
+import string
+import math
 try:
     import yara
 except:
@@ -159,6 +163,50 @@ Examples:
 This argument can be used to dump the first 256 bytes of a PE file located inside the stream: ['MZ']:0x100l
 This argument can be used to dump the OLE file located inside the stream: [d0cf11e0]:
 When this option is not used, the complete stream is selected. 
+
+Option -E (extra) calculates extra information. This option takes a parameter describing the extra data that needs to be calculated and displayed for each part. The following variables are defined:
+  %INDEX%: the index of the part
+  %INDICATOR%: Multipart indicator
+  %LENGTH%': the length of the part
+  %TYPE%: the type of the part
+  %MD5%: calculates MD5 hash
+  %SHA1%: calculates SHA1 hash
+  %SHA256%: calculates SHA256 hash
+  %ENTROPY%: calculates entropy
+  %HEADHEX%: display first 20 bytes of the part as hexadecimal
+  %HEADASCII%: display first 20 bytes of the part as ASCII
+  %TAILHEX%: display last 20 bytes of the part as hexadecimal
+  %TAILASCII%: display last 20 bytes of the part as ASCII
+  %HISTOGRAM%: calculates a histogram
+                 this is the prevalence of each byte value (0x00 trough 0xFF)
+                 at least 3 numbers are displayed separated by a comma:
+                 number of values with a prevalence > 0
+                 minimum values with a prevalence > 0
+                 maximum values with a prevalence > 0
+                 each value with a prevalence > 0
+  %BYTESTATS%: calculates byte statistics
+                 byte statistics are 5 numbers separated by a comma:
+                 number of NULL bytes
+                 number of control bytes
+                 number of whitespace bytes
+                 number of printable bytes
+                 number of high bytes
+
+The parameter for -E may contain other text than the variables, which will be printed. Escape characters \\n and \\t are supported.
+Example displaying the MD5 and SHA256 hash per part, separated by a space character:
+emldump.py -E "%MD5% %SHA256%" example.eml
+1: M         multipart/mixed 
+2:        32 text/plain  989a168dcc073b3365269f1173a8edb0 d181b815ced40f1bb5738483fec79cb11347c6f4212a45d917ad13ab5d386809
+3:    114704 application/octet-stream  4a8ed6be91d63104f91626ef8db30fe3 1a15d8f44b6549c8b49d067e8793d38628348fffeaab17685d40e3dfa890e442
+
+If the extra parameter starts with !, then it replaces the complete output line (in stead of being appended to the output line).
+Example:
+emldump.py -E "!%INDEX% %MD5%" example.eml
+1
+2 989a168dcc073b3365269f1173a8edb0
+3 4a8ed6be91d63104f91626ef8db30fe3
+
+To include extra data with each use of emldump, define environment variable EMLDUMP_EXTRA with the parameter that should be passed to -E. When environment variable EMLDUMP_EXTRA is defined, option -E can be ommited. When option -E is used together with environment variable EMLDUMP_EXTRA, the parameter of option -E is used and the environment variable is ignored.
 '''
     for line in manual.split('\n'):
         print(textwrap.fill(line, 78))
@@ -423,6 +471,138 @@ def CutData(stream, cutArgument):
 
     return stream[positionBegin:positionEnd]
 
+def ExtraInfoMD5(data):
+    if data == None:
+        return ''
+    return hashlib.md5(data).hexdigest()
+
+def ExtraInfoSHA1(data):
+    if data == None:
+        return ''
+    return hashlib.sha1(data).hexdigest()
+
+def ExtraInfoSHA256(data):
+    if data == None:
+        return ''
+    return hashlib.sha256(data).hexdigest()
+
+def CalculateByteStatistics(dPrevalence):
+    sumValues = sum(dPrevalence.values())
+    countNullByte = dPrevalence[0]
+    countControlBytes = 0
+    countWhitespaceBytes = 0
+    for iter in range(1, 0x21):
+        if chr(iter) in string.whitespace:
+            countWhitespaceBytes += dPrevalence[iter]
+        else:
+            countControlBytes += dPrevalence[iter]
+    countControlBytes += dPrevalence[0x7F]
+    countPrintableBytes = 0
+    for iter in range(0x21, 0x7F):
+        countPrintableBytes += dPrevalence[iter]
+    countHighBytes = 0
+    for iter in range(0x80, 0x100):
+        countHighBytes += dPrevalence[iter]
+    entropy = 0.0
+    for iter in range(0x100):
+        if dPrevalence[iter] > 0:
+            prevalence = float(dPrevalence[iter]) / float(sumValues)
+            entropy += - prevalence * math.log(prevalence, 2)
+    return sumValues, entropy, countNullByte, countControlBytes, countWhitespaceBytes, countPrintableBytes, countHighBytes
+
+def ExtraInfoENTROPY(data):
+    if data == None:
+        return ''
+    dPrevalence = {iter: 0 for iter in range(0x100)}
+    for char in data:
+        dPrevalence[ord(char)] += 1
+    sumValues, entropy, countNullByte, countControlBytes, countWhitespaceBytes, countPrintableBytes, countHighBytes = CalculateByteStatistics(dPrevalence)
+    return '%f' % entropy
+
+def ExtraInfoHEADHEX(data):
+    if data == None:
+        return ''
+    return binascii.hexlify(data[:16])
+
+def ExtraInfoHEADASCII(data):
+    if data == None:
+        return ''
+    return ''.join([IFF(ord(b) >= 32, b, '.') for b in data[:16]])
+
+def ExtraInfoTAILHEX(data):
+    if data == None:
+        return ''
+    return binascii.hexlify(data[-16:])
+
+def ExtraInfoTAILASCII(data):
+    if data == None:
+        return ''
+    return ''.join([IFF(ord(b) >= 32, b, '.') for b in data[-16:]])
+
+def ExtraInfoHISTOGRAM(data):
+    if data == None:
+        return ''
+    dPrevalence = {iter: 0 for iter in range(0x100)}
+    for char in data:
+        dPrevalence[ord(char)] += 1
+    result = []
+    count = 0
+    minimum = None
+    maximum = None
+    for iter in range(0x100):
+        if dPrevalence[iter] > 0:
+            result.append('0x%02x:%d' % (iter, dPrevalence[iter]))
+            count += 1
+            if minimum == None:
+                minimum = iter
+            else:
+                minimum = min(minimum, iter)
+            if maximum == None:
+                maximum = iter
+            else:
+                maximum = max(maximum, iter)
+    result.insert(0, '%d' % count)
+    result.insert(1, IFF(minimum == None, '', '0x%02x' % minimum))
+    result.insert(2, IFF(maximum == None, '', '0x%02x' % maximum))
+    return ','.join(result)
+
+def ExtraInfoBYTESTATS(data):
+    if data == None:
+        return ''
+    dPrevalence = {iter: 0 for iter in range(0x100)}
+    for char in data:
+        dPrevalence[ord(char)] += 1
+    sumValues, entropy, countNullByte, countControlBytes, countWhitespaceBytes, countPrintableBytes, countHighBytes = CalculateByteStatistics(dPrevalence)
+    return '%d,%d,%d,%d,%d' % (countNullByte, countControlBytes, countWhitespaceBytes, countPrintableBytes, countHighBytes)
+
+def GenerateExtraInfo(extra, index, indicator, type, stream):
+    if extra == '':
+        return ''
+    if extra.startswith('!'):
+        extra = extra[1:]
+        prefix = ''
+    else:
+        prefix = ' '
+    dExtras = {'%INDEX%': lambda x: '%d' % index,
+               '%INDICATOR%': lambda x: indicator,
+               '%LENGTH%': lambda x: IFF(stream == None, '', lambda: '%d' % len(stream)),
+               '%TYPE%': lambda x: type,
+               '%MD5%': ExtraInfoMD5,
+               '%SHA1%': ExtraInfoSHA1,
+               '%SHA256%': ExtraInfoSHA256,
+               '%ENTROPY%': ExtraInfoENTROPY,
+               '%HEADHEX%': ExtraInfoHEADHEX,
+               '%HEADASCII%': ExtraInfoHEADASCII,
+               '%TAILHEX%': ExtraInfoTAILHEX,
+               '%TAILASCII%': ExtraInfoTAILASCII,
+               '%HISTOGRAM%': ExtraInfoHISTOGRAM,
+               '%BYTESTATS%': ExtraInfoBYTESTATS,
+              }
+    for variable in dExtras:
+        if variable in extra:
+            extra = extra.replace(variable, dExtras[variable](stream))
+    return prefix + extra.replace(r'\t', '\t').replace(r'\n', '\n')
+
 def EMLDump(emlfilename, options):
     FixPipe()
     if emlfilename == '':
@@ -462,7 +642,12 @@ def EMLDump(emlfilename, options):
                     lengthString = '       '
                 else:
                     lengthString = '%7d' % len(data)
-                print('%d: %s %s %s' % (counter, IFF(oPart.is_multipart(), 'M', ' '), lengthString, oPart.get_content_type()))
+                extrainfo = GenerateExtraInfo(options.extra, counter, IFF(oPart.is_multipart(), 'M', ''), oPart.get_content_type(), data)
+                line = '%d: %s %s %s' % (counter, IFF(oPart.is_multipart(), 'M', ' '), lengthString, oPart.get_content_type())
+                if options.extra.startswith('!'):
+                    line = ''
+                line += extrainfo
+                print(line)
                 counter += 1
         else:
             counter = 1
@@ -512,6 +697,10 @@ def EMLDump(emlfilename, options):
                 break
             counter += 1
 
+def OptionsEnvironmentVariables(options):
+    if options.extra == '':
+        options.extra = os.getenv('EMLDUMP_EXTRA', options.extra)
+
 def Main():
     oParser = optparse.OptionParser(usage='usage: %prog [options] [mimefile]\n' + __description__, version='%prog ' + __version__)
     oParser.add_option('-m', '--man', action='store_true', default=False, help='Print manual')
@@ -526,6 +715,7 @@ def Main():
     oParser.add_option('--decoderoptions', type=str, default='', help='options for the decoder')
     oParser.add_option('-v', '--verbose', action='store_true', default=False, help='verbose output with decoder errors')
     oParser.add_option('-c', '--cut', type=str, default='', help='cut data')
+    oParser.add_option('-E', '--extra', type=str, default='', help='add extra info (environment variable: EMLDUMP_EXTRA)')
     (options, args) = oParser.parse_args()
 
     if options.man:
@@ -536,6 +726,8 @@ def Main():
     if ParseCutArgument(options.cut)[0] == None:
         print('Error: the expression of the cut option (-c) is invalid: %s' % options.cut)
         return 0
+
+    OptionsEnvironmentVariables(options)
 
     if len(args) > 1:
         oParser.print_help()
