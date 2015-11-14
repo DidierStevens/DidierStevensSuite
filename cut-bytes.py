@@ -2,8 +2,8 @@
 
 __description__ = 'Cut a section of bytes out of a file'
 __author__ = 'Didier Stevens'
-__version__ = '0.0.1'
-__date__ = '2015/09/13'
+__version__ = '0.0.2'
+__date__ = '2015/11/10'
 
 """
 
@@ -13,6 +13,7 @@ Use at your own risk
 
 History:
   2015/09/13: start
+  2015/11/10: 0.0.2 added support for :-number
 
 Todo:
 """
@@ -23,6 +24,7 @@ import re
 import cStringIO
 import sys
 import os
+import zipfile
 
 MALWARE_PASSWORD = 'infected'
 
@@ -38,7 +40,7 @@ This cut-expression is composed of 2 terms separated by a colon (:), like this:
 termA:termB
 termA and termB can be:
 - nothing (an empty string)
-- a positive number; example: 10
+- a positive decimal number; example: 10
 - an hexadecimal number (to be preceded by 0x); example: 0x10
 - a case sensitive string to search for (surrounded by square brackets and single quotes); example: ['MZ']
 - an hexadecimal string to search for (surrounded by square brackets); example: [d0cf11e0]
@@ -48,6 +50,7 @@ If termA is a string to search for, then the cut section of bytes starts with th
 If termB is nothing, then the cut section of bytes ends with the last byte.
 If termB is a number, then the cut section of bytes ends with the byte at the position given by the number (first byte has index 0).
 When termB is a number, it can have suffix letter l. This indicates that the number is a length (number of bytes), and not a position.
+termB can also be a negative number (decimal or hexademical): in that case the position is counted from the end of the file. For example, :-5 selects the complete file except the last 5 bytes.
 If termB is a string to search for, then the cut section of bytes ends with the last byte at the position where the string is first found. If the string is not found, the cut is empty (0 bytes).
 No checks are made to assure that the position specified by termA is lower than the position specified by termB. This is left up to the user.
 Examples:
@@ -77,15 +80,21 @@ CUTTERM_LENGTH = 3
 def ParseCutTerm(argument):
     if argument == '':
         return CUTTERM_NOTHING, None, ''
-    oMatch = re.match(r'0x([0-9a-f]+)', argument, re.I)
+    oMatch = re.match(r'\-?0x([0-9a-f]+)', argument, re.I)
     if oMatch == None:
-        oMatch = re.match(r'(\d+)', argument)
+        oMatch = re.match(r'\-?(\d+)', argument)
     else:
-        return CUTTERM_POSITION, int(oMatch.group(1), 16), argument[len(oMatch.group(0)):]
+        value = int(oMatch.group(1), 16)
+        if argument.startswith('-'):
+            value = -value
+        return CUTTERM_POSITION, value, argument[len(oMatch.group(0)):]
     if oMatch == None:
         oMatch = re.match(r'\[([0-9a-f]+)\]', argument, re.I)
     else:
-        return CUTTERM_POSITION, int(oMatch.group(1)), argument[len(oMatch.group(0)):]
+        value = int(oMatch.group(1))
+        if argument.startswith('-'):
+            value = -value
+        return CUTTERM_POSITION, value, argument[len(oMatch.group(0)):]
     if oMatch == None:
         oMatch = re.match(r"\[\'(.+)\'\]", argument)
     else:
@@ -112,6 +121,8 @@ def ParseCutArgument(argument):
     else:
         typeLeft = type
         valueLeft = value
+        if typeLeft == CUTTERM_POSITION and valueLeft < 0:
+            return None, None, None, None
         if remainder.startswith(':'):
             remainder = remainder[1:]
         else:
@@ -144,6 +155,8 @@ def CutData(stream, cutArgument):
 
     if typeRight == CUTTERM_NOTHING:
         positionEnd = len(stream)
+    elif typeRight == CUTTERM_POSITION and valueRight < 0:
+        positionEnd = len(stream) + valueRight
     elif typeRight == CUTTERM_POSITION:
         positionEnd = valueRight + 1
     elif typeRight == CUTTERM_LENGTH:

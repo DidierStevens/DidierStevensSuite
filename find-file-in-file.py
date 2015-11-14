@@ -2,8 +2,8 @@
 
 __description__ = 'Find if a file is present in another file'
 __author__ = 'Didier Stevens'
-__version__ = '0.0.4'
-__date__ = '2014/11/25'
+__version__ = '0.0.5'
+__date__ = '2015/09/17'
 
 """
 
@@ -21,6 +21,7 @@ History:
   2014/06/11: added options partial, output, range, hexdump
   2014/06/13: added option quiet
   2014/11/25: changed help string for options; added manual
+  2015/09/17: 0.0.5 added indicator (End of containing file)
 
 Todo:
   cOutput: close on dispose
@@ -71,6 +72,17 @@ The containing file may contain the contained file in an arbitrary order, like f
 Example:
 find-file-in-file.py -x contained-1.txt containing-2.txt
 0x00000015 0x0000000d (50%)
+ 41 42 43 44 45 46 47 48 49 4a 4b 4c 4d
+0x00000004 0x0000000d (50%)
+ 4e 4f 50 51 52 53 54 55 56 57 58 59 5a
+Finished
+
+If a part of the contained file is found at the end of the containing file then indicator (End of containing file) is used, like file containing-4.txt:
+0000NOPQRSTUVWXYZ1111ABCDEFGHIJKLM
+
+Example:
+find-file-in-file.py -x contained-1.txt containing-4.txt
+0x00000015 0x0000000d (50%) (End of containing file)
  41 42 43 44 45 46 47 48 49 4a 4b 4c 4d
 0x00000004 0x0000000d (50%)
  4e 4f 50 51 52 53 54 55 56 57 58 59 5a
@@ -266,7 +278,11 @@ def Scan(fileContaining, contained, containing, singleMode, partial, options):
         if printFilename and not options.verbose:
             oOutput.Print('File: %s%s' % (fileContaining, IFF(partial != 0, ' (partial 0x%02x)' % partial, '')))
             printFilename = False
-        oOutput.Print('0x%08x 0x%08x (%d%%)' % (index, length, length * 100.0 / len(contained)))
+        if len(containing[index + length:]) == 0:
+            eofMessage = ' (End of containing file)'
+        else:
+            eofMessage = ''
+        oOutput.Print('0x%08x 0x%08x (%d%%)%s' % (index, length, length * 100.0 / len(contained), eofMessage))
         if options.hexdump:
             Hexdump(remaining, length, oOutput)
         if not options.overlap:
