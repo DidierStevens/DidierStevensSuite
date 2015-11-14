@@ -3,7 +3,7 @@
 __description__ = 'Find if a file is present in another file'
 __author__ = 'Didier Stevens'
 __version__ = '0.0.5'
-__date__ = '2015/09/17'
+__date__ = '2015/11/14'
 
 """
 
@@ -22,6 +22,7 @@ History:
   2014/06/13: added option quiet
   2014/11/25: changed help string for options; added manual
   2015/09/17: 0.0.5 added indicator (End of containing file)
+  2015/11/14: bugfix File2StringZIP and added option -r
 
 Todo:
   cOutput: close on dispose
@@ -138,6 +139,7 @@ There are some other options:
 -O output: besides writing output to stdout, write the output also to the given file.
 -q quiet: do not output to stdout.
 
+If the contained and/or containing files are ZIP files containing a single file, then the single file is extracted from the ZIP files and analyzed. To analyze the ZIP file and not the file inside the ZIP file, use option -r: regular; consider the ZIP file as a regular file.
 '''
     for line in manual.split('\n'):
         print(textwrap.fill(line))
@@ -149,11 +151,18 @@ def C2BIP3(string):
     else:
         return string
 
-def File2StringZIP(filename):
-    if filename.lower().endswith('.zip'):
+def File2StringZIP(filename, regular=False):
+    f = None
+    oZipfile = None
+    if not regular and filename.lower().endswith('.zip'):
         oZipfile = zipfile.ZipFile(filename, 'r')
-        f = oZipfile.open(oZipfile.infolist()[0], 'r', C2BIP3(MALWARE_PASSWORD))
-    else:
+        if len(oZipfile.infolist()) == 1:
+            f = oZipfile.open(oZipfile.infolist()[0], 'r', C2BIP3(MALWARE_PASSWORD))
+        else:
+            f = None
+            oZipfile.close()
+            oZipfile = None
+    if f == None:
         try:
             f = open(filename, 'rb')
         except:
@@ -164,6 +173,8 @@ def File2StringZIP(filename):
         return None
     finally:
         f.close()
+        if oZipfile != None:
+            oZipfile.close()
 
 def File2Strings(filename):
     try:
@@ -304,7 +315,7 @@ def FindFileInFile(fileContained, filesContaining, options):
     if options.minimum < 1:
         oOutput.Print('Option m is too small')
         return
-    containedAll = File2StringZIP(fileContained)
+    containedAll = File2StringZIP(fileContained, options.regular)
     if containedAll == None:
         oOutput.Print('Error reading file %s' % fileContained)
         return
@@ -320,7 +331,7 @@ def FindFileInFile(fileContained, filesContaining, options):
     containedRange = containedAll[rangebegin:rangeend]
 
     for fileContaining in filesContaining:
-        containing = File2StringZIP(fileContaining)
+        containing = File2StringZIP(fileContaining, options.regular)
         if containing == None:
             if singleMode or options.verbose:
                 oOutput.Print('Error reading file %s' % fileContaining)
@@ -360,6 +371,7 @@ Use at your own risk
 https://DidierStevens.com'''
 
     oParser = optparse.OptionParser(usage='usage: %prog [options] file-contained file-containing [...]\n' + __description__ + moredesc, version='%prog ' + __version__)
+    oParser.add_option('--man', action='store_true', default=False, help='Print manual')
     oParser.add_option('-m', '--minimum', type=int, default=10, help='Minimum length of byte-sequence to find (default 10)')
     oParser.add_option('-o', '--overlap', action='store_true', default=False, help='Found sequences may overlap')
     oParser.add_option('-v', '--verbose', action='store_true', default=False, help='Be verbose in batch mode')
@@ -369,7 +381,7 @@ https://DidierStevens.com'''
     oParser.add_option('-e', '--rangeend', type=int, default=-1, help='Select the end of the contained file (by default last byte)')
     oParser.add_option('-x', '--hexdump', action='store_true', default=False, help='Hexdump of found bytes')
     oParser.add_option('-q', '--quiet', action='store_true', default=False, help='Do not output to standard output')
-    oParser.add_option('--man', action='store_true', default=False, help='Print manual')
+    oParser.add_option('-r', '--regular', action='store_true', default=False, help='Handle a ZIP file like a regular (non-ZIP) file')
     (options, args) = oParser.parse_args()
 
     if options.man:
