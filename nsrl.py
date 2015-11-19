@@ -2,8 +2,8 @@
 
 __description__ = 'NSRL tool'
 __author__ = 'Didier Stevens'
-__version__ = '0.0.1'
-__date__ = '2015/08/31'
+__version__ = '0.0.2'
+__date__ = '2015/09/03'
 
 """
 
@@ -16,6 +16,8 @@ History:
   2015/08/16: added .zip file support
   2015/08/29: continue
   2015/08/31: added man
+  2015/09/02: added ApplicationType
+  2015/09/03: added FindNSRLFile
 
 Todo:
 """
@@ -85,14 +87,28 @@ def File2Strings(filename):
     finally:
         f.close()
 
+def LoadProducts(fIn):
+    dProducts = {}
+    header = None
+    reader = csv.reader(fIn, delimiter=',', skipinitialspace=True)
+    for row in reader:
+        if header == None:
+            header = row
+        else:
+            dProducts[row[0]] = row[6]
+    fIn.close()
+    return dProducts
+
 def HashSub(filenameHashes, filenameNSRL, options):
     dHashes = {}
+    dProducts = {}
     for hash1 in File2Strings(filenameHashes):
         dHashes[hash1.strip().lower()] = False
     header = None
     if os.path.splitext(filenameNSRL)[1].lower() == '.zip':
         oZipfile = zipfile.ZipFile(filenameNSRL, 'r')
         fIn = oZipfile.open('NSRLFile.txt', 'r')
+        dProducts = LoadProducts(oZipfile.open('NSRLProd.txt', 'r'))
         oZipfile.close()
     elif os.path.splitext(filenameNSRL)[1].lower() == '.gz':
         fIn = gzip.GzipFile(filenameNSRL, 'rb')
@@ -108,22 +124,32 @@ def HashSub(filenameHashes, filenameNSRL, options):
                 print('Hash %s not found in header:' % options.hash.upper())
                 print(header)
                 return
+            headers = [header[indexHash]] + header[3:] + ['ApplicationType']
             if options.output:
-                oCSVLogger = cCSVLogger(options.output, [header[indexHash]] + header[3:], options.quiet, options.separator, True)
+                oCSVLogger = cCSVLogger(options.output, headers, options.quiet, options.separator, True)
             else:
-                oCSVLogger = cCSVLogger(os.path.splitext(filenameHashes)[0], [header[indexHash]] + header[3:], options.quiet, options.separator)
+                oCSVLogger = cCSVLogger(os.path.splitext(filenameHashes)[0], headers, options.quiet, options.separator)
         else:
             hash2 = row[indexHash].lower()
             if hash2 in dHashes:
                 if not options.notfoundonly:
                     if options.allfinds or not dHashes[hash2]:
-                        oCSVLogger.PrintAndLog([hash2] + row[3:])
+                        oCSVLogger.PrintAndLog([hash2] + row[3:] + [dProducts.get(row[5], '')])
                 dHashes[hash2] = True
     fIn.close()
     if not options.foundonly:
         for key in sorted(dHashes.keys()):
             if not dHashes[key]:
-                oCSVLogger.PrintAndLog([key, '', '', '', '', ''])
+                oCSVLogger.PrintAndLog([key, '', '', '', '', '', ''])
+
+def FindNSRLFile():
+    fileZIP = os.path.join(os.path.dirname(sys.argv[0]), 'rds.zip')
+    if os.path.isfile(fileZIP):
+        return fileZIP
+    fileGZ = os.path.join(os.path.dirname(sys.argv[0]), 'NSRLFile.txt.gz')
+    if os.path.isfile(fileGZ):
+        return fileGZ
+    return os.path.join(os.path.dirname(sys.argv[0]), 'NSRLFile.txt')
 
 def Main():
     oParser = optparse.OptionParser(usage='usage: %prog [options] filemd5 [NSRL-file]\n' + __description__, version='%prog ' + __version__)
@@ -152,7 +178,7 @@ def Main():
     elif len(args) == 2:
         HashSub(args[0], args[1], options)
     else:
-        HashSub(args[0], os.path.join(os.path.dirname(sys.argv[0]), 'NSRLFile.txt.gz'), options)
+        HashSub(args[0], FindNSRLFile(), options)
 
 if __name__ == '__main__':
     Main()
