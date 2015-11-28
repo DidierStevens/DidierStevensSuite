@@ -2,8 +2,8 @@
 
 __description__ = 'Program to search VirusTotal reports with search terms (MD5, SHA1, SHA256) found in the argument file'
 __author__ = 'Didier Stevens'
-__version__ = '0.1.2'
-__date__ = '2015/04/23'
+__version__ = '0.1.3'
+__date__ = '2015/08/11'
 
 """
 
@@ -36,6 +36,7 @@ History:
   2015/01/19: added option -w
   2015/01/26: added option -R
   2015/04/23: 0.1.2 added CVE (thanks Pieter-Jan Moreels)
+  2015/08/11: 0.1.3 added option -s
 
 Todo:
 """
@@ -371,9 +372,9 @@ def VirusTotalRefresh(options):
 
     headers = ('Search Term', 'Requested', 'Response', 'Scan Date', 'Detections', 'Total', 'Permalink', 'AVs', 'CVEs')
     if options.output:
-        oLogger = CSVLogger(options.output, headers, prefixIsFullName=True)
+        oLogger = CSVLogger(options.output, headers, separator=options.separator, prefixIsFullName=True)
     else:
-        oLogger = CSVLogger('virustotal-search', headers)
+        oLogger = CSVLogger('virustotal-search', headers, separator=options.separator)
 
     reports = DeSerializeDictionary(GetPickleFile(options.globaldb))
     if reports == None:
@@ -414,9 +415,9 @@ def VirusTotalSearch(filename, options):
     if options.comment:
         headers = InsertIntoTuple(headers, 1, 'Comment')
     if options.output:
-        oLogger = CSVLogger(options.output, headers, prefixIsFullName=True)
+        oLogger = CSVLogger(options.output, headers, separator=options.separator, prefixIsFullName=True)
     else:
-        oLogger = CSVLogger('virustotal-search', headers)
+        oLogger = CSVLogger('virustotal-search', headers, separator=options.separator)
 
     reports = DeSerializeDictionary(GetPickleFile(options.globaldb))
     if reports == None:
@@ -483,6 +484,7 @@ def Main():
     oParser.add_option('-n', '--notfound', default='', help='File to keep track and skip not found searches')
     oParser.add_option('-i', '--noupdate', action='store_true', default=False, help='do not update the database') # i = immutable
     oParser.add_option('-w', '--waitquota', action='store_true', default=False, help='wait 1 hour when quota exceeded')
+    oParser.add_option('-s', '--separator', default=';', help='Separator character (default ;)')
     (options, args) = oParser.parse_args()
 
     if not (len(args) == 1 or (options.refresh or options.refreshrandom) and len(args) == 0):
