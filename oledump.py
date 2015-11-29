@@ -2,7 +2,7 @@
 
 __description__ = 'Analyze OLE files (Compound Binary Files)'
 __author__ = 'Didier Stevens'
-__version__ = '0.0.20'
+__version__ = '0.0.21'
 __date__ = '2015/11/09'
 
 """
@@ -57,6 +57,8 @@ History:
   2015/10/30: 0.0.19 added option -E and environment variable OLEDUMP_EXTRA; added MD5 to option -i
   2015/11/08: 0.0.20 added man text for option -E; changed OptionsEnvironmentVariables so option takes precedence over environment variable
   2015/11/09: continued -E
+  2015/11/12: 0.0.21 added dslsimulationdb
+  2015/11/17: added support for :-number in --cut option
 
 Todo:
 """
@@ -74,6 +76,11 @@ import hashlib
 import textwrap
 import re
 import string
+
+try:
+    import dslsimulationdb
+except:
+    dslsimulationdb = None
 
 try:
     import yara
@@ -144,7 +151,7 @@ The --cut option takes an argument to specify which section of bytes to select f
 termA:termB
 termA and termB can be:
 - nothing (an empty string)
-- a positive number; example: 10
+- a positive decimal number; example: 10
 - an hexadecimal number (to be preceded by 0x); example: 0x10
 - a case sensitive string to search for (surrounded by square brackets and single quotes); example: ['MZ']
 - an hexadecimal string to search for (surrounded by square brackets); example: [d0cf11e0]
@@ -154,6 +161,7 @@ If termA is a string to search for, then the cut section of bytes starts with th
 If termB is nothing, then the cut section of bytes ends with the last byte.
 If termB is a number, then the cut section of bytes ends with the byte at the position given by the number (first byte has index 0).
 When termB is a number, it can have suffix letter l. This indicates that the number is a length (number of bytes), and not a position.
+termB can also be a negative number (decimal or hexademical): in that case the position is counted from the end of the file. For example, :-5 selects the complete file except the last 5 bytes.
 If termB is a string to search for, then the cut section of bytes ends with the last byte at the position where the string is first found. If the string is not found, the cut is empty (0 bytes).
 No checks are made to assure that the position specified by termA is lower than the position specified by termB. This is left up to the user.
 Examples:
@@ -1014,15 +1022,21 @@ CUTTERM_LENGTH = 3
 def ParseCutTerm(argument):
     if argument == '':
         return CUTTERM_NOTHING, None, ''
-    oMatch = re.match(r'0x([0-9a-f]+)', argument, re.I)
+    oMatch = re.match(r'\-?0x([0-9a-f]+)', argument, re.I)
     if oMatch == None:
-        oMatch = re.match(r'(\d+)', argument)
+        oMatch = re.match(r'\-?(\d+)', argument)
     else:
-        return CUTTERM_POSITION, int(oMatch.group(1), 16), argument[len(oMatch.group(0)):]
+        value = int(oMatch.group(1), 16)
+        if argument.startswith('-'):
+            value = -value
+        return CUTTERM_POSITION, value, argument[len(oMatch.group(0)):]
     if oMatch == None:
         oMatch = re.match(r'\[([0-9a-f]+)\]', argument, re.I)
     else:
-        return CUTTERM_POSITION, int(oMatch.group(1)), argument[len(oMatch.group(0)):]
+        value = int(oMatch.group(1))
+        if argument.startswith('-'):
+            value = -value
+        return CUTTERM_POSITION, value, argument[len(oMatch.group(0)):]
     if oMatch == None:
         oMatch = re.match(r"\[\'(.+)\'\]", argument)
     else:
@@ -1049,6 +1063,8 @@ def ParseCutArgument(argument):
     else:
         typeLeft = type
         valueLeft = value
+        if typeLeft == CUTTERM_POSITION and valueLeft < 0:
+            return None, None, None, None
         if remainder.startswith(':'):
             remainder = remainder[1:]
         else:
@@ -1081,6 +1097,8 @@ def CutData(stream, cutArgument):
 
     if typeRight == CUTTERM_NOTHING:
         positionEnd = len(stream)
+    elif typeRight == CUTTERM_POSITION and valueRight < 0:
+        positionEnd = len(stream) + valueRight
     elif typeRight == CUTTERM_POSITION:
         positionEnd = valueRight + 1
     elif typeRight == CUTTERM_LENGTH:
@@ -1093,7 +1111,6 @@ def CutData(stream, cutArgument):
             positionEnd += len(valueRight)
 
     return stream[positionBegin:positionEnd]
-
 
 def ExtraInfoMD5(data):
     return hashlib.md5(data).hexdigest()
@@ -1358,10 +1375,15 @@ def YARACompile(fileordirname):
             dFilepaths[filename] = filename
     return yara.compile(filepaths=dFilepaths)
 
+def FilenameInSimulations(filename):
+    if dslsimulationdb == None:
+        return False
+    return filename in dslsimulationdb.dSimulations
+
 def OLEDump(filename, options):
     returnCode = 0
 
-    if filename != '' and not os.path.isfile(filename):
+    if filename != '' and not FilenameInSimulations(filename) and not os.path.isfile(filename):
         print('Error: %s is not a file.' % filename)
         return returnCode
 
@@ -1417,6 +1439,15 @@ def OLEDump(filename, options):
     if filename == '':
         IfWIN32SetBinary(sys.stdin)
         oStringIO = cStringIO.StringIO(sys.stdin.read())
+    elif FilenameInSimulations(filename):
+        oZipfile = zipfile.ZipFile(dslsimulationdb.GetSimulation(filename), 'r')
+        oZipContent = oZipfile.open(oZipfile.infolist()[0], 'r', C2BIP3(MALWARE_PASSWORD))
+        zipContent = oZipContent.read()
+        if zipContent.startswith('Neut'):
+            zipContent = OLEFILE_MAGIC + zipContent[4:]
+        oStringIO = cStringIO.StringIO(zipContent)
+        oZipContent.close()
+        oZipfile.close()
     elif filename.lower().endswith('.zip'):
         oZipfile = zipfile.ZipFile(filename, 'r')
         oZipContent = oZipfile.open(oZipfile.infolist()[0], 'r', C2BIP3(MALWARE_PASSWORD))
