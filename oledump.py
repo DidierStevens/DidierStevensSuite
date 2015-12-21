@@ -2,8 +2,8 @@
 
 __description__ = 'Analyze OLE files (Compound Binary Files)'
 __author__ = 'Didier Stevens'
-__version__ = '0.0.21'
-__date__ = '2015/11/09'
+__version__ = '0.0.22'
+__date__ = '2015/12/16'
 
 """
 
@@ -59,6 +59,7 @@ History:
   2015/11/09: continued -E
   2015/11/12: 0.0.21 added dslsimulationdb
   2015/11/17: added support for :-number in --cut option
+  2015/12/16: 0.0.22 some enhancements for --raw option
 
 Todo:
 """
@@ -1402,8 +1403,15 @@ def OLEDump(filename, options):
         else:
             data = File2String(filename)
         if options.vbadecompress:
-            print(SearchAndDecompress(data))
-            return returnCode
+            if options.vbadecompresscorrupt:
+                vba = SearchAndDecompress(data, None)
+            else:
+                vba = SearchAndDecompress(data)
+            if options.plugins == '':
+                print(vba)
+                return returnCode
+            else:
+                data = vba
         for cPlugin in plugins:
             try:
                 if cPlugin.macroOnly:
