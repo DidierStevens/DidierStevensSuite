@@ -2,8 +2,8 @@
 
 __description__ = 'Extract base64 strings from file'
 __author__ = 'Didier Stevens'
-__version__ = '0.0.3'
-__date__ = '2015/09/12'
+__version__ = '0.0.4'
+__date__ = '2016/01/23'
 
 """
 
@@ -17,6 +17,9 @@ History:
   2015/07/14: 0.0.2: added option -n
   2015/07/28: fixed option -n
   2015/09/12: 0.0.3: added option -c
+  2015/11/18: 0.0.4 added support for -c :-number
+  2016/01/22: added option ignorewhitespace
+  2016/01/23: updated CutData
 
 Todo:
 """
@@ -32,6 +35,7 @@ import re
 import hashlib
 import string
 import math
+import string
 
 dumplinelength = 16
 MALWARE_PASSWORD = 'infected'
@@ -76,14 +80,16 @@ Here is an example of an ascii dump (-s 2 -a):
 00000000: 53 63 72 69 70 74 69 6E 67 2E 46 69 6C 65 53 79  Scripting.FileSy
 00000010: 73 74 65 6D 4F 62 6A 65 63 74                    stemObject
 
-You can also specify the minimum length of the decoded base64 datastream with option -n. 
+You can also specify the minimum length of the decoded base64 datastream with option -n.
+
+With option -w (ignorewhitespace), you can instruct base64dump to ignore all whitespace characters. So for example if the base64 text is split into lines, then you will get one base64 stream.
 
 Option -c (--cut) allows for the partial selection of a stream. Use this option to "cut out" part of the stream.
 The --cut option takes an argument to specify which section of bytes to select from the stream. This argument is composed of 2 terms separated by a colon (:), like this:
 termA:termB
 termA and termB can be:
 - nothing (an empty string)
-- a positive number; example: 10
+- a positive decimal number; example: 10
 - an hexadecimal number (to be preceded by 0x); example: 0x10
 - a case sensitive string to search for (surrounded by square brackets and single quotes); example: ['MZ']
 - an hexadecimal string to search for (surrounded by square brackets); example: [d0cf11e0]
@@ -93,12 +99,16 @@ If termA is a string to search for, then the cut section of bytes starts with th
 If termB is nothing, then the cut section of bytes ends with the last byte.
 If termB is a number, then the cut section of bytes ends with the byte at the position given by the number (first byte has index 0).
 When termB is a number, it can have suffix letter l. This indicates that the number is a length (number of bytes), and not a position.
+termB can also be a negative number (decimal or hexademical): in that case the position is counted from the end of the file. For example, :-5 selects the complete file except the last 5 bytes.
 If termB is a string to search for, then the cut section of bytes ends with the last byte at the position where the string is first found. If the string is not found, the cut is empty (0 bytes).
 No checks are made to assure that the position specified by termA is lower than the position specified by termB. This is left up to the user.
+Search string expressions (ASCII and hexadecimal) can be followed by an instance (a number equal to 1 or greater) to indicate which instance needs to be taken. For example, ['ABC']2 will search for the second instance of string 'ABC'. If this instance is not found, then nothing is selected.
+Search string expressions (ASCII and hexadecimal) can be followed by an offset (+ or - a number) to add (or substract) an offset to the found instance. For example, ['ABC']+3 will search for the first instance of string 'ABC' and then select the bytes after ABC (+ 3).
+Finally, search string expressions (ASCII and hexadecimal) can be followed by an instance and an offset.
 Examples:
 This argument can be used to dump the first 256 bytes of a PE file located inside the stream: ['MZ']:0x100l
 This argument can be used to dump the OLE file located inside the stream: [d0cf11e0]:
-When this option is not used, the complete stream is selected. 
+When this option is not used, the complete stream is selected.
 '''
     for line in manual.split('\n'):
         print(textwrap.fill(line, 78))
@@ -273,29 +283,41 @@ CUTTERM_POSITION = 1
 CUTTERM_FIND = 2
 CUTTERM_LENGTH = 3
 
+def Replace(string, dReplacements):
+    if string in dReplacements:
+        return dReplacements[string]
+    else:
+        return string
+
 def ParseCutTerm(argument):
     if argument == '':
         return CUTTERM_NOTHING, None, ''
-    oMatch = re.match(r'0x([0-9a-f]+)', argument, re.I)
+    oMatch = re.match(r'\-?0x([0-9a-f]+)', argument, re.I)
     if oMatch == None:
-        oMatch = re.match(r'(\d+)', argument)    
+        oMatch = re.match(r'\-?(\d+)', argument)
     else:
-        return CUTTERM_POSITION, int(oMatch.group(1), 16), argument[len(oMatch.group(0)):]
+        value = int(oMatch.group(1), 16)
+        if argument.startswith('-'):
+            value = -value
+        return CUTTERM_POSITION, value, argument[len(oMatch.group(0)):]
     if oMatch == None:
-        oMatch = re.match(r'\[([0-9a-f]+)\]', argument, re.I)
+        oMatch = re.match(r'\[([0-9a-f]+)\](\d+)?([+-]\d+)?', argument, re.I)
     else:
-        return CUTTERM_POSITION, int(oMatch.group(1)), argument[len(oMatch.group(0)):]
+        value = int(oMatch.group(1))
+        if argument.startswith('-'):
+            value = -value
+        return CUTTERM_POSITION, value, argument[len(oMatch.group(0)):]
     if oMatch == None:
-        oMatch = re.match(r"\[\'(.+)\'\]", argument)
+        oMatch = re.match(r"\[\'(.+?)\'\](\d+)?([+-]\d+)?", argument)
     else:
         if len(oMatch.group(1)) % 2 == 1:
-            raise
+            raise Exception("Uneven length hexadecimal string")
         else:
-            return CUTTERM_FIND, binascii.a2b_hex(oMatch.group(1)), argument[len(oMatch.group(0)):]
+            return CUTTERM_FIND, (binascii.a2b_hex(oMatch.group(1)), int(Replace(oMatch.group(2), {None: '1'})), int(Replace(oMatch.group(3), {None: '0'}))), argument[len(oMatch.group(0)):]
     if oMatch == None:
         return None, None, argument
     else:
-        return CUTTERM_FIND, oMatch.group(1), argument[len(oMatch.group(0)):]
+        return CUTTERM_FIND, (oMatch.group(1), int(Replace(oMatch.group(2), {None: '1'})), int(Replace(oMatch.group(3), {None: '0'}))), argument[len(oMatch.group(0)):]
 
 def ParseCutArgument(argument):
     type, value, remainder = ParseCutTerm(argument.strip())
@@ -311,6 +333,10 @@ def ParseCutArgument(argument):
     else:
         typeLeft = type
         valueLeft = value
+        if typeLeft == CUTTERM_POSITION and valueLeft < 0:
+            return None, None, None, None
+        if typeLeft == CUTTERM_FIND and valueLeft[1] == 0:
+            return None, None, None, None
         if remainder.startswith(':'):
             remainder = remainder[1:]
         else:
@@ -320,8 +346,19 @@ def ParseCutArgument(argument):
         return typeLeft, valueLeft, CUTTERM_LENGTH, value
     elif type == None or remainder != '':
         return None, None, None, None
+    elif type == CUTTERM_FIND and value[1] == 0:
+        return None, None, None, None
     else:
         return typeLeft, valueLeft, type, value
+
+def Find(data, value, nth):
+    position = -1
+    while nth > 0:
+        position = data.find(value, position + 1)
+        if position == -1:
+            return -1
+        nth -= 1
+    return position
 
 def CutData(stream, cutArgument):
     if cutArgument == '':
@@ -336,23 +373,31 @@ def CutData(stream, cutArgument):
         positionBegin = 0
     elif typeLeft == CUTTERM_POSITION:
         positionBegin = valueLeft
-    else:
-        positionBegin = stream.find(valueLeft)
+    elif typeLeft == CUTTERM_FIND:
+        positionBegin = Find(stream, valueLeft[0], valueLeft[1])
         if positionBegin == -1:
             return ''
+        positionBegin += valueLeft[2]
+    else:
+        raise Exception("Unknown value typeLeft")
 
     if typeRight == CUTTERM_NOTHING:
         positionEnd = len(stream)
+    elif typeRight == CUTTERM_POSITION and valueRight < 0:
+        positionEnd = len(stream) + valueRight
     elif typeRight == CUTTERM_POSITION:
         positionEnd = valueRight + 1
     elif typeRight == CUTTERM_LENGTH:
         positionEnd = positionBegin + valueRight
-    else:
-        positionEnd = stream.find(valueRight)
+    elif typeRight == CUTTERM_FIND:
+        positionEnd = Find(stream, valueRight[0], valueRight[1])
         if positionEnd == -1:
             return ''
         else:
-            positionEnd += len(valueRight)
+            positionEnd += len(valueRight[0])
+        positionEnd += valueRight[2]
+    else:
+        raise Exception("Unknown value typeRight")
 
     return stream[positionBegin:positionEnd]
 
@@ -387,6 +432,9 @@ def BASE64Dump(filename, options):
 
     counter = 1
     data = oStringIO.read()
+    if options.ignorewhitespace:
+        for whitespacecharacter in string.whitespace:
+            data = data.replace(whitespacecharacter, '')
     for base64string in re.findall('[ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/]+={0,2}', data):
         if len(base64string) % 4 == 0:
             try:
@@ -426,6 +474,7 @@ def Main():
     oParser.add_option('-a', '--asciidump', action='store_true', default=False, help='perform ascii dump')
     oParser.add_option('-n', '--number', type=int, default=None, help='minimum number of bytes in decoded base64 data')
     oParser.add_option('-c', '--cut', type=str, default='', help='cut data')
+    oParser.add_option('-w', '--ignorewhitespace', action='store_true', default=False, help='ignore whitespace')
     (options, args) = oParser.parse_args()
 
     if options.man:
