@@ -2,8 +2,8 @@
 
 __description__ = 'EML dump utility'
 __author__ = 'Didier Stevens'
-__version__ = '0.0.5'
-__date__ = '2015/11/17'
+__version__ = '0.0.6'
+__date__ = '2016/01/20'
 
 """
 
@@ -23,6 +23,8 @@ History:
   2015/11/08: 0.0.4 added option -E and environment variable EMLDUMP_EXTRA
   2015/11/09: continue -E
   2015/11/17: 0.0.5 added support for :-number in --cut option
+  2016/01/08: 0.0.6 added warning when first lines do not contain a field
+  2016/01/24: updated CutData
 
 Todo:
 """
@@ -65,7 +67,13 @@ The first number is an index added by emldump (this index does not come from the
 If a part has an M indicator, then it is a multipart and can not be selected.
 Next is the number of bytes in the part, and the MIME type of the part.
 
-Some MIME files start with an info line that has to be skipped. For example e-mails saved with Lotus Notes. Skipping this first line can be done with option -H.
+Some MIME files start with one or more lines that have to be skipped (because they don't contain a RFC822 field). For example e-mails saved with Lotus Notes start with one line of info. A warning will be issued for such files:
+
+emldump.py example-header-2.eml
+Warning: the first 2 lines do not contain a field.
+1:    158034 text/plain
+
+Skipping these first lines can be done with option -H.
 
 A particular part of the MIME file can be selected for further analysis with option -s. Here is an example where we use the index 2 to select the second part:
 
@@ -161,6 +169,9 @@ When termB is a number, it can have suffix letter l. This indicates that the num
 termB can also be a negative number (decimal or hexademical): in that case the position is counted from the end of the file. For example, :-5 selects the complete file except the last 5 bytes.
 If termB is a string to search for, then the cut section of bytes ends with the last byte at the position where the string is first found. If the string is not found, the cut is empty (0 bytes).
 No checks are made to assure that the position specified by termA is lower than the position specified by termB. This is left up to the user.
+Search string expressions (ASCII and hexadecimal) can be followed by an instance (a number equal to 1 or greater) to indicate which instance needs to be taken. For example, ['ABC']2 will search for the second instance of string 'ABC'. If this instance is not found, then nothing is selected.
+Search string expressions (ASCII and hexadecimal) can be followed by an offset (+ or - a number) to add (or substract) an offset to the found instance. For example, ['ABC']+3 will search for the first instance of string 'ABC' and then select the bytes after ABC (+ 3).
+Finally, search string expressions (ASCII and hexadecimal) can be followed by an instance and an offset.
 Examples:
 This argument can be used to dump the first 256 bytes of a PE file located inside the stream: ['MZ']:0x100l
 This argument can be used to dump the OLE file located inside the stream: [d0cf11e0]:
@@ -390,6 +401,12 @@ CUTTERM_POSITION = 1
 CUTTERM_FIND = 2
 CUTTERM_LENGTH = 3
 
+def Replace(string, dReplacements):
+    if string in dReplacements:
+        return dReplacements[string]
+    else:
+        return string
+
 def ParseCutTerm(argument):
     if argument == '':
         return CUTTERM_NOTHING, None, ''
@@ -402,23 +419,23 @@ def ParseCutTerm(argument):
             value = -value
         return CUTTERM_POSITION, value, argument[len(oMatch.group(0)):]
     if oMatch == None:
-        oMatch = re.match(r'\[([0-9a-f]+)\]', argument, re.I)
+        oMatch = re.match(r'\[([0-9a-f]+)\](\d+)?([+-]\d+)?', argument, re.I)
     else:
         value = int(oMatch.group(1))
         if argument.startswith('-'):
             value = -value
         return CUTTERM_POSITION, value, argument[len(oMatch.group(0)):]
     if oMatch == None:
-        oMatch = re.match(r"\[\'(.+)\'\]", argument)
+        oMatch = re.match(r"\[\'(.+?)\'\](\d+)?([+-]\d+)?", argument)
     else:
         if len(oMatch.group(1)) % 2 == 1:
-            raise
+            raise Exception("Uneven length hexadecimal string")
         else:
-            return CUTTERM_FIND, binascii.a2b_hex(oMatch.group(1)), argument[len(oMatch.group(0)):]
+            return CUTTERM_FIND, (binascii.a2b_hex(oMatch.group(1)), int(Replace(oMatch.group(2), {None: '1'})), int(Replace(oMatch.group(3), {None: '0'}))), argument[len(oMatch.group(0)):]
     if oMatch == None:
         return None, None, argument
     else:
-        return CUTTERM_FIND, oMatch.group(1), argument[len(oMatch.group(0)):]
+        return CUTTERM_FIND, (oMatch.group(1), int(Replace(oMatch.group(2), {None: '1'})), int(Replace(oMatch.group(3), {None: '0'}))), argument[len(oMatch.group(0)):]
 
 def ParseCutArgument(argument):
     type, value, remainder = ParseCutTerm(argument.strip())
@@ -436,6 +453,8 @@ def ParseCutArgument(argument):
         valueLeft = value
         if typeLeft == CUTTERM_POSITION and valueLeft < 0:
             return None, None, None, None
+        if typeLeft == CUTTERM_FIND and valueLeft[1] == 0:
+            return None, None, None, None
         if remainder.startswith(':'):
             remainder = remainder[1:]
         else:
@@ -445,8 +464,19 @@ def ParseCutArgument(argument):
         return typeLeft, valueLeft, CUTTERM_LENGTH, value
     elif type == None or remainder != '':
         return None, None, None, None
+    elif type == CUTTERM_FIND and value[1] == 0:
+        return None, None, None, None
     else:
         return typeLeft, valueLeft, type, value
+
+def Find(data, value, nth):
+    position = -1
+    while nth > 0:
+        position = data.find(value, position + 1)
+        if position == -1:
+            return -1
+        nth -= 1
+    return position
 
 def CutData(stream, cutArgument):
     if cutArgument == '':
@@ -461,10 +491,13 @@ def CutData(stream, cutArgument):
         positionBegin = 0
     elif typeLeft == CUTTERM_POSITION:
         positionBegin = valueLeft
-    else:
-        positionBegin = stream.find(valueLeft)
+    elif typeLeft == CUTTERM_FIND:
+        positionBegin = Find(stream, valueLeft[0], valueLeft[1])
         if positionBegin == -1:
             return ''
+        positionBegin += valueLeft[2]
+    else:
+        raise Exception("Unknown value typeLeft")
 
     if typeRight == CUTTERM_NOTHING:
         positionEnd = len(stream)
@@ -474,12 +507,15 @@ def CutData(stream, cutArgument):
         positionEnd = valueRight + 1
     elif typeRight == CUTTERM_LENGTH:
         positionEnd = positionBegin + valueRight
-    else:
-        positionEnd = stream.find(valueRight)
+    elif typeRight == CUTTERM_FIND:
+        positionEnd = Find(stream, valueRight[0], valueRight[1])
         if positionEnd == -1:
             return ''
         else:
-            positionEnd += len(valueRight)
+            positionEnd += len(valueRight[0])
+        positionEnd += valueRight[2]
+    else:
+        raise Exception("Unknown value typeRight")
 
     return stream[positionBegin:positionEnd]
 
@@ -615,6 +651,16 @@ def GenerateExtraInfo(extra, index, indicator, type, stream):
             extra = extra.replace(variable, dExtras[variable](stream))
     return prefix + extra.replace(r'\t', '\t').replace(r'\n', '\n')
 
+def ContainsField(line):
+    for c in line:
+        if c == ' ':
+            return False
+        if c >= '\x00' and c <= '\x1F':
+            return False
+        if c == ':':
+            return True
+    return False
+
 def EMLDump(emlfilename, options):
     FixPipe()
     if emlfilename == '':
@@ -641,8 +687,20 @@ def EMLDump(emlfilename, options):
             return
         rules = YARACompile(options.yara)
 
+    counter = 0
+    for line in data.splitlines():
+        if ContainsField(line):
+            break
+        counter += 1
+    if not options.header and counter != 0:
+        if counter == 1:
+            print('Warning: the first line does not contain a field.')
+        else:
+            print('Warning: the first %d lines do not contain a field.' % counter)
+
     if options.header:
-        data = data[data.find('\n') + 1:]
+        data = ''.join(data.splitlines(True)[counter:])
+
     oEML = email.message_from_string(data)
 
     if options.select == '':
@@ -719,7 +777,7 @@ def Main():
     oParser.add_option('-d', '--dump', action='store_true', default=False, help='perform dump')
     oParser.add_option('-x', '--hexdump', action='store_true', default=False, help='perform hex dump')
     oParser.add_option('-a', '--asciidump', action='store_true', default=False, help='perform ascii dump')
-    oParser.add_option('-H', '--header', action='store_true', default=False, help='skip first line')
+    oParser.add_option('-H', '--header', action='store_true', default=False, help='skip first lines without fields')
     oParser.add_option('-s', '--select', default='', help='select item nr or MIME type for dumping')
     oParser.add_option('-y', '--yara', help="YARA rule file (or directory or @file) to check streams (YARA search doesn't work with -s option)")
     oParser.add_option('--yarastrings', action='store_true', default=False, help='Print YARA strings')
