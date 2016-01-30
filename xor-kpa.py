@@ -2,8 +2,8 @@
 
 __description__ = 'XOR known-plaintext attack'
 __author__ = 'Didier Stevens'
-__version__ = '0.0.1'
-__date__ = '2015/12/15'
+__version__ = '0.0.2'
+__date__ = '2016/01/10'
 
 """
 
@@ -15,6 +15,7 @@ History:
   2015/12/09: start
   2015/12/10: continue
   2015/12/15: continue
+  2016/01/10: 0.0.2 added support for zipfiles
 
 Todo:
 """
@@ -23,6 +24,10 @@ import optparse
 import textwrap
 import binascii
 import collections
+import zipfile
+import sys
+
+MALWARE_PASSWORD = 'infected'
 
 def PrintManual():
     manual = '''
@@ -37,6 +42,13 @@ example
 '''
     for line in manual.split('\n'):
         print(textwrap.fill(line, 78))
+
+#Convert 2 Bytes If Python 3
+def C2BIP3(string):
+    if sys.version_info[0] > 2:
+        return bytes([ord(x) for x in string])
+    else:
+        return string
 
 def File2String(filename):
     try:
@@ -64,6 +76,16 @@ def File2StringHash(filename):
             return decoded
     elif filename.startswith('#'):
         return filename[1:]
+    elif filename.lower().endswith('.zip'):
+        oZipfile = zipfile.ZipFile(filename, 'r')
+        if len(oZipfile.infolist()) == 1:
+            oZipContent = oZipfile.open(oZipfile.infolist()[0], 'r', C2BIP3(MALWARE_PASSWORD))
+            data = oZipContent.read()
+            oZipContent.close()
+        else:
+            data = File2String(filename)
+        oZipfile.close()
+        return data
     else:
         return File2String(filename)
 
