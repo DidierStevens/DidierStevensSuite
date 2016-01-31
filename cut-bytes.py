@@ -2,8 +2,8 @@
 
 __description__ = 'Cut a section of bytes out of a file'
 __author__ = 'Didier Stevens'
-__version__ = '0.0.2'
-__date__ = '2015/11/10'
+__version__ = '0.0.3'
+__date__ = '2015/12/17'
 
 """
 
@@ -14,6 +14,8 @@ Use at your own risk
 History:
   2015/09/13: start
   2015/11/10: 0.0.2 added support for :-number
+  2015/12/16: 0.0.3 added support [...]number+number
+  2015/12/17: continue
 
 Todo:
 """
@@ -25,6 +27,7 @@ import cStringIO
 import sys
 import os
 import zipfile
+import binascii
 
 MALWARE_PASSWORD = 'infected'
 
@@ -53,6 +56,9 @@ When termB is a number, it can have suffix letter l. This indicates that the num
 termB can also be a negative number (decimal or hexademical): in that case the position is counted from the end of the file. For example, :-5 selects the complete file except the last 5 bytes.
 If termB is a string to search for, then the cut section of bytes ends with the last byte at the position where the string is first found. If the string is not found, the cut is empty (0 bytes).
 No checks are made to assure that the position specified by termA is lower than the position specified by termB. This is left up to the user.
+Search string expressions (ASCII and hexadecimal) can be followed by an instance (a number equal to 1 or greater) to indicate which instance needs to be taken. For example, ['ABC']2 will search for the second instance of string 'ABC'. If this instance is not found, then nothing is selected.
+Search string expressions (ASCII and hexadecimal) can be followed by an offset (+ or - a number) to add (or substract) an offset to the found instance. For example, ['ABC']+3 will search for the first instance of string 'ABC' and then select the bytes after ABC (+ 3).
+Finally, search string expressions (ASCII and hexadecimal) can be followed by an instance and an offset.
 Examples:
 This cut-expression can be used to dump the first 256 bytes of a PE file located inside the stream: ['MZ']:0x100l
 This cut-expression can be used to dump the OLE file located inside the stream: [d0cf11e0]:
@@ -77,6 +83,12 @@ CUTTERM_POSITION = 1
 CUTTERM_FIND = 2
 CUTTERM_LENGTH = 3
 
+def Replace(string, dReplacements):
+    if string in dReplacements:
+        return dReplacements[string]
+    else:
+        return string
+
 def ParseCutTerm(argument):
     if argument == '':
         return CUTTERM_NOTHING, None, ''
@@ -89,23 +101,23 @@ def ParseCutTerm(argument):
             value = -value
         return CUTTERM_POSITION, value, argument[len(oMatch.group(0)):]
     if oMatch == None:
-        oMatch = re.match(r'\[([0-9a-f]+)\]', argument, re.I)
+        oMatch = re.match(r'\[([0-9a-f]+)\](\d+)?([+-]\d+)?', argument, re.I)
     else:
         value = int(oMatch.group(1))
         if argument.startswith('-'):
             value = -value
         return CUTTERM_POSITION, value, argument[len(oMatch.group(0)):]
     if oMatch == None:
-        oMatch = re.match(r"\[\'(.+)\'\]", argument)
+        oMatch = re.match(r"\[\'(.+?)\'\](\d+)?([+-]\d+)?", argument)
     else:
         if len(oMatch.group(1)) % 2 == 1:
-            raise
+            raise Exception("Uneven length hexadecimal string")
         else:
-            return CUTTERM_FIND, binascii.a2b_hex(oMatch.group(1)), argument[len(oMatch.group(0)):]
+            return CUTTERM_FIND, (binascii.a2b_hex(oMatch.group(1)), int(Replace(oMatch.group(2), {None: '1'})), int(Replace(oMatch.group(3), {None: '0'}))), argument[len(oMatch.group(0)):]
     if oMatch == None:
         return None, None, argument
     else:
-        return CUTTERM_FIND, oMatch.group(1), argument[len(oMatch.group(0)):]
+        return CUTTERM_FIND, (oMatch.group(1), int(Replace(oMatch.group(2), {None: '1'})), int(Replace(oMatch.group(3), {None: '0'}))), argument[len(oMatch.group(0)):]
 
 def ParseCutArgument(argument):
     type, value, remainder = ParseCutTerm(argument.strip())
@@ -123,6 +135,8 @@ def ParseCutArgument(argument):
         valueLeft = value
         if typeLeft == CUTTERM_POSITION and valueLeft < 0:
             return None, None, None, None
+        if typeLeft == CUTTERM_FIND and valueLeft[1] == 0:
+            return None, None, None, None
         if remainder.startswith(':'):
             remainder = remainder[1:]
         else:
@@ -132,8 +146,19 @@ def ParseCutArgument(argument):
         return typeLeft, valueLeft, CUTTERM_LENGTH, value
     elif type == None or remainder != '':
         return None, None, None, None
+    elif type == CUTTERM_FIND and value[1] == 0:
+        return None, None, None, None
     else:
         return typeLeft, valueLeft, type, value
+
+def Find(data, value, nth):
+    position = -1
+    while nth > 0:
+        position = data.find(value, position + 1)
+        if position == -1:
+            return -1
+        nth -= 1
+    return position
 
 def CutData(stream, cutArgument):
     if cutArgument == '':
@@ -148,10 +173,13 @@ def CutData(stream, cutArgument):
         positionBegin = 0
     elif typeLeft == CUTTERM_POSITION:
         positionBegin = valueLeft
-    else:
-        positionBegin = stream.find(valueLeft)
+    elif typeLeft == CUTTERM_FIND:
+        positionBegin = Find(stream, valueLeft[0], valueLeft[1])
         if positionBegin == -1:
             return ''
+        positionBegin += valueLeft[2]
+    else:
+        raise Exception("Unknown value typeLeft")
 
     if typeRight == CUTTERM_NOTHING:
         positionEnd = len(stream)
@@ -161,12 +189,15 @@ def CutData(stream, cutArgument):
         positionEnd = valueRight + 1
     elif typeRight == CUTTERM_LENGTH:
         positionEnd = positionBegin + valueRight
-    else:
-        positionEnd = stream.find(valueRight)
+    elif typeRight == CUTTERM_FIND:
+        positionEnd = Find(stream, valueRight[0], valueRight[1])
         if positionEnd == -1:
             return ''
         else:
-            positionEnd += len(valueRight)
+            positionEnd += len(valueRight[0])
+        positionEnd += valueRight[2]
+    else:
+        raise Exception("Unknown value typeRight")
 
     return stream[positionBegin:positionEnd]
 
@@ -184,11 +215,20 @@ def CutBytes(expression, filename, options):
     if filename == '':
         IfWIN32SetBinary(sys.stdin)
         oStringIO = cStringIO.StringIO(sys.stdin.read())
+    elif filename.startswith('#h#'):
+        oStringIO = cStringIO.StringIO(binascii.a2b_hex(filename[3:]))
+    elif filename.startswith('#b#'):
+        oStringIO = cStringIO.StringIO(binascii.a2b_base64(filename[3:]))
+    elif filename.startswith('#'):
+        oStringIO = cStringIO.StringIO(filename[1:])
     elif filename.lower().endswith('.zip'):
         oZipfile = zipfile.ZipFile(filename, 'r')
-        oZipContent = oZipfile.open(oZipfile.infolist()[0], 'r', C2BIP3(MALWARE_PASSWORD))
-        oStringIO = cStringIO.StringIO(oZipContent.read())
-        oZipContent.close()
+        if len(oZipfile.infolist()) == 1:
+            oZipContent = oZipfile.open(oZipfile.infolist()[0], 'r', C2BIP3(MALWARE_PASSWORD))
+            oStringIO = cStringIO.StringIO(oZipContent.read())
+            oZipContent.close()
+        else:
+            oStringIO = cStringIO.StringIO(open(filename, 'rb').read())
         oZipfile.close()
     else:
         oStringIO = cStringIO.StringIO(open(filename, 'rb').read())
@@ -197,7 +237,7 @@ def CutBytes(expression, filename, options):
     StdoutWriteChunked(CutData(oStringIO.read(), expression))
 
 def Main():
-    oParser = optparse.OptionParser(usage='usage: %prog [options] cut-expression [file]\n' + __description__, version='%prog ' + __version__)
+    oParser = optparse.OptionParser(usage='usage: %prog [options] cut-expression [[#]file]\n' + __description__, version='%prog ' + __version__)
     oParser.add_option('-m', '--man', action='store_true', default=False, help='Print manual')
     (options, args) = oParser.parse_args()
 
