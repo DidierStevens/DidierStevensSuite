@@ -2,8 +2,8 @@
 
 __description__ = "Program to convert decimal numbers into hex numbers"
 __author__ = 'Didier Stevens'
-__version__ = '0.0.1'
-__date__ = '2016/01/06'
+__version__ = '0.0.2'
+__date__ = '2016/02/02'
 
 """
 
@@ -14,6 +14,7 @@ Use at your own risk
 History:
   2015/12/18: start
   2016/01/06: wrote man; added option -i
+  2016/02/02: 0.0.2 bugfix
 
 Todo:
 """
@@ -166,7 +167,7 @@ https://DidierStevens.com'''
     if len(args) == 0:
         NumbersToHex([''], options)
     else:
-        NumbersToHex(ExpandFilenameArguments(args[1:]), options)
+        NumbersToHex(ExpandFilenameArguments(args), options)
 
 if __name__ == '__main__':
     Main()
