@@ -240,6 +240,7 @@ class cPDFEOF:
     def __init__(self):
         self.token = ''
         self.cntEOFs = 0
+        self.cntCharsAfterLastEOF = 0
 
     def parse(self, char):
         if self.cntEOFs > 0:
