@@ -2,8 +2,8 @@
 
 __description__ = 'Translate bytes according to a Python expression'
 __author__ = 'Didier Stevens'
-__version__ = '2.1.0'
-__date__ = '2015/11/05'
+__version__ = '2.2.0'
+__date__ = '2016/02/20'
 
 """
 
@@ -21,6 +21,7 @@ History:
   2014/02/27: manual
   2015/11/04: added option -f
   2015/11/05: continue
+  2016/02/20: added option -r
 
 Todo:
 """
@@ -29,6 +30,7 @@ import optparse
 import sys
 import os
 import textwrap
+import re
 
 def PrintManual():
     manual = '''
@@ -65,6 +67,7 @@ Another function I defined is IFF (the IF Function): IFF(expression, valueTrue, 
 translate.py malware -o malware.decoded "IFF(position >= 0x10 and position < 0x20, byte ^ 0x10, byte)"
 
 By default this program translates individual bytes via the provided Python expression. With option -f (fullread), translate.py reads the input file as one byte sequence and passes it to the function specified by the expression. This function needs to take one string as an argument and return one string (the translated file).
+Options -r (regex) uses a regular expression to search through the file and then calls the provided function with a match argument for each matched string. The return value of the function (a string) is used to replace the matched string.
 '''
     for line in manual.split('\n'):
         print(textwrap.fill(line))
@@ -129,6 +132,8 @@ def Translate(filenameInput, commandPython, options):
 
     if options.fullread:
         fOut.write(eval(commandPython)(fIn.read()))
+    elif options.regex != '':
+        fOut.write(re.sub(options.regex, eval(commandPython), fIn.read()))
     else:
         Transform(fIn, fOut, commandPython)
 
@@ -156,6 +161,7 @@ https://DidierStevens.com'''
     oParser.add_option('-o', '--output', default='', help='Output file (default is stdout)')
     oParser.add_option('-s', '--script', default='', help='Script with definitions to include')
     oParser.add_option('-f', '--fullread', action='store_true', default=False, help='Full read of the file')
+    oParser.add_option('-r', '--regex', default='', help='Regex to search input file for and apply function to')
     oParser.add_option('-m', '--man', action='store_true', default=False, help='print manual')
     (options, args) = oParser.parse_args()
 
