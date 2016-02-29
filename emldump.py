@@ -2,8 +2,8 @@
 
 __description__ = 'EML dump utility'
 __author__ = 'Didier Stevens'
-__version__ = '0.0.6'
-__date__ = '2016/01/20'
+__version__ = '0.0.7'
+__date__ = '2016/02/28'
 
 """
 
@@ -25,6 +25,7 @@ History:
   2015/11/17: 0.0.5 added support for :-number in --cut option
   2016/01/08: 0.0.6 added warning when first lines do not contain a field
   2016/01/24: updated CutData
+  2016/02/28: 0.0.7 added option -f
 
 Todo:
 """
@@ -74,6 +75,8 @@ Warning: the first 2 lines do not contain a field.
 1:    158034 text/plain
 
 Skipping these first lines can be done with option -H.
+
+Some MIME files are obfuscated, for example they contain long lines of random letters and numbers. The filter option will filter out obfuscating lines: the filter option filters out first lines that are not fields (like with option -H), and every line that is longer than 100 characters.
 
 A particular part of the MIME file can be selected for further analysis with option -s. Here is an example where we use the index 2 to select the second part:
 
@@ -692,14 +695,23 @@ def EMLDump(emlfilename, options):
         if ContainsField(line):
             break
         counter += 1
-    if not options.header and counter != 0:
+    if not options.header and not options.filter and counter != 0:
         if counter == 1:
             print('Warning: the first line does not contain a field.')
         else:
             print('Warning: the first %d lines do not contain a field.' % counter)
 
-    if options.header:
+    if not options.filter:
+        for line in data.splitlines():
+            if len(line) > 100:
+                print('Warning: contains lines longer than 100 characters.')
+                break
+
+    if options.header or options.filter:
         data = ''.join(data.splitlines(True)[counter:])
+
+    if options.filter:
+        data = ''.join([line for line in data.splitlines(True) if len(line) <= 100])
 
     oEML = email.message_from_string(data)
 
@@ -786,6 +798,7 @@ def Main():
     oParser.add_option('-v', '--verbose', action='store_true', default=False, help='verbose output with decoder errors')
     oParser.add_option('-c', '--cut', type=str, default='', help='cut data')
     oParser.add_option('-E', '--extra', type=str, default='', help='add extra info (environment variable: EMLDUMP_EXTRA)')
+    oParser.add_option('-f', '--filter', action='store_true', default=False, help='filter out obfuscatiing lines')
     (options, args) = oParser.parse_args()
 
     if options.man:
