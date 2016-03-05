@@ -2,8 +2,8 @@
 
 __description__ = 'EML dump utility'
 __author__ = 'Didier Stevens'
-__version__ = '0.0.7'
-__date__ = '2016/02/28'
+__version__ = '0.0.8'
+__date__ = '2016/03/02'
 
 """
 
@@ -26,6 +26,7 @@ History:
   2016/01/08: 0.0.6 added warning when first lines do not contain a field
   2016/01/24: updated CutData
   2016/02/28: 0.0.7 added option -f
+  2016/03/02: 0.0.8 extra deobfuscation code for option -f
 
 Todo:
 """
@@ -702,9 +703,16 @@ def EMLDump(emlfilename, options):
             print('Warning: the first %d lines do not contain a field.' % counter)
 
     if not options.filter:
-        for line in data.splitlines():
+        for line in data.splitlines(True):
             if len(line) > 100:
                 print('Warning: contains lines longer than 100 characters.')
+                break
+        warningPrinted = False
+        for line in data.splitlines(True):
+            if not ':' in line and not warningPrinted:
+                print('Warning: the first block contains lines that are not a field.')
+                warningPrinted = True
+            if line == '\r\n':
                 break
 
     if options.header or options.filter:
@@ -712,6 +720,17 @@ def EMLDump(emlfilename, options):
 
     if options.filter:
         data = ''.join([line for line in data.splitlines(True) if len(line) <= 100])
+        temp = []
+        firstBlock = True
+        for line in data.splitlines(True):
+            if not firstBlock:
+                temp.append(line)
+            if firstBlock and ':' in line:
+                temp.append(line)
+            if firstBlock and line == '\r\n':
+                firstBlock = False
+                temp.append(line)
+        data = ''.join(temp)
 
     oEML = email.message_from_string(data)
 
