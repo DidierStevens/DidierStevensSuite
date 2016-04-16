@@ -2,8 +2,8 @@
 
 __description__ = 'Decode VBE script'
 __author__ = 'Didier Stevens'
-__version__ = '0.0.1'
-__date__ = '2016/03/28'
+__version__ = '0.0.2'
+__date__ = '2016/03/29'
 
 """
 
@@ -13,6 +13,7 @@ Use at your own risk
 
 History:
   2016/03/28: start
+  2016/03/29: 0.0.2 added support for ZIP files and literal arguments with File2StringHash
 
 Todo:
 
@@ -26,6 +27,10 @@ import os
 import signal
 import textwrap
 import re
+import zipfile
+import binascii
+
+MALWARE_PASSWORD = 'infected'
 
 def PrintManual():
     manual = '''
@@ -33,9 +38,29 @@ Manual:
 
 This program reads from the given file or standard input, and converts the encoded VBE script to VBS.
 
+The provided file can be a password protected ZIP file (with password infected) containing the VBE script.
+
+The content of the VBE script can also be passed as a literal argument. This is similar to a Here Document in Unix.
+Start the argument (the "filename") with character # to pass a literal argument.
+Example: decode-vbe.py "##@~^DgAAAA==\ko$K6,JCV^GJqAQAAA==^#~@"
+Result: MsgBox "Hello"
+
+It's also possible to use hexadecimal (prefix #h#) or base64 (prefix #b#) to pass a literal argument.
+Example: decode-vbe.py #h#23407E5E4467414141413D3D5C6B6F244B362C4A437F565E474A7141514141413D3D5E237E40
+Result: MsgBox "Hello"
+Example: decode-vbe.py #b#I0B+XkRnQUFBQT09XGtvJEs2LEpDf1ZeR0pxQVFBQUE9PV4jfkA=
+Result: MsgBox "Hello"
+
 '''
     for line in manual.split('\n'):
         print(textwrap.fill(line))
+
+#Convert 2 Bytes If Python 3
+def C2BIP3(string):
+    if sys.version_info[0] > 2:
+        return bytes([ord(x) for x in string])
+    else:
+        return string
 
 def File2String(filename):
     try:
@@ -48,6 +73,33 @@ def File2String(filename):
         return None
     finally:
         f.close()
+
+def File2StringHash(filename):
+    decoded = None
+    if filename.startswith('#h#'):
+        try:
+            decoded = binascii.a2b_hex(filename[3:])
+        finally:
+            return decoded
+    elif filename.startswith('#b#'):
+        try:
+            decoded = binascii.a2b_base64(filename[3:])
+        finally:
+            return decoded
+    elif filename.startswith('#'):
+        return filename[1:]
+    elif filename.lower().endswith('.zip'):
+        oZipfile = zipfile.ZipFile(filename, 'r')
+        if len(oZipfile.infolist()) == 1:
+            oZipContent = oZipfile.open(oZipfile.infolist()[0], 'r', C2BIP3(MALWARE_PASSWORD))
+            data = oZipContent.read()
+            oZipContent.close()
+        else:
+            data = File2String(filename)
+        oZipfile.close()
+        return data
+    else:
+        return File2String(filename)
 
 def FixPipe():
     try:
@@ -270,7 +322,7 @@ def DecodeVBE(filename, options):
     if filename == '':
         content = sys.stdin.read()
     else:
-        content = File2String(filename)
+        content = File2StringHash(filename)
     oMatch = re.search(r'#@~\^......==(.+)......==\^#~@', content)
     if oMatch == None:
         print('No encoded script found!')
