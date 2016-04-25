@@ -2,8 +2,8 @@
 
 __description__ = 'Translate bytes according to a Python expression'
 __author__ = 'Didier Stevens'
-__version__ = '2.2.0'
-__date__ = '2016/02/20'
+__version__ = '2.3.0'
+__date__ = '2016/04/25'
 
 """
 
@@ -22,6 +22,7 @@ History:
   2015/11/04: added option -f
   2015/11/05: continue
   2016/02/20: added option -r
+  2016/04/25: 2.3.0 added StdoutWriteChunked() and optin -R
 
 Todo:
 """
@@ -67,7 +68,19 @@ Another function I defined is IFF (the IF Function): IFF(expression, valueTrue, 
 translate.py malware -o malware.decoded "IFF(position >= 0x10 and position < 0x20, byte ^ 0x10, byte)"
 
 By default this program translates individual bytes via the provided Python expression. With option -f (fullread), translate.py reads the input file as one byte sequence and passes it to the function specified by the expression. This function needs to take one string as an argument and return one string (the translated file).
-Options -r (regex) uses a regular expression to search through the file and then calls the provided function with a match argument for each matched string. The return value of the function (a string) is used to replace the matched string.
+
+Option -r (regex) uses a regular expression to search through the file and then calls the provided function with a match argument for each matched string. The return value of the function (a string) is used to replace the matched string.
+Option -R (filterregex) is similar to option -r (regex), except that it does not operate on the complete file, but on the file filtered for the regex.
+
+Here are 2 examples with a regex. The input file (test-ah.txt) contains the following: 1234&H41&H42&H43&H444321
+
+The first command will search for strings &Hxx and replace them with the character represented in ASCII by hexadecimal number xx:
+translate.py -r "&H(..)" test-ah.txt "lambda m: chr(int(m.groups()[0], 16))"
+Output: 1234ABCD4321
+
+The second command is exactly the same as the first command, except that it uses option -R in stead or -r:
+translate.py -R "&H(..)" test-ah.txt "lambda m: chr(int(m.groups()[0], 16))"
+Output: ABCD
 '''
     for line in manual.split('\n'):
         print(textwrap.fill(line))
@@ -110,6 +123,16 @@ def Transform(fIn, fOut, commandPython):
         fOut.write(CS2BIP3(chr(outbyte)))
         position += 1
 
+#Fix for http://bugs.python.org/issue11395
+def StdoutWriteChunked(data):
+    while data != '':
+        sys.stdout.write(data[0:10000])
+        try:
+            sys.stdout.flush()
+        except IOError:
+            return
+        data = data[10000:]
+
 def Translate(filenameInput, commandPython, options):
     if filenameInput == '':
         if sys.platform == 'win32':
@@ -132,8 +155,16 @@ def Translate(filenameInput, commandPython, options):
 
     if options.fullread:
         fOut.write(eval(commandPython)(fIn.read()))
-    elif options.regex != '':
-        fOut.write(re.sub(options.regex, eval(commandPython), fIn.read()))
+    elif options.regex != '' or options.filterregex != '':
+        content = fIn.read()
+        if options.regex != '':
+            data = re.sub(options.regex, eval(commandPython), content)
+        else:
+            data = re.sub(options.filterregex, eval(commandPython), ''.join([x.group() for x in re.finditer(options.filterregex, content)]))
+        if fOut != sys.stdout:
+            fOut.write(data)
+        else:
+            StdoutWriteChunked(data)
     else:
         Transform(fIn, fOut, commandPython)
 
@@ -162,6 +193,7 @@ https://DidierStevens.com'''
     oParser.add_option('-s', '--script', default='', help='Script with definitions to include')
     oParser.add_option('-f', '--fullread', action='store_true', default=False, help='Full read of the file')
     oParser.add_option('-r', '--regex', default='', help='Regex to search input file for and apply function to')
+    oParser.add_option('-R', '--filterregex', default='', help='Regex to filter input file for and apply function to')
     oParser.add_option('-m', '--man', action='store_true', default=False, help='print manual')
     (options, args) = oParser.parse_args()
 
