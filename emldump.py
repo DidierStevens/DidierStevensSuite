@@ -2,8 +2,8 @@
 
 __description__ = 'EML dump utility'
 __author__ = 'Didier Stevens'
-__version__ = '0.0.8'
-__date__ = '2016/03/02'
+__version__ = '0.0.9'
+__date__ = '2016/04/13'
 
 """
 
@@ -27,6 +27,7 @@ History:
   2016/01/24: updated CutData
   2016/02/28: 0.0.7 added option -f
   2016/03/02: 0.0.8 extra deobfuscation code for option -f
+  2016/04/13: 0.0.9 changed handling of obfuscating lines
 
 Todo:
 """
@@ -665,6 +666,11 @@ def ContainsField(line):
             return True
     return False
 
+def StartsWithWhitespace(line):
+    if line == '':
+        return False
+    return line[0] in ' \t'
+
 def EMLDump(emlfilename, options):
     FixPipe()
     if emlfilename == '':
@@ -696,36 +702,36 @@ def EMLDump(emlfilename, options):
         if ContainsField(line):
             break
         counter += 1
-    if not options.header and not options.filter and counter != 0:
+    if not options.header and not options.filter and options.select == '' and counter != 0:
         if counter == 1:
             print('Warning: the first line does not contain a field.')
         else:
             print('Warning: the first %d lines do not contain a field.' % counter)
 
-    if not options.filter:
-        for line in data.splitlines(True):
-            if len(line) > 100:
-                print('Warning: contains lines longer than 100 characters.')
-                break
+    if not options.filter and options.select == '':
+#        for line in data.splitlines(True):
+#            if len(line) > 100:
+#                print('Warning: contains lines longer than 100 characters.')
+#                break
         warningPrinted = False
         for line in data.splitlines(True):
-            if not ':' in line and not warningPrinted:
-                print('Warning: the first block contains lines that are not a field.')
-                warningPrinted = True
             if line == '\r\n':
                 break
+            if not StartsWithWhitespace(line) and not ContainsField(line) and not warningPrinted:
+                print('Warning: the first block contains lines that are not a field.')
+                warningPrinted = True
 
     if options.header or options.filter:
         data = ''.join(data.splitlines(True)[counter:])
 
     if options.filter:
-        data = ''.join([line for line in data.splitlines(True) if len(line) <= 100])
+#        data = ''.join([line for line in data.splitlines(True) if len(line) <= 100])
         temp = []
         firstBlock = True
         for line in data.splitlines(True):
             if not firstBlock:
                 temp.append(line)
-            if firstBlock and ':' in line:
+            if firstBlock and (StartsWithWhitespace(line) or ContainsField(line)):
                 temp.append(line)
             if firstBlock and line == '\r\n':
                 firstBlock = False

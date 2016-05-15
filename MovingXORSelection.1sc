@@ -1,0 +1,104 @@
+/*
+	MovingXORSelection.1sc: 010 Editor Script to perform a moving XOR of the current selection
+	Version 1.0 2026/04/13
+	Source code put in public domain by Didier Stevens, no Copyright
+	https://DidierStevens.com
+	Use at your own risk
+
+	Shortcomings, or todo's ;-)
+
+	History:
+		2026/04/09: v1.0 start
+		2026/04/12: renamed program
+		2026/04/13: continue
+*/
+
+#define TITLE "MovingXORSelection"
+
+string StrLower(string sIn)
+{
+	string sResult;
+	int iIter;
+
+	Strcpy(sResult, sIn);
+
+	for (iIter = 0; iIter < Strlen(sResult); iIter++)
+	{
+		sResult[iIter] = ToLower(sResult[iIter]);
+	}
+	return sResult;
+}
+
+void Main(void)
+{
+	int iIter, iStart, iSize;
+	string sDirection;
+	int iOffset, iIterStart, iIterStop;
+
+	// Check that a file is open
+	if(FileCount() == 0)
+	{
+		MessageBox(idOk, TITLE, TITLE + " can only be executed when a file is loaded.");
+		return;
+	}
+
+	// Get input from user
+	sDirection = StrLower(InputString(TITLE, "Left-to-right (L) or right-to-left (R)?", "L"));
+	if (sDirection == "")
+		return;
+	if (sDirection != "l" && sDirection != "r")
+	{
+		MessageBox(idOk, TITLE, "Answer L or R please!");
+		return;
+	}
+	iOffset = InputNumber(TITLE, "Offset: ", "-1");
+	if (iOffset == BAD_VALUE)
+		return;
+
+	// Initializes the variables
+	iSize = GetSelSize();
+	iStart = GetSelStart();
+
+	// Check that bytes were selected
+	if(iSize == 0)
+	{
+		iSize = FileSize();
+		iStart = 0;
+	}
+
+	// Modify the selection
+	if (sDirection == "l")
+	{
+		if (iOffset < 0)
+		{
+			iIterStart = -iOffset;
+			iIterStop = iSize - 1;
+		}
+		else
+		{
+			iIterStart = 0;
+			iIterStop = iSize - 1 - iOffset;
+		}
+		for (iIter = iIterStart; iIter <= iIterStop; iIter++)
+			// Modify the current byte
+			WriteUByte(iStart + iIter, ReadUByte(iStart + iIter) ^ ReadUByte(iStart + iIter + iOffset));
+	}
+	else
+	{
+		if (iOffset < 0)
+		{
+			iIterStart = iSize - 1;
+			iIterStop = -iOffset;
+		}
+		else
+		{
+			iIterStart = iSize - 1 - iOffset;
+			iIterStop = 0;
+		}
+		for (iIter = iIterStart; iIter >= iIterStop; iIter--)
+			// Modify the current byte
+			WriteUByte(iStart + iIter, ReadUByte(iStart + iIter) ^ ReadUByte(iStart + iIter + iOffset));
+	}
+}
+
+Main();
