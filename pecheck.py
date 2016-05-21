@@ -2,8 +2,8 @@
 
 __description__ = 'Tool for displaying PE file info'
 __author__ = 'Didier Stevens'
-__version__ = '0.4.0'
-__date__ = '2014/11/18'
+__version__ = '0.5.0'
+__date__ = '2016/05/21'
 
 """
 
@@ -22,6 +22,9 @@ History:
   2014/11/09: added default userdb.txt support
   2014/11/16: added entry point info
   2014/11/18: fixed bug entry point info
+  2016/05/16: V0.5.0 added YARA support
+  2016/05/17: added GetArgumentsUpdatedWithEnvironmentVariable
+  2016/05/21: added overlay info
 
 Todo:
 """
@@ -33,6 +36,9 @@ import sys
 import time
 import zipfile
 import signal
+import binascii
+import shlex
+import os
 
 try:
     import pefile
@@ -40,6 +46,11 @@ try:
 except:
     print('Missing pefile and/or peutils Python module, please check if it is installed.')
     exit()
+
+try:
+    import yara
+except:
+    pass
 
 def Timestamp(epoch=None):
     if epoch == None:
@@ -70,6 +81,16 @@ def C2BIP3(string):
     else:
         return string
 
+def ProcessAt(argument):
+    if argument.startswith('@'):
+        strings = File2Strings(argument[1:])
+        if strings == None:
+            raise Exception('Error reading %s' % argument)
+        else:
+            return strings
+    else:
+        return [argument]
+
 def GetPEObject(filename):
     if filename.lower().endswith('.zip'):
         try:
@@ -91,7 +112,29 @@ def GetPEObject(filename):
         oPE = pefile.PE(filename)
     return oPE
 
-def SingleFile(filename, signatures):
+def YARACompile(fileordirname):
+    dFilepaths = {}
+    if os.path.isdir(fileordirname):
+        for root, dirs, files in os.walk(fileordirname):
+            for file in files:
+                filename = os.path.join(root, file)
+                dFilepaths[filename] = filename
+    else:
+        for filename in ProcessAt(fileordirname):
+            dFilepaths[filename] = filename
+    return yara.compile(filepaths=dFilepaths)
+
+def NumberOfBytesHumanRepresentation(value):
+    if value <= 1024:
+        return '%s bytes' % value
+    elif value < 1024 * 1024:
+        return '%.1f KB' % (float(value) / 1024.0)
+    elif value < 1024 * 1024 * 1024:
+        return '%.1f MB' % (float(value) / 1024.0 / 1024.0)
+    else:
+        return '%.1f GB' % (float(value) / 1024.0 / 1024.0 / 1024.0)
+
+def SingleFile(filename, signatures, options):
     pe = GetPEObject(filename)
     raw = pe.write()
     print("PE check for '%s':" % filename)
@@ -119,6 +162,31 @@ def SingleFile(filename, signatures):
         if section.VirtualAddress <= ep and section.VirtualAddress + section.SizeOfRawData >= ep:
             print 'Section:     %s' % ''.join(filter(lambda c:c != '\0', str(section.Name)))
             print 'ep offset:   0x%08x' % (section.PointerToRawData + ep - section.VirtualAddress)
+
+    print('')
+    print('Overlay:')
+    overlay = pe.get_overlay_data_start_offset()
+    if overlay == None:
+        print(' No overlay')
+    else:
+        print(' Start offset: 0x%08x' %     overlay)
+        overlaySize = len(raw) - overlay
+        print(' Size:         0x%08x %s %.2f%%' %     (overlaySize, NumberOfBytesHumanRepresentation(overlaySize), float(overlaySize) / float(len(raw)) * 100.0))
+
+    if options.yara != None:
+        print('')
+        print('YARA:')
+        if not 'yara' in sys.modules:
+            print('Error: option yara requires the YARA Python module.')
+            return
+        rules = YARACompile(options.yara)
+        for result in rules.match(data=str(raw)):
+            print(' Rule: %s' % result.rule)
+            if options.yarastrings:
+                for stringdata in result.strings:
+                    print('  %06x %s:' % (stringdata[0], stringdata[1]))
+                    print('   %s' % binascii.hexlify(C2BIP3(stringdata[2])))
+                    print('   %s' % repr(stringdata[2]))
 
 def FileContentsStartsWithMZ(filename):
     try:
@@ -200,6 +268,13 @@ def ScanFiles(directory, signatures, minimumEntropy):
             print(sys.exc_value)
             exit()
 
+def GetArgumentsUpdatedWithEnvironmentVariable(varname):
+    envVar = os.getenv(varname)
+    if envVar == None:
+        return sys.argv[1:]
+    else:
+        return shlex.split(envVar, posix=False) + sys.argv[1:]
+
 def Main():
     global oLogger
 
@@ -208,11 +283,13 @@ def Main():
     except:
         pass
 
-    oParser = optparse.OptionParser(usage='usage: %prog [options] [file/directory]\n' + __description__, version='%prog ' + __version__)
+    oParser = optparse.OptionParser(usage='usage: %prog [options] [file/directory]\nEnvironment variable for options: PECHECK_OPTIONS\n' + __description__, version='%prog ' + __version__)
     oParser.add_option('-d', '--db', default='', help='the PeID user db file, default userdb.txt in same directory as pecheck')
     oParser.add_option('-s', '--scan', action='store_true', default=False, help='scan folder')
     oParser.add_option('-e', '--entropy', type=float, default=7.0, help='the minimum entropy value for a file to be listed in scan mode (default 7.0)')
-    (options, args) = oParser.parse_args()
+    oParser.add_option('-y', '--yara', help="YARA rule-file, @file or directory to check streams (YARA search doesn't work with -s option)")
+    oParser.add_option('--yarastrings', action='store_true', default=False, help='Print YARA strings')
+    (options, args) = oParser.parse_args(GetArgumentsUpdatedWithEnvironmentVariable('PECHECK_OPTIONS'))
 
     if len(args) > 1:
         oParser.print_help()
@@ -231,12 +308,12 @@ def Main():
         except:
             signatures = None
         if len(args) == 0:
-            SingleFile('', signatures)
+            SingleFile('', signatures, options)
         elif options.scan:
             oLogger = CSVLogger('pecheck', ('Filename', 'Entropy', 'Sections', 'Executable sections', 'Executable and writable sections', 'Size AuthentiCode', 'Stored CRC', 'Calculated CRC', 'CRC anomaly', 'Compile date', 'CompanyName', 'ProductName', 'MD5'))
             ScanFiles(args[0], signatures, options.entropy)
         else:
-            SingleFile(args[0], signatures)
+            SingleFile(args[0], signatures, options)
 
 if __name__ == '__main__':
     Main()
