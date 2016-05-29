@@ -2,8 +2,8 @@
 
 __description__ = 'Tool for displaying PE file info'
 __author__ = 'Didier Stevens'
-__version__ = '0.5.0'
-__date__ = '2016/05/21'
+__version__ = '0.5.1'
+__date__ = '2016/05/24'
 
 """
 
@@ -25,6 +25,9 @@ History:
   2016/05/16: V0.5.0 added YARA support
   2016/05/17: added GetArgumentsUpdatedWithEnvironmentVariable
   2016/05/21: added overlay info
+  2016/05/22: V0.5.1 extended overlay info
+  2016/05/23: continued extended overlay info
+  2016/05/24: fixed bug GetPEObject
 
 Todo:
 """
@@ -51,6 +54,20 @@ try:
     import yara
 except:
     pass
+
+# CIC: Call If Callable
+def CIC(expression):
+    if callable(expression):
+        return expression()
+    else:
+        return expression
+
+# IFF: IF Function
+def IFF(expression, valueTrue, valueFalse):
+    if expression:
+        return CIC(valueTrue)
+    else:
+        return CIC(valueFalse)
 
 def Timestamp(epoch=None):
     if epoch == None:
@@ -97,7 +114,7 @@ def GetPEObject(filename):
             oZipfile = zipfile.ZipFile(filename, 'r')
             file = oZipfile.open(oZipfile.infolist()[0], 'r', C2BIP3('infected'))
         except:
-            print('Error opening file %s' % file)
+            print('Error opening file %s' % filename)
             print(sys.exc_info()[1])
             sys.exit()
         oPE = pefile.PE(data=file.read())
@@ -165,13 +182,22 @@ def SingleFile(filename, signatures, options):
 
     print('')
     print('Overlay:')
-    overlay = pe.get_overlay_data_start_offset()
-    if overlay == None:
+    overlayOffset = pe.get_overlay_data_start_offset()
+    if overlayOffset == None:
         print(' No overlay')
     else:
-        print(' Start offset: 0x%08x' %     overlay)
-        overlaySize = len(raw) - overlay
+        print(' Start offset: 0x%08x' % overlayOffset)
+        overlaySize = len(raw[overlayOffset:])
         print(' Size:         0x%08x %s %.2f%%' %     (overlaySize, NumberOfBytesHumanRepresentation(overlaySize), float(overlaySize) / float(len(raw)) * 100.0))
+        print(' MD5:          %s' % hashlib.md5(raw[overlayOffset:]).hexdigest())
+        print(' SHA-256:      %s' % hashlib.sha256(raw[overlayOffset:]).hexdigest())
+        overlayMagic = raw[overlayOffset:][:4]
+        if type(overlayMagic[0]) == int:
+            overlayMagic = ''.join([chr(b) for b in overlayMagic])
+        print(' MAGIC:        %s %s' % (binascii.b2a_hex(overlayMagic), ''.join([IFF(ord(b) >= 32, b, '.') for b in overlayMagic])))
+        print(' PE file without overlay:')
+        print('  MD5:          %s' % hashlib.md5(raw[:overlayOffset]).hexdigest())
+        print('  SHA-256:      %s' % hashlib.sha256(raw[:overlayOffset]).hexdigest())
 
     if options.yara != None:
         print('')
