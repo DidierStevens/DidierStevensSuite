@@ -2,8 +2,8 @@
 
 __description__ = 'Analyze OLE files (Compound Binary Files)'
 __author__ = 'Didier Stevens'
-__version__ = '0.0.23'
-__date__ = '2015/12/22'
+__version__ = '0.0.24'
+__date__ = '2016/06/08'
 
 """
 
@@ -61,6 +61,7 @@ History:
   2015/11/17: added support for :-number in --cut option
   2015/12/16: 0.0.22 some enhancements for --raw option
   2015/12/22: 0.0.23 updated cut syntax
+  2016/06/08: 0.0.24 option -v works with option -E
 
 Todo:
 """
@@ -435,6 +436,8 @@ C:\Demo>oledump.py -E "!%INDEX% %MD5%" Book1.xls
 1 ff1773dce227027d410b09f8f3224a56
 2 b46068f38a3294ca9163442cb8271028
 3 d6a5bebba74fb1adf84c4ee66b2bf8dd
+
+Option -v can be used together with option -c or -E to perform the calculations on the decompressed macro streams (m and M) in stead of the raw macro streams.
 
 To include extra data with each use of oledump, define environment variable OLEDUMP_EXTRA with the parameter that should be passed to -E. When environment variable OLEDUMP_EXTRA is defined, option -E can be ommited. When option -E is used together with environment variable OLEDUMP_EXTRA, the parameter of option -E is used and the environment variable is ignored.
 
@@ -1306,11 +1309,15 @@ def OLESub(ole, prefix, rules, options):
             if not options.quiet:
                 index = '%s%d' % (prefix, counter)
                 line = '%3s: %s %s %s' % (index, indicator, lengthString, PrintableName(fname))
+                if indicator.lower() == 'm' and options.vbadecompress:
+                    streamForExtra = SearchAndDecompress(stream)
+                else:
+                    streamForExtra = stream
                 if options.calc:
-                    line += ' %s' % hashlib.md5(stream).hexdigest()
+                    line += ' %s' % hashlib.md5(streamForExtra).hexdigest()
                 if options.extra.startswith('!'):
                     line = ''
-                line += GenerateExtraInfo(options.extra, index, indicator, PrintableName(fname), stream)
+                line += GenerateExtraInfo(options.extra, index, indicator, PrintableName(fname), streamForExtra)
                 print(line)
             for cPlugin in plugins:
                 try:
