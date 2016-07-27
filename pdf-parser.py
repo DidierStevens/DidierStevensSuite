@@ -2,8 +2,8 @@
 
 __description__ = 'pdf-parser, use it to parse a PDF document'
 __author__ = 'Didier Stevens'
-__version__ = '0.6.4'
-__date__ = '2015/08/12'
+__version__ = '0.6.5'
+__date__ = '2016/07/27'
 __minimum_python_version__ = (2, 5, 1)
 __maximum_python_version__ = (3, 4, 3)
 
@@ -55,6 +55,7 @@ History:
   2015/04/06: fixed bug reported by Kurt for stream produced by Ghostscript where endstream is not preceded by whitespace; fixed prettyprint bug
   2015/04/24: V0.6.3 when option dump's filename is -, content is dumped to stdout
   2015/08/12: V0.6.4 option hash now also calculates hashes of streams when selecting or searching objects; and displays hexasciidump first line
+  2016/07/27: V0.6.5 bugfix whitespace 0x00 0x0C after stream 0x0D 0x0A reported by @mr_me
 
 Todo:
   - handle printf todo
@@ -529,7 +530,13 @@ class cPDFElementIndirectObject:
                 if self.content[i][0] == CHAR_REGULAR and self.content[i][1] == 'stream':
                     state = 'stream-whitespace'
             elif state == 'stream-whitespace':
-                if self.content[i][0] != CHAR_WHITESPACE:
+                if self.content[i][0] == CHAR_WHITESPACE:
+                    whitespace = self.content[i][1]
+                    if whitespace.startswith('\x0D\x0A') and len(whitespace) > 2:
+                        data += whitespace[2:]
+                    elif whitespace.startswith('\x0A') and len(whitespace) > 1:
+                        data += whitespace[1:]
+                else:
                     data += self.content[i][1]
                 state = 'stream-concat'
             elif state == 'stream-concat':
