@@ -2,8 +2,8 @@
 
 __description__ = "Program to use Python's re.findall on files"
 __author__ = 'Didier Stevens'
-__version__ = '0.0.1'
-__date__ = '2015/07/07'
+__version__ = '0.0.2'
+__date__ = '2016/07/22'
 
 """
 
@@ -24,6 +24,8 @@ History:
   2014/11/04: updated man
   2014/11/13: added error handling to CompileRegex
   2015/07/07: added option fullread
+  2015/07/28: 0.0.2 added option dotall
+  2016/07/22: fix for binary files/data
 
 Todo:
   add hostname to header
@@ -102,7 +104,7 @@ microsoft
 ahsnvyetdhfkg
 
 By default the regular expression matching is not case sensitive. You can make it case sensitive with option -c. To surround the regular expression with boundaries (\b), use option -b. Output can be mode lowercase with option -l and unique with option -u. Output can be saved to a file with option -o filename. And if you also want to output the regular expression used for matching, use option -d.
-To get grep-like output, use option -g. Option -r removes the anchor (^and $) or the regular expression.
+To get grep-like output, use option -g. Option -r removes the anchor (^and $) or the regular expression. Use option -D (dotall) to make the . expression match newline characters. 
 By default, re-search reads the file(s) line-by-line. Binary files can also be processed, but are best read completely and not line-by-line. Use option -f (fullread) to perform a fule read of the file (and not line-by-line).
 
 If you have a list of regular expressions to match, put them in a csv file, and use option -v, -S, -I, -H, -R and -C.
@@ -176,6 +178,11 @@ re-search.py requires module reextra, which is part of the re-search package.
         print(textwrap.fill(line))
 
 QUOTE = '"'
+
+def IfWIN32SetBinary(io):
+    if sys.platform == 'win32':
+        import msvcrt
+        msvcrt.setmode(io.fileno(), os.O_BINARY)
 
 def ToString(value):
     if type(value) == type(''):
@@ -309,7 +316,7 @@ def CompileRegex(regex, options):
         regex = IFF(regex.endswith('$'), regex[:-1], regex)
     regex = IFF(options.boundary, '\\b%s\\b' % regex, regex)
     try:
-        oREExtra = reextra.cREExtra(regex, IFF(options.casesensitive, 0, re.IGNORECASE), options.sensical)
+        oREExtra = reextra.cREExtra(regex, IFF(options.casesensitive, 0, re.IGNORECASE) + IFF(options.dotall, 0, re.DOTALL), options.sensical)
     except:
         print('Error regex: %s' % regex)
         raise
@@ -328,9 +335,11 @@ def RESearchSingle(regex, filenames, oOutput, options):
         oOutput.Line('Regex: %s' % regex)
     for filename in filenames:
         if filename == '':
+            if options.fullread:
+                IfWIN32SetBinary(sys.stdin)
             fIn = sys.stdin
         else:
-            fIn = open(filename, 'r')
+            fIn = open(filename, IFF(options.fullread, 'rb', 'r'))
         for line in ProcessFile(fIn, options.fullread):
             results = oREExtra.Findall(line)
             if options.grep:
@@ -371,9 +380,11 @@ def RESearchCSV(csvFilename, filenames, oOutput, options):
 
     for filename in filenames:
         if filename == '':
+            if options.fullread:
+                IfWIN32SetBinary(sys.stdin)
             fIn = sys.stdin
         else:
-            fIn = open(filename, 'r')
+            fIn = open(filename, IFF(options.fullread, 'rb', 'r'))
         for line in ProcessFile(fIn, options.fullread):
             for regex, (oREExtra, comment) in dRegex.items():
                 results = oREExtra.Findall(line)
@@ -455,6 +466,7 @@ https://DidierStevens.com'''
     oParser.add_option('-R', '--regexindex', default='', help='Index or title of the regex column in the CSV file')
     oParser.add_option('-C', '--commentindex', default='', help='Index or title of the comment column in the CSV file')
     oParser.add_option('-f', '--fullread', action='store_true', default=False, help='Do a full read of the input, not line per line')
+    oParser.add_option('-D', '--dotall', action='store_true', default=False, help='. matches newline too')
     (options, args) = oParser.parse_args()
 
     if options.man:
