@@ -12,6 +12,7 @@
   History:
     2015/09/15: start
     2016/07/24: RTF_ListView2_CLSID
+    2016/07/29: http, RTF_Object, pFragments
 */
 
 rule includepicture_http
@@ -26,7 +27,7 @@ rule includepicture_http
 }
 
 // https://securelist.com/analysis/publications/37158/the-curious-case-of-a-cve-2012-0158-exploit/
-rule RTF_ListView2_CLSID
+rule ListView2_CLSID
 {
     meta:
         author = "Didier Stevens (https://DidierStevens.com)"
@@ -35,3 +36,34 @@ rule RTF_ListView2_CLSID
     condition:
         any of them
 }
+
+rule http
+{
+    meta:
+        author = "Didier Stevens (https://DidierStevens.com)"
+    strings:
+        $a1 = "http" nocase
+    condition:
+        $a1
+}
+
+rule RTF_Object
+{
+    meta:
+        author = "Didier Stevens (https://DidierStevens.com)"
+    strings:
+        $a1 = {01 05 00 00 02 00 00 00}
+    condition:
+        any of them
+}
+
+rule pFragments
+{
+    meta:
+        author = "Didier Stevens (https://DidierStevens.com)"
+    strings:
+        $a1 = "pFragments"
+    condition:
+        $a1
+}
+

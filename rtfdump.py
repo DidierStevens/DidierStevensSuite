@@ -2,8 +2,8 @@
 
 __description__ = 'Analyze RTF files'
 __author__ = 'Didier Stevens'
-__version__ = '0.0.2'
-__date__ = '2016/07/27'
+__version__ = '0.0.3'
+__date__ = '2016/07/30'
 
 """
 
@@ -26,6 +26,7 @@ History:
   2016/07/24: continue
   2016/07/26: continue
   2016/07/27: continue
+  2016/07/30: 0.0.3 added option recursionlimit
 
 Todo:
 """
@@ -555,11 +556,13 @@ def RTFSub(oStringIO, prefix, rules, options):
     global decoders
 
     if options.filter != '':
-        if options.filter != 'O':
+        if not options.filter in ['O', 'h']:
             print('Unknown filter: %s' % options.filter)
             return
 
     returnCode = 0
+
+    sys.setrecursionlimit(options.recursionlimit)
 
     counter = 1
     rtfdata = oStringIO.read()
@@ -587,8 +590,8 @@ def RTFSub(oStringIO, prefix, rules, options):
 
     if options.select == '':
         for counter in range(1, len(dAnalysis) + 1):
-            if options.filter == '' or options.filter == 'O' and dAnalysis[counter][10] != []:
-                hexcount, bincount = HexBinCount(dAnalysis[counter][9])
+            hexcount, bincount = HexBinCount(dAnalysis[counter][9])
+            if options.filter == '' or options.filter == 'O' and dAnalysis[counter][10] != [] or options.filter == 'h' and hexcount > 0:
                 line = '%5d %s c=%5d p=%08x l=%8d h=%8s b=%8s %s u=%8d %s' % (counter, dAnalysis[counter][1][0:15], dAnalysis[counter][5], dAnalysis[counter][3], dAnalysis[counter][4] - dAnalysis[counter][3], hexcount, bincount, IFF(dAnalysis[counter][10] != [], 'O', ' '), dAnalysis[counter][6], dAnalysis[counter][7].strip())
                 if dAnalysis[counter][7].strip() == '\\*\\objclass':
                     line += ' ' + dAnalysis[counter][8]
@@ -703,6 +706,7 @@ def Main():
     oParser.add_option('-c', '--cut', type=str, default='', help='cut data')
     oParser.add_option('-i', '--info', action='store_true', default=False, help='print extra info for selected item')
     oParser.add_option('-f', '--filter', type=str, default='', help='filter')
+    oParser.add_option('--recursionlimit', type=int, default=2000, help='set recursionlimit for Python (default 2000)')
     (options, args) = oParser.parse_args()
 
     if options.man:
