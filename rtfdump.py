@@ -2,8 +2,8 @@
 
 __description__ = 'Analyze RTF files'
 __author__ = 'Didier Stevens'
-__version__ = '0.0.3'
-__date__ = '2016/07/30'
+__version__ = '0.0.4'
+__date__ = '2016/08/12'
 
 """
 
@@ -27,6 +27,8 @@ History:
   2016/07/26: continue
   2016/07/27: continue
   2016/07/30: 0.0.3 added option recursionlimit
+  2016/08/09: 0.0.4 refactoring
+  2016/08/12: continue
 
 Todo:
 """
@@ -251,6 +253,13 @@ def DecodeFunction(decoders, options, stream):
         return stream
     return decoders[0](stream, options.decoderoptions).Decode()
 
+class cIteminfo():
+    def __init__(self, level, beginPosition, endPosition, countChildren):
+        self.level = level
+        self.beginPosition = beginPosition
+        self.endPosition = endPosition
+        self.countChildren = countChildren
+
 def BuildTree(rtfdata, level, index, sequence, options):
     children = 0
     level += 1
@@ -261,30 +270,30 @@ def BuildTree(rtfdata, level, index, sequence, options):
         print(error)
         raise Exception(error)
     start = index
-    iteminfo = [level, start, None, None]
-    sequence.append(iteminfo)
+    oIteminfo = cIteminfo(level, start, None, None)
+    sequence.append(oIteminfo)
     index += 1
     while index < len(rtfdata):
         if rtfdata[index] == '{' and (index == 0 or rtfdata[index - 1] != '\\'):
             index = BuildTree(rtfdata, level, index, sequence, options)
             children += 1
         elif rtfdata[index] == '}' and (index == 0 or rtfdata[index - 1] != '\\'):
-            iteminfo[2] = index
-            iteminfo[3] = children
+            oIteminfo.endPosition = index
+            oIteminfo.countChildren = children
             return index + 1
         else:
             index += 1
     if options.select == '':
         print('Parser warning: Missing terminating character } level = %d' % level)
-    iteminfo[2] = index
-    iteminfo[3] = children
+    oIteminfo.endPosition = index
+    oIteminfo.countChildren = children
     return index
 
 def ExtractHex(data):
     backslash = False
     backslashtext = ''
     hexstring = [cStringIO.StringIO()]
-    unexpectedCharacter = 0
+    countUnexpectedCharacters = 0
     binstatus = 0
     binnumber = ''
     bintext = ''
@@ -343,20 +352,20 @@ def ExtractHex(data):
         elif char in ['{', '}']:
             pass
         else:
-            unexpectedCharacter += 1
+            countUnexpectedCharacters += 1
 #            print(hexstring)
 #            print(repr(char))
 #            if not char in ['\0']:
 #                raise('xxx')
         i += 1
-    return [IFF(isinstance(x, list), x, lambda: x.getvalue()) for x in hexstring], unexpectedCharacter
+    return [IFF(isinstance(x, list), x, lambda: x.getvalue()) for x in hexstring], countUnexpectedCharacters
 
 def ReadDWORD(data):
     if len(data) < 4:
         return None, None
     return ord(data[0]) + ord(data[1]) *0x100 + ord(data[2]) *0x10000 + ord(data[3]) *0x1000000, data[4:]
 
-def ExtractOle(data):
+def ExtractOleInfo(data):
     word1, data = ReadDWORD(data)
     if word1 == None or word1 != 0x00000501:
         return []
@@ -384,7 +393,7 @@ def ExtractOle(data):
     return [name, 6*4 + word3, sizeEmbedded]
 
 def Info(data):
-    result = ExtractOle(data)
+    result = ExtractOleInfo(data)
     if result == []:
         return 'Error: extraction failed'
     return 'Name: %s\nPosition embedded: %08x\nSize embedded: %08x\nmd5: %s\nmagic: %s\n' % (repr(result[0]), result[1], result[2], hashlib.md5(data[result[1]:result[1] + result[2]]).hexdigest(), binascii.b2a_hex(data[result[1]:result[1] + 4]))
@@ -534,12 +543,12 @@ def HexDecode(hexstream, options):
 
 def HexDecodeIfRequested(info, options):
     if options.hexdecode:
-        hexstream = info[9]
+        hexstream = info.hexstring
         if hexstream == None:
-            return info[8]
+            return info.content
         return HexDecode(hexstream, options)
     else:
-        return info[8]
+        return info.content
 
 def HexBinCount(hexstream):
     hexcount = 0
@@ -550,6 +559,23 @@ def HexBinCount(hexstream):
         else:
             bincount += len(entry[1])
     return hexcount, bincount
+
+class cAnalysis():
+    def __init__(self, index, leader, level, beginPosition, endPosition, countChildren, countUnexpectedCharacters, controlWord, content, hexstring, oleInfo):
+        self.index = index
+        self.leader = leader
+        self.level = level
+        self.beginPosition = beginPosition
+        self.endPosition = endPosition
+        self.countChildren = countChildren
+        self.countUnexpectedCharacters = countUnexpectedCharacters
+        self.controlWord = controlWord
+        self.content = content
+        self.hexstring = hexstring
+        self.oleInfo = oleInfo
+
+def GenerateMAGIC(data):
+    return binascii.b2a_hex(data) + ' ' + ''.join([IFF(ord(c) >= 32, c, '.') for c in data])
 
 def RTFSub(oStringIO, prefix, rules, options):
     global plugins
@@ -566,40 +592,43 @@ def RTFSub(oStringIO, prefix, rules, options):
 
     counter = 1
     rtfdata = oStringIO.read()
+    if not rtfdata.startswith('{'):
+        print('This file does not start with an opening brace: {\nCheck if it is an RTF file.\nMAGIC: %s' % GenerateMAGIC(rtfdata[0:4]))
+        return -1
     sequence = []
     BuildTree(rtfdata, 0, 0, sequence, options)
-    remainder = rtfdata[sequence[0][2] + 1:]
+    remainder = rtfdata[sequence[0].endPosition + 1:]
     if len(remainder) > 0:
-        sequence.append([0, sequence[0][2] + 1, len(rtfdata) - 1, 0])
+        sequence.append(cIteminfo(0, sequence[0].endPosition + 1, len(rtfdata) - 1, 0))
     dAnalysis = {}
-    for iteminfo in sequence:
-        oMatch = re.match(r'(\\\*)?\\[a-z]+(-?[0-9]+)? ?', rtfdata[iteminfo[1] + 1:])
-        control = ''
+    for oIteminfo in sequence:
+        oMatch = re.match(r'(\\\*)?\\[a-z]+(-?[0-9]+)? ?', rtfdata[oIteminfo.beginPosition + 1:])
+        controlWord = ''
         if oMatch != None:
-            control = oMatch.group(0)
-        beginContent = iteminfo[1] + 1 + len(control)
-        endContent = iteminfo[2] - 1
+            controlWord = oMatch.group(0)
+        beginContent = oIteminfo.beginPosition + 1 + len(controlWord)
+        endContent = oIteminfo.endPosition - 1
         if beginContent < endContent:
             content = rtfdata[beginContent:endContent + 1]
         else:
             content = ''
-        hexstring, unexpectedCharacter = ExtractHex(content)
-        leader = '%sLevel %2d                      ' % (' ' * (iteminfo[0] - 1), iteminfo[0])
-        dAnalysis[counter] = (counter, leader, iteminfo[0], iteminfo[1], iteminfo[2], iteminfo[3], unexpectedCharacter, control, content, hexstring, ExtractOle(HexDecode(hexstring, options)))
+        hexstring, countUnexpectedCharacters = ExtractHex(content)
+        leader = '%sLevel %2d                      ' % (' ' * (oIteminfo.level - 1), oIteminfo.level)
+        dAnalysis[counter] = cAnalysis(counter, leader, oIteminfo.level, oIteminfo.beginPosition, oIteminfo.endPosition, oIteminfo.countChildren, countUnexpectedCharacters, controlWord, content, hexstring, ExtractOleInfo(HexDecode(hexstring, options)))
         counter += 1
 
     if options.select == '':
         for counter in range(1, len(dAnalysis) + 1):
-            hexcount, bincount = HexBinCount(dAnalysis[counter][9])
-            if options.filter == '' or options.filter == 'O' and dAnalysis[counter][10] != [] or options.filter == 'h' and hexcount > 0:
-                line = '%5d %s c=%5d p=%08x l=%8d h=%8s b=%8s %s u=%8d %s' % (counter, dAnalysis[counter][1][0:15], dAnalysis[counter][5], dAnalysis[counter][3], dAnalysis[counter][4] - dAnalysis[counter][3], hexcount, bincount, IFF(dAnalysis[counter][10] != [], 'O', ' '), dAnalysis[counter][6], dAnalysis[counter][7].strip())
-                if dAnalysis[counter][7].strip() == '\\*\\objclass':
-                    line += ' ' + dAnalysis[counter][8]
+            hexcount, bincount = HexBinCount(dAnalysis[counter].hexstring)
+            if options.filter == '' or options.filter == 'O' and dAnalysis[counter].oleInfo != [] or options.filter == 'h' and hexcount > 0:
+                line = '%5d %s c=%5d p=%08x l=%8d h=%8s b=%8s %s u=%8d %s' % (counter, dAnalysis[counter].leader[0:15], dAnalysis[counter].countChildren, dAnalysis[counter].beginPosition, dAnalysis[counter].endPosition - dAnalysis[counter].beginPosition, hexcount, bincount, IFF(dAnalysis[counter].oleInfo != [], 'O', ' '), dAnalysis[counter].countUnexpectedCharacters, dAnalysis[counter].controlWord.strip())
+                if dAnalysis[counter].controlWord.strip() == '\\*\\objclass':
+                    line += ' ' + dAnalysis[counter].content
                 linePrinted = False
                 if options.yara == None:
                     print(line)
                     linePrinted = True
-                elif dAnalysis[counter][8] != None:
+                elif dAnalysis[counter].content != None:
                     stream = HexDecodeIfRequested(dAnalysis[counter], options)
                     oDecoders = [cIdentity(stream, None)]
                     for cDecoder in decoders:
