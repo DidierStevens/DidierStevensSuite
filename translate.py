@@ -2,8 +2,8 @@
 
 __description__ = 'Translate bytes according to a Python expression'
 __author__ = 'Didier Stevens'
-__version__ = '2.3.0'
-__date__ = '2016/04/25'
+__version__ = '2.3.1'
+__date__ = '2016/09/13'
 
 """
 
@@ -22,7 +22,10 @@ History:
   2015/11/04: added option -f
   2015/11/05: continue
   2016/02/20: added option -r
-  2016/04/25: 2.3.0 added StdoutWriteChunked() and optin -R
+  2016/04/25: 2.3.0 added StdoutWriteChunked() and option -R
+  2016/09/07: 2.3.1 added option -e
+  2016/09/09: continue
+  2016/09/13: man
 
 Todo:
 """
@@ -32,6 +35,7 @@ import sys
 import os
 import textwrap
 import re
+import math
 
 def PrintManual():
     manual = '''
@@ -81,6 +85,10 @@ Output: 1234ABCD4321
 The second command is exactly the same as the first command, except that it uses option -R in stead or -r:
 translate.py -R "&H(..)" test-ah.txt "lambda m: chr(int(m.groups()[0], 16))"
 Output: ABCD
+
+Option -e (execute) is used to execute Python commands before the command is executed. This can, for example, be used to import modules.
+Here is an example to decompress a Flash file (.swf):
+ translate.py -f -e "import zlib" sample.swf "lambda b: zlib.decompress(b[8:])"
 '''
     for line in manual.split('\n'):
         print(textwrap.fill(line))
@@ -111,6 +119,12 @@ def CS2BIP3(string):
         return bytes([ord(x) for x in string])
     else:
         return string
+
+def Output(fOut, data):
+    if fOut != sys.stdout:
+        fOut.write(data)
+    else:
+        StdoutWriteChunked(data)
 
 def Transform(fIn, fOut, commandPython):
     position = 0
@@ -153,18 +167,17 @@ def Translate(filenameInput, commandPython, options):
     if options.script != '':
         execfile(options.script, globals())
 
+    if options.execute != '':
+        exec(options.execute, globals())
+
     if options.fullread:
-        fOut.write(eval(commandPython)(fIn.read()))
+        Output(fOut, eval(commandPython)(fIn.read()))
     elif options.regex != '' or options.filterregex != '':
         content = fIn.read()
         if options.regex != '':
-            data = re.sub(options.regex, eval(commandPython), content)
+            Output(fOut, re.sub(options.regex, eval(commandPython), content))
         else:
-            data = re.sub(options.filterregex, eval(commandPython), ''.join([x.group() for x in re.finditer(options.filterregex, content)]))
-        if fOut != sys.stdout:
-            fOut.write(data)
-        else:
-            StdoutWriteChunked(data)
+            Output(fOut, re.sub(options.filterregex, eval(commandPython), ''.join([x.group() for x in re.finditer(options.filterregex, content)])))
     else:
         Transform(fIn, fOut, commandPython)
 
@@ -194,6 +207,7 @@ https://DidierStevens.com'''
     oParser.add_option('-f', '--fullread', action='store_true', default=False, help='Full read of the file')
     oParser.add_option('-r', '--regex', default='', help='Regex to search input file for and apply function to')
     oParser.add_option('-R', '--filterregex', default='', help='Regex to filter input file for and apply function to')
+    oParser.add_option('-e', '--execute', default='', help='Commands to execute')
     oParser.add_option('-m', '--man', action='store_true', default=False, help='print manual')
     (options, args) = oParser.parse_args()
 

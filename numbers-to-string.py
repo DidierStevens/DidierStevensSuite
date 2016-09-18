@@ -3,7 +3,7 @@
 __description__ = "Program to convert numbers into a string"
 __author__ = 'Didier Stevens'
 __version__ = '0.0.1'
-__date__ = '2015/11/12'
+__date__ = '2016/09/13'
 
 """
 
@@ -14,6 +14,7 @@ Use at your own risk
 History:
   2015/11/02: start
   2015/11/12: added import math
+  2016/09/10: added option -j
 
 Todo:
 """
@@ -114,12 +115,15 @@ def ProcessFile(fIn, fullread):
             yield line.strip('\n')
 
 def NumbersToStringSingle(function, filenames, oOutput, options):
-    if function == "":
+    if function == '':
         Function = lambda x: x
-    else:
+    elif function.startswith('lambda '):
         Function = eval(function)
+    else:
+        Function = None
     oRE = re.compile('\d+')
     for filename in filenames:
+        joined = ''
         if filename == '':
             fIn = sys.stdin
         else:
@@ -128,14 +132,27 @@ def NumbersToStringSingle(function, filenames, oOutput, options):
             results = oRE.findall(line)
             if len(results) >= options.number:
                 error = True
-                try:
-                    result = ''.join(map(chr, Function(map(int, results))))
-                    error = False
-                except:
-                    if options.error:
-                        raise
+                if Function == None:
+                    try:
+                        result = ''.join(map(chr, [eval(function) for n in map(int, results)]))
+                        error = False
+                    except:
+                        if options.error:
+                            raise
+                else:
+                    try:
+                        result = ''.join(map(chr, Function(map(int, results))))
+                        error = False
+                    except:
+                        if options.error:
+                            raise
                 if not error:
-                    oOutput.Line(result)
+                    if options.join:
+                        joined += result
+                    else:
+                        oOutput.Line(result)
+        if options.join:
+            oOutput.Line(joined)
         if fIn != sys.stdin:
             fIn.close()
 
@@ -157,11 +174,12 @@ Source code put in the public domain by Didier Stevens, no Copyright
 Use at your own risk
 https://DidierStevens.com'''
 
-    oParser = optparse.OptionParser(usage='usage: %prog [options] expression [[@]file ...]\n' + __description__ + moredesc, version='%prog ' + __version__)
+    oParser = optparse.OptionParser(usage='usage: %prog [options] [expression [[@]file ...]]\n' + __description__ + moredesc, version='%prog ' + __version__)
     oParser.add_option('-m', '--man', action='store_true', default=False, help='Print manual')
     oParser.add_option('-o', '--output', type=str, default='', help='Output to file')
     oParser.add_option('-e', '--error', action='store_true', default=False, help='Generate error when error occurs in Python expression')
     oParser.add_option('-n', '--number', type=int, default=3, help='Minimum number of numbers (3 by default)')
+    oParser.add_option('-j', '--join', action='store_true', default=False, help='Join output')
     (options, args) = oParser.parse_args()
 
     if options.man:
@@ -170,7 +188,7 @@ https://DidierStevens.com'''
         return
 
     if len(args) == 0:
-        oParser.print_help()
+        NumbersToString('', [''], options)
     elif len(args) == 1:
         NumbersToString(args[0], [''], options)
     else:
