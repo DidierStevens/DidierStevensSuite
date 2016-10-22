@@ -2,8 +2,8 @@
 
 __description__ = 'Cut a section of bytes out of a file'
 __author__ = 'Didier Stevens'
-__version__ = '0.0.3'
-__date__ = '2015/12/17'
+__version__ = '0.0.4'
+__date__ = '2016/08/02'
 
 """
 
@@ -16,6 +16,7 @@ History:
   2015/11/10: 0.0.2 added support for :-number
   2015/12/16: 0.0.3 added support [...]number+number
   2015/12/17: continue
+  2016/08/02: 0.0.4 added dumps
 
 Todo:
 """
@@ -30,6 +31,7 @@ import zipfile
 import binascii
 
 MALWARE_PASSWORD = 'infected'
+dumplinelength = 16
 
 def PrintManual():
     manual = '''
@@ -62,6 +64,9 @@ Finally, search string expressions (ASCII and hexadecimal) can be followed by an
 Examples:
 This cut-expression can be used to dump the first 256 bytes of a PE file located inside the stream: ['MZ']:0x100l
 This cut-expression can be used to dump the OLE file located inside the stream: [d0cf11e0]:
+
+By default the output uses the same representation as the input, but this can be changed to hex, ascii dump or base64 with options -x, -a and -b.
+
 '''
     for line in manual.split('\n'):
         print(textwrap.fill(line))
@@ -77,6 +82,72 @@ def IfWIN32SetBinary(io):
     if sys.platform == 'win32':
         import msvcrt
         msvcrt.setmode(io.fileno(), os.O_BINARY)
+
+# CIC: Call If Callable
+def CIC(expression):
+    if callable(expression):
+        return expression()
+    else:
+        return expression
+
+# IFF: IF Function
+def IFF(expression, valueTrue, valueFalse):
+    if expression:
+        return CIC(valueTrue)
+    else:
+        return CIC(valueFalse)
+
+class cDumpStream():
+    def __init__(self):
+        self.text = ''
+
+    def Addline(self, line):
+        if line != '':
+            self.text += line + '\n'
+
+    def Content(self):
+        return self.text
+
+def HexDump(data):
+    oDumpStream = cDumpStream()
+    hexDump = ''
+    for i, b in enumerate(data):
+        if i % dumplinelength == 0 and hexDump != '':
+            oDumpStream.Addline(hexDump)
+            hexDump = ''
+        hexDump += IFF(hexDump == '', '', ' ') + '%02X' % ord(b)
+    oDumpStream.Addline(hexDump)
+    return oDumpStream.Content()
+
+def CombineHexAscii(hexDump, asciiDump):
+    if hexDump == '':
+        return ''
+    return hexDump + '  ' + (' ' * (3 * (dumplinelength - len(asciiDump)))) + asciiDump
+
+def HexAsciiDump(data):
+    oDumpStream = cDumpStream()
+    hexDump = ''
+    asciiDump = ''
+    for i, b in enumerate(data):
+        if i % dumplinelength == 0:
+            if hexDump != '':
+                oDumpStream.Addline(CombineHexAscii(hexDump, asciiDump))
+            hexDump = '%08X:' % i
+            asciiDump = ''
+        hexDump+= ' %02X' % ord(b)
+        asciiDump += IFF(ord(b) >= 32, b, '.')
+    oDumpStream.Addline(CombineHexAscii(hexDump, asciiDump))
+    return oDumpStream.Content()
+
+def Base64Dump(data, nowhitespace=False):
+    encoded = binascii.b2a_base64(data)
+    if nowhitespace:
+        return encoded
+    oDumpStream = cDumpStream()
+    length = 64
+    for i in range(0, len(encoded), length):
+        oDumpStream.Addline(encoded[0+i:length+i])
+    return oDumpStream.Content()
 
 CUTTERM_NOTHING = 0
 CUTTERM_POSITION = 1
@@ -233,12 +304,31 @@ def CutBytes(expression, filename, options):
     else:
         oStringIO = cStringIO.StringIO(open(filename, 'rb').read())
 
-    IfWIN32SetBinary(sys.stdout)
-    StdoutWriteChunked(CutData(oStringIO.read(), expression))
+    if options.hexdump:
+        DumpFunction = HexDump
+    elif options.hexdumpnows:
+        DumpFunction = lambda x: binascii.b2a_hex(x)
+    elif options.base64:
+        DumpFunction = Base64Dump
+    elif options.base64nows:
+        DumpFunction = lambda x: Base64Dump(x, True)
+    elif options.asciidump:
+        DumpFunction = HexAsciiDump
+    else:
+        DumpFunction = lambda x: x
+        IfWIN32SetBinary(sys.stdout)
+
+    StdoutWriteChunked(DumpFunction(CutData(oStringIO.read(), expression)))
 
 def Main():
     oParser = optparse.OptionParser(usage='usage: %prog [options] cut-expression [[#]file]\n' + __description__, version='%prog ' + __version__)
     oParser.add_option('-m', '--man', action='store_true', default=False, help='Print manual')
+    oParser.add_option('-d', '--dump', action='store_true', default=False, help='perform dump')
+    oParser.add_option('-x', '--hexdump', action='store_true', default=False, help='perform hex dump')
+    oParser.add_option('-X', '--hexdumpnows', action='store_true', default=False, help='perform hex dump without whitespace')
+    oParser.add_option('-a', '--asciidump', action='store_true', default=False, help='perform ascii dump')
+    oParser.add_option('-b', '--base64', action='store_true', default=False, help='perform BASE64 dump')
+    oParser.add_option('-B', '--base64nows', action='store_true', default=False, help='perform BASE64 dump without whitespace')
     (options, args) = oParser.parse_args()
 
     if options.man:
