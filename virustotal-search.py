@@ -2,8 +2,8 @@
 
 __description__ = 'Program to search VirusTotal reports with search terms (MD5, SHA1, SHA256) found in the argument file'
 __author__ = 'Didier Stevens'
-__version__ = '0.1.3'
-__date__ = '2015/08/11'
+__version__ = '0.1.4'
+__date__ = '2016/01/17'
 
 """
 
@@ -37,6 +37,7 @@ History:
   2015/01/26: added option -R
   2015/04/23: 0.1.2 added CVE (thanks Pieter-Jan Moreels)
   2015/08/11: 0.1.3 added option -s
+  2016/01/17: 0.1.4 added support for stdin
 
 Todo:
 """
@@ -283,7 +284,10 @@ def GetReports(searchTerms, reports, withComment, dNotFound=None):
 
 def File2Strings(filename):
     try:
-        f = open(filename, 'r')
+        if filename == '':
+            f = sys.stdin
+        else:
+            f = open(filename, 'r')
     except:
         return None
     try:
@@ -291,7 +295,8 @@ def File2Strings(filename):
     except:
         return None
     finally:
-        f.close()
+        if f != sys.stdin:
+            f.close()
 
 def Strings2File(filename, lines):
     try:
@@ -401,7 +406,14 @@ def VirusTotalSearch(filename, options):
     SetProxiesIfNecessary()
 
     if options.md5:
-        searchTerms = [hashlib.md5(open(filename, 'rb').read()).hexdigest()]
+        if filename == '':
+            if sys.platform == 'win32':
+                import msvcrt
+                msvcrt.setmode(sys.stdin.fileno(), os.O_BINARY)
+            data = sys.stdin.read()
+        else:
+            data = open(filename, 'rb').read()
+        searchTerms = [hashlib.md5(data).hexdigest()]
     else:
         searchTerms = File2Strings(filename)
         if searchTerms == None:
@@ -469,7 +481,7 @@ def VirusTotalSearch(filename, options):
 def Main():
     global VIRUSTOTAL_API2_KEY
 
-    oParser = optparse.OptionParser(usage='usage: %prog [options] file\n' + __description__, version='%prog ' + __version__)
+    oParser = optparse.OptionParser(usage='usage: %prog [options] [file]\n' + __description__, version='%prog ' + __version__)
     oParser.add_option('-d', '--delay', type=int, default=16, help='delay in seconds between queries (default 16s, VT rate limit is 4 queries per minute)')
     oParser.add_option('-c', '--comment', action='store_true', default=False, help='the search term is followed by a comment and separated by a space character')
     oParser.add_option('-f', '--force', action='store_true', default=False, help='force all request to be send to VirusTotal, even if found in local database (pkl file)')
@@ -487,7 +499,7 @@ def Main():
     oParser.add_option('-s', '--separator', default=';', help='Separator character (default ;)')
     (options, args) = oParser.parse_args()
 
-    if not (len(args) == 1 or (options.refresh or options.refreshrandom) and len(args) == 0):
+    if not (len(args) <= 1 or (options.refresh or options.refreshrandom) and len(args) == 0):
         oParser.print_help()
         print('')
         print('  Source code put in the public domain by Didier Stevens, no Copyright')
@@ -505,6 +517,8 @@ def Main():
         print('You need to get a VirusTotal API key and set environment variable VIRUSTOTAL_API2_KEY, use option -k or add it to this program.\nTo get your API key, you need a VirusTotal account.')
     elif options.refresh or options.refreshrandom:
         VirusTotalRefresh(options)
+    elif len(args) == 0:
+        VirusTotalSearch('', options)
     else:
         VirusTotalSearch(args[0], options)
 
