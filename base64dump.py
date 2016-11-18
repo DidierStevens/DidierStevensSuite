@@ -2,8 +2,8 @@
 
 __description__ = 'Extract base64 strings from file'
 __author__ = 'Didier Stevens'
-__version__ = '0.0.4'
-__date__ = '2016/01/23'
+__version__ = '0.0.5'
+__date__ = '2016/11/18'
 
 """
 
@@ -20,6 +20,8 @@ History:
   2015/11/18: 0.0.4 added support for -c :-number
   2016/01/22: added option ignorewhitespace
   2016/01/23: updated CutData
+  2016/11/08: 0.0.5 added option -e; unique bytes; option -S
+  2016/11/18: added hex encoding
 
 Todo:
 """
@@ -39,24 +41,39 @@ import string
 
 dumplinelength = 16
 MALWARE_PASSWORD = 'infected'
+REGEX_STANDARD = '[\x09\x20-\x7E]'
 
 def PrintManual():
     manual = '''
 Manual:
 
-base64dump is a program that extracts and decodes base64 strings found inside the provided file. base64dump looks for sequences of base64 characters in the provided file and tries to decode them. The result is displayed in a table like this:
+base64dump is a program that extracts and decodes base64 strings (or other encodings) found inside the provided file. base64dump looks for sequences of base64 characters (or other encodings) in the provided file and tries to decode them.
 
-ID  Size    BASE64           Decoded          MD5 decoded
---  ----    ------           -------          -----------
+Other encodings than base64 can be used via option -e.
+
+The result is displayed in a table like this (base64 encoding example):
+
+ID  Size    Encoded          Decoded          MD5 decoded
+--  ----    -------          -------          -----------
  1:  400728 TVqQAAMAAAAEAAAA MZ.............. d611941e0d24cb6b59c7b6b2add4fd8f
  2:      36 U2NyaXB0aW5nLkZp Scripting.FileSy a1c46f599699a442a5ae0454467f6d63
  3:       4 exel             {..              f1b1127ffb842243f9a03e67036d4bb6
 
 The first column (ID) is the number (ID) assigned to the datastream by base64dump. This ID is used when selecting a datastream for further analysis with option -s.
 The second column (Size) is the length of the base64 string.
-The third column (BASE64) is the start of the base64 string.
+The third column (Encoded) is the start of the base64 string.
 The fourth column (Decoded) is the ASCII dump of the start of the decoded base64 string.
 The fifth column (MD5 decoded) is the MD5 hash of the decoded base64 string.
+
+By default, base64dump will search for base64 encoding strings. It's possible to specify other encodings by using option -e. This option takes the following values:
+base64
+bu
+pu
+hex
+
+bu stands for "backslash UNICODE" (\\u), it looks like this: \\u9090\\ueb77...
+pu stands for "percent UNICODE" (%u), it looks like this: %u9090%ueb77...
+hex stands for "hexadecimal", it looks like this: 6D6573736167652C...
 
 Select a datastream for further analysis with option -s followed by the ID number of the datastream (or a for all). For example -s 2:
 
@@ -64,6 +81,7 @@ Info:
  MD5: d611941e0d24cb6b59c7b6b2add4fd8f
  Filesize: 300544
  Entropy: 6.900531
+ Unique bytes: 256 (100.00%)
  Magic HEX: 4d5a9000
  Magic ASCII: MZ..
  Null bytes: 41139
@@ -74,7 +92,7 @@ Info:
 
 This displays information for the datastream, like the entropy of the datastream.
 
-The selected stream can be dumped (-d), hexdumped (-x) or ASCII dumped (-a). Use the dump option (-d) to extract the stream and save it to disk (with file redirection >) or to pipe it (|) into the next command.
+The selected stream can be dumped (-d), hexdumped (-x), ASCII dumped (-a) or dump the strings (-S). Use the dump option (-d) to extract the stream and save it to disk (with file redirection >) or to pipe it (|) into the next command.
 Here is an example of an ascii dump (-s 2 -a):
 
 00000000: 53 63 72 69 70 74 69 6E 67 2E 46 69 6C 65 53 79  Scripting.FileSy
@@ -248,6 +266,7 @@ def CalculateByteStatistics(dPrevalence):
     countNullByte = dPrevalence[0]
     countControlBytes = 0
     countWhitespaceBytes = 0
+    countUniqueBytes = 0
     for iter in range(1, 0x21):
         if chr(iter) in string.whitespace:
             countWhitespaceBytes += dPrevalence[iter]
@@ -265,7 +284,8 @@ def CalculateByteStatistics(dPrevalence):
         if dPrevalence[iter] > 0:
             prevalence = float(dPrevalence[iter]) / float(sumValues)
             entropy += - prevalence * math.log(prevalence, 2)
-    return sumValues, entropy, countNullByte, countControlBytes, countWhitespaceBytes, countPrintableBytes, countHighBytes
+            countUniqueBytes += 1
+    return sumValues, entropy, countUniqueBytes, countNullByte, countControlBytes, countWhitespaceBytes, countPrintableBytes, countHighBytes
 
 def CalculateFileMetaData(data):
     dPrevalence = {}
@@ -274,9 +294,9 @@ def CalculateFileMetaData(data):
     for char in data:
         dPrevalence[ord(char)] += 1
 
-    fileSize, entropy, countNullByte, countControlBytes, countWhitespaceBytes, countPrintableBytes, countHighBytes = CalculateByteStatistics(dPrevalence)
+    fileSize, entropy, countUniqueBytes, countNullByte, countControlBytes, countWhitespaceBytes, countPrintableBytes, countHighBytes = CalculateByteStatistics(dPrevalence)
     magicPrintable, magicHex = Magic(data[0:4])
-    return hashlib.md5(data).hexdigest(), magicPrintable, magicHex, fileSize, entropy, countNullByte, countControlBytes, countWhitespaceBytes, countPrintableBytes, countHighBytes
+    return hashlib.md5(data).hexdigest(), magicPrintable, magicHex, fileSize, entropy, countUniqueBytes, countNullByte, countControlBytes, countWhitespaceBytes, countPrintableBytes, countHighBytes
 
 CUTTERM_NOTHING = 0
 CUTTERM_POSITION = 1
@@ -401,7 +421,72 @@ def CutData(stream, cutArgument):
 
     return stream[positionBegin:positionEnd]
 
+def ExtractStringsASCII(data):
+    regex = REGEX_STANDARD + '{%d,}'
+    return re.findall(regex % 4, data)
+
+def ExtractStringsUNICODE(data):
+    regex = '((' + REGEX_STANDARD + '\x00){%d,})'
+    return [foundunicodestring.replace('\x00', '') for foundunicodestring, dummy in re.findall(regex % 4, data)]
+
+def ExtractStrings(data):
+    return ExtractStringsASCII(data) + ExtractStringsUNICODE(data)
+
+def DumpFunctionStrings(data):
+    return ''.join([extractedstring + '\n' for extractedstring in ExtractStrings(data)])
+
+def DecodeDataBase64(data):
+    for base64string in re.findall('[ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/]+={0,2}', data):
+        if len(base64string) % 4 == 0:
+            try:
+                yield (base64string, binascii.a2b_base64(base64string))
+            except:
+                continue
+
+def DecodeDataHex(data):
+    for hexstring in re.findall('[ABCDEFabcdef0123456789]+', data):
+        if len(hexstring) % 2 == 0:
+            try:
+                yield (hexstring, binascii.a2b_hex(hexstring))
+            except:
+                continue
+
+def DecodeBU(data):
+    decoded = ''
+    while data != '':
+        decoded += binascii.a2b_hex(data[4:6]) + binascii.a2b_hex(data[2:4])
+        data = data[6:]
+    return decoded
+
+def DecodeDataBU(data):
+    for bu in re.findall(r'(?:\\u[ABCDEFabcdef0123456789]{4})+', data):
+        yield (bu, DecodeBU(bu))
+
+def DecodeDataPU(data):
+    for bu in re.findall(r'(?:%u[ABCDEFabcdef0123456789]{4})+', data):
+        yield (bu, DecodeBU(bu))
+
 def BASE64Dump(filename, options):
+    dEncodings = {
+        'base64': ('BASE64, example: TVqQAAMAAAAEAAAA...', DecodeDataBase64),
+        'bu': ('\\u UNICODE, example: \\u9090\\ueb77...', DecodeDataBU),
+        'pu': ('% UNICODE, example: %u9090%ueb77...', DecodeDataPU),
+        'hex': ('hexadecimal, example: 6D6573736167652C...', DecodeDataHex)
+    }
+
+    if options.encoding == '?' :
+        print('Available encodings:')
+        for key, value in dEncodings.items():
+            print(' %s -> %s' % (key, value[0]))
+        return
+
+    if not options.encoding in dEncodings:
+        print('Error: invalid encoding: %s' % options.encoding)
+        print('Valid encodings:')
+        for key, value in dEncodings.items():
+            print(' %s -> %s' % (key, value[0]))
+        return
+
     if filename == '':
         IfWIN32SetBinary(sys.stdin)
         oStringIO = cStringIO.StringIO(sys.stdin.read())
@@ -421,12 +506,14 @@ def BASE64Dump(filename, options):
         DumpFunction = HexDump
     elif options.asciidump:
         DumpFunction = HexAsciiDump
+    elif options.strings:
+    	  DumpFunction = DumpFunctionStrings
     else:
         DumpFunction = None
 
     if options.select == '':
         formatString = '%-2s  %-7s %-16s %-16s %-32s'
-        columnNames = ('ID', 'Size', 'BASE64', 'Decoded', 'MD5 decoded')
+        columnNames = ('ID', 'Size', 'Encoded', 'Decoded', 'MD5 decoded')
         print(formatString % columnNames)
         print(formatString % tuple(['-' * len(s) for s in columnNames]))
 
@@ -435,44 +522,42 @@ def BASE64Dump(filename, options):
     if options.ignorewhitespace:
         for whitespacecharacter in string.whitespace:
             data = data.replace(whitespacecharacter, '')
-    for base64string in re.findall('[ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/]+={0,2}', data):
-        if len(base64string) % 4 == 0:
-            try:
-                base64data = binascii.a2b_base64(base64string)
-            except:
-                continue
-            if options.number and len(base64data) < options.number:
-                continue
-            if options.select == '':
-                print('%2d: %7d %-16s %-16s %s' % (counter, len(base64string), base64string[0:16], AsciiDump(base64data[0:16]), hashlib.md5(base64data).hexdigest()))
-            elif ('%s' % counter) == options.select or options.select == 'a':
-                if DumpFunction == None:
-                    filehash, magicPrintable, magicHex, fileSize, entropy, countNullByte, countControlBytes, countWhitespaceBytes, countPrintableBytes, countHighBytes = CalculateFileMetaData(base64data)
-                    print('Info:')
-                    print(' %s: %s' % ('MD5', filehash))
-                    print(' %s: %d' % ('Filesize', fileSize))
-                    print(' %s: %f' % ('Entropy', entropy))
-                    print(' %s: %s' % ('Magic HEX', magicHex))
-                    print(' %s: %s' % ('Magic ASCII', magicPrintable))
-                    print(' %s: %s' % ('Null bytes', countNullByte))
-                    print(' %s: %s' % ('Control bytes', countControlBytes))
-                    print(' %s: %s' % ('Whitespace bytes', countWhitespaceBytes))
-                    print(' %s: %s' % ('Printable bytes', countPrintableBytes))
-                    print(' %s: %s' % ('High bytes', countHighBytes))
-                else:
-                    StdoutWriteChunked(DumpFunction(CutData(base64data, options.cut)))
-            counter += 1
+    for encodeddata, decodeddata in dEncodings[options.encoding][1](data):
+        if options.number and len(decodeddata) < options.number:
+            continue
+        if options.select == '':
+            print('%2d: %7d %-16s %-16s %s' % (counter, len(encodeddata), encodeddata[0:16], AsciiDump(decodeddata[0:16]), hashlib.md5(decodeddata).hexdigest()))
+        elif ('%s' % counter) == options.select or options.select == 'a':
+            if DumpFunction == None:
+                filehash, magicPrintable, magicHex, fileSize, entropy, countUniqueBytes, countNullByte, countControlBytes, countWhitespaceBytes, countPrintableBytes, countHighBytes = CalculateFileMetaData(decodeddata)
+                print('Info:')
+                print(' %s: %s' % ('MD5', filehash))
+                print(' %s: %d' % ('Filesize', fileSize))
+                print(' %s: %f' % ('Entropy', entropy))
+                print(' %s: %d (%.2f%%)' % ('Unique bytes', countUniqueBytes, countUniqueBytes / 2.560))
+                print(' %s: %s' % ('Magic HEX', magicHex))
+                print(' %s: %s' % ('Magic ASCII', magicPrintable))
+                print(' %s: %s' % ('Null bytes', countNullByte))
+                print(' %s: %s' % ('Control bytes', countControlBytes))
+                print(' %s: %s' % ('Whitespace bytes', countWhitespaceBytes))
+                print(' %s: %s' % ('Printable bytes', countPrintableBytes))
+                print(' %s: %s' % ('High bytes', countHighBytes))
+            else:
+                StdoutWriteChunked(DumpFunction(CutData(decodeddata, options.cut)))
+        counter += 1
 
     return 0
 
 def Main():
     oParser = optparse.OptionParser(usage='usage: %prog [options] [file]\n' + __description__, version='%prog ' + __version__)
     oParser.add_option('-m', '--man', action='store_true', default=False, help='Print manual')
+    oParser.add_option('-e', '--encoding', default='base64', help='select encoding to use (default base64)')
     oParser.add_option('-s', '--select', default='', help='select item nr for dumping (a for all)')
     oParser.add_option('-d', '--dump', action='store_true', default=False, help='perform dump')
     oParser.add_option('-x', '--hexdump', action='store_true', default=False, help='perform hex dump')
     oParser.add_option('-a', '--asciidump', action='store_true', default=False, help='perform ascii dump')
-    oParser.add_option('-n', '--number', type=int, default=None, help='minimum number of bytes in decoded base64 data')
+    oParser.add_option('-S', '--strings', action='store_true', default=False, help='perform strings dump')
+    oParser.add_option('-n', '--number', type=int, default=None, help='minimum number of bytes in decoded data')
     oParser.add_option('-c', '--cut', type=str, default='', help='cut data')
     oParser.add_option('-w', '--ignorewhitespace', action='store_true', default=False, help='ignore whitespace')
     (options, args) = oParser.parse_args()

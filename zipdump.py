@@ -2,8 +2,8 @@
 
 __description__ = 'ZIP dump utility'
 __author__ = 'Didier Stevens'
-__version__ = '0.0.3'
-__date__ = '2016/05/29'
+__version__ = '0.0.4'
+__date__ = '2016/11/16'
 
 """
 
@@ -31,6 +31,8 @@ History:
   2015/11/17: added support for :-number in --cut option; added -E option
   2016/05/26: refactoring and man
   2016/05/29: continue man, updated cut option
+  2016/11/15: 0.0.4: Added support ZIP comment
+  2016/11/16: added Unique bytes
 
 Todo:
 """
@@ -130,11 +132,12 @@ This can be useful when reports of many ZIP files are merged together.
 
 Option -e extends the amount of information reported:
 C:\Demo>zipdump.py -e example.zip
-Index Filename     Encrypted Timestamp           MD5                              Filesize Entropy       Magic HEX Magic ASCII Null bytes Control bytes Whitespace bytes Printable bytes High bytes 
-    1 Dialog42.exe         0 2012-02-25 12:08:26 9b7f8260724e2cb643ad0729ec995b40    58120 6.42503434625 4d5a5000  MZP.             13014          6403             1678           19366      17659 
-    2 readme.txt           0 2015-11-24 19:40:12 098f6bcd4621d373cade4e832627b4f6        4 1.5            74657374 test                 0             0                0               4          0 
+Index Filename     Encrypted Timestamp           MD5                              Filesize Entropy       Unique bytes Magic HEX Magic ASCII Null bytes Control bytes Whitespace bytes Printable bytes High bytes 
+    1 Dialog42.exe         0 2012-02-25 12:08:26 9b7f8260724e2cb643ad0729ec995b40    58120 6.42503434625          256 4d5a5000  MZP.             13014          6403             1678           19366      17659 
+    2 readme.txt           0 2015-11-24 19:40:12 098f6bcd4621d373cade4e832627b4f6        4 1.5                      3  74657374 test                 0             0                0               4          0 
 
 Columns MD5, Filesize and Entropy should be self-explanatory.
+Unique bytes counts the number of unique, different byte values contained in the file.
 The Magic columns (HEX and ASCII) report the first 4 bytes of the file.
 The remaining columns provide more statistical data about the contained file. They count the number of bytes of a particular type found inside the contained file. The byte types are: null bytes, control bytes, whitespace, printable bytes and high bytes.
 
@@ -408,6 +411,7 @@ def CalculateByteStatistics(dPrevalence):
     countNullByte = dPrevalence[0]
     countControlBytes = 0
     countWhitespaceBytes = 0
+    countUniqueBytes = 0
     for iter in range(1, 0x21):
         if chr(iter) in string.whitespace:
             countWhitespaceBytes += dPrevalence[iter]
@@ -425,7 +429,8 @@ def CalculateByteStatistics(dPrevalence):
         if dPrevalence[iter] > 0:
             prevalence = float(dPrevalence[iter]) / float(sumValues)
             entropy += - prevalence * math.log(prevalence, 2)
-    return sumValues, entropy, countNullByte, countControlBytes, countWhitespaceBytes, countPrintableBytes, countHighBytes
+            countUniqueBytes += 1
+    return sumValues, entropy, countUniqueBytes, countNullByte, countControlBytes, countWhitespaceBytes, countPrintableBytes, countHighBytes
 
 def CalculateFileMetaData(data):
     dPrevalence = {}
@@ -434,9 +439,9 @@ def CalculateFileMetaData(data):
     for char in data:
         dPrevalence[ord(char)] += 1
 
-    fileSize, entropy, countNullByte, countControlBytes, countWhitespaceBytes, countPrintableBytes, countHighBytes = CalculateByteStatistics(dPrevalence)
+    fileSize, entropy, countUniqueBytes, countNullByte, countControlBytes, countWhitespaceBytes, countPrintableBytes, countHighBytes = CalculateByteStatistics(dPrevalence)
     magicPrintable, magicHex = Magic(data[0:4])
-    return hashlib.md5(data).hexdigest(), magicPrintable, magicHex, fileSize, entropy, countNullByte, countControlBytes, countWhitespaceBytes, countPrintableBytes, countHighBytes
+    return hashlib.md5(data).hexdigest(), magicPrintable, magicHex, fileSize, entropy, countUniqueBytes, countNullByte, countControlBytes, countWhitespaceBytes, countPrintableBytes, countHighBytes
 
 def AddDecoder(cClass):
     global decoders
@@ -626,37 +631,13 @@ def ExtraInfoSHA256(data):
         return ''
     return hashlib.sha256(data).hexdigest()
 
-def CalculateByteStatistics(dPrevalence):
-    sumValues = sum(dPrevalence.values())
-    countNullByte = dPrevalence[0]
-    countControlBytes = 0
-    countWhitespaceBytes = 0
-    for iter in range(1, 0x21):
-        if chr(iter) in string.whitespace:
-            countWhitespaceBytes += dPrevalence[iter]
-        else:
-            countControlBytes += dPrevalence[iter]
-    countControlBytes += dPrevalence[0x7F]
-    countPrintableBytes = 0
-    for iter in range(0x21, 0x7F):
-        countPrintableBytes += dPrevalence[iter]
-    countHighBytes = 0
-    for iter in range(0x80, 0x100):
-        countHighBytes += dPrevalence[iter]
-    entropy = 0.0
-    for iter in range(0x100):
-        if dPrevalence[iter] > 0:
-            prevalence = float(dPrevalence[iter]) / float(sumValues)
-            entropy += - prevalence * math.log(prevalence, 2)
-    return sumValues, entropy, countNullByte, countControlBytes, countWhitespaceBytes, countPrintableBytes, countHighBytes
-
 def ExtraInfoENTROPY(data):
     if data == None:
         return ''
     dPrevalence = {iter: 0 for iter in range(0x100)}
     for char in data:
         dPrevalence[ord(char)] += 1
-    sumValues, entropy, countNullByte, countControlBytes, countWhitespaceBytes, countPrintableBytes, countHighBytes = CalculateByteStatistics(dPrevalence)
+    sumValues, entropy, countUniqueBytes, countNullByte, countControlBytes, countWhitespaceBytes, countPrintableBytes, countHighBytes = CalculateByteStatistics(dPrevalence)
     return '%f' % entropy
 
 def ExtraInfoHEADHEX(data):
@@ -712,7 +693,7 @@ def ExtraInfoBYTESTATS(data):
     dPrevalence = {iter: 0 for iter in range(0x100)}
     for char in data:
         dPrevalence[ord(char)] += 1
-    sumValues, entropy, countNullByte, countControlBytes, countWhitespaceBytes, countPrintableBytes, countHighBytes = CalculateByteStatistics(dPrevalence)
+    sumValues, entropy, countUniqueBytes, countNullByte, countControlBytes, countWhitespaceBytes, countPrintableBytes, countHighBytes = CalculateByteStatistics(dPrevalence)
     return '%d,%d,%d,%d,%d' % (countNullByte, countControlBytes, countWhitespaceBytes, countPrintableBytes, countHighBytes)
 
 def GenerateExtraInfo(extra, index, zipfilename, filename, encrypted, timestamp, stream):
@@ -839,6 +820,8 @@ def ZIPDump(zipfilename, options):
                 if options.select == '' and (options.dump or options.hexdump or options.asciidump):
                     break
     else:
+        if oZipfile.comment != '':
+            Print(oZipfile.comment, fOut)
         outputRows = []
         outputExtraInfo = ['']
         headers = ['Index']
@@ -849,7 +832,7 @@ def ZIPDump(zipfilename, options):
             headers.extend(['Decoder', 'YARA namespace', 'YARA rule'])
         else:
             if options.extended:
-                headers.extend(['Encrypted', 'Timestamp', 'MD5', 'Filesize', 'Entropy', 'Magic HEX', 'Magic ASCII', 'Null bytes', 'Control bytes', 'Whitespace bytes', 'Printable bytes', 'High bytes'])
+                headers.extend(['Encrypted', 'Timestamp', 'MD5', 'Filesize', 'Entropy', 'Unique bytes', 'Magic HEX', 'Magic ASCII', 'Null bytes', 'Control bytes', 'Whitespace bytes', 'Printable bytes', 'High bytes'])
             else:
                 headers.extend(['Encrypted', 'Timestamp'])
         outputRows.append(headers)
@@ -864,8 +847,8 @@ def ZIPDump(zipfilename, options):
                 timestamp = '%04d-%02d-%02d %02d:%02d:%02d' % oZipInfo.date_time
                 if options.yara == None:
                     if options.extended:
-                        filehash, magicPrintable, magicHex, fileSize, entropy, countNullByte, countControlBytes, countWhitespaceBytes, countPrintableBytes, countHighBytes = CalculateFileMetaData(filecontent)
-                        row = [oZipInfo.filename, encrypted, timestamp, filehash, fileSize, entropy, magicHex, magicPrintable, countNullByte, countControlBytes, countWhitespaceBytes, countPrintableBytes, countHighBytes]
+                        filehash, magicPrintable, magicHex, fileSize, entropy, countUniqueBytes, countNullByte, countControlBytes, countWhitespaceBytes, countPrintableBytes, countHighBytes = CalculateFileMetaData(filecontent)
+                        row = [oZipInfo.filename, encrypted, timestamp, filehash, fileSize, entropy, countUniqueBytes, magicHex, magicPrintable, countNullByte, countControlBytes, countWhitespaceBytes, countPrintableBytes, countHighBytes]
                     else:
                         row = [oZipInfo.filename, encrypted, timestamp]
                     if options.zipfilename:

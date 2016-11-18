@@ -2,8 +2,8 @@
 
 __description__ = 'Calculate byte statistics'
 __author__ = 'Didier Stevens'
-__version__ = '0.0.3'
-__date__ = '2015/11/08'
+__version__ = '0.0.4'
+__date__ = '2016/11/16'
 
 """
 Source code put in public domain by Didier Stevens, no Copyright
@@ -19,6 +19,7 @@ History:
   2015/10/31: 0.0.3 option -k also works for sequences (-s) now
   2015/11/01: added option -f
   2015/11/08: added position for minimum and maximum entropy
+  2016/11/16: 0.0.4 added unique bytes
 
 Todo:
 """
@@ -61,6 +62,7 @@ Size: 256
 
                    File(s)
 Entropy:           8.000000
+Unique bytes:           256 100.00%
 NULL bytes:               1   0.39%
 Control bytes:           27  10.55%
 Whitespace bytes:         6   2.34%
@@ -75,6 +77,7 @@ After the histogram, the size of the file(s) is displayed.
 
 Finally, the following statistics for the files(s) are displayed:
 * Entropy (between 0.0 and 8.0).
+* Number and percentage of Unique bytes.
 * Number and percentage of NULL bytes (0x00).
 * Number and percentage of Control bytes (0x01 through 0x1F, excluding whitespace bytes and including 0x7F).
 * Number and percentage of Whitespace bytes (0x09 through 0x0D and 0x20).
@@ -105,6 +108,7 @@ Size: 74752  Bucket size: 10240  Bucket count: 7
                    File(s)           Minimum buckets   Maximum buckets
 Entropy:           7.997180          7.981543          7.984125
                    Position:         0x0000f000        0x00005000
+Unique bytes:           256   0.34%       256   2.50%       256   2.50%
 NULL bytes:             303   0.41%        34   0.33%        44   0.43%
 Control bytes:         7888  10.55%      1046  10.21%      1117  10.91%
 Whitespace bytes:      1726   2.31%       220   2.15%       254   2.48%
@@ -137,6 +141,7 @@ Size: 877456  Bucket size: 10240  Bucket count: 85
                    File(s)           Minimum buckets   Maximum buckets
 Entropy:           7.815519          5.156678          7.981628
                    Position:         0x00019000        0x00005000
+Unique bytes:           256   0.03%       179   1.75%       256   2.50%
 NULL bytes:           23873   2.72%         8   0.08%      1643  16.04%
 Control bytes:        92243  10.51%        98   0.96%      1275  12.45%
 Whitespace bytes:     16241   1.85%         1   0.01%       263   2.57%
@@ -193,6 +198,7 @@ Size: 877456  Bucket size: 10240  Bucket count: 85
                    File(s)           Minimum buckets   Maximum buckets
 Entropy:           7.815519          5.156678          7.981628
                    Position:         0x00019000        0x00005000
+Unique bytes:           256   0.03%       179   1.75%       256   2.50%
 NULL bytes:           23873   2.72%         8   0.08%      1643  16.04%
 Control bytes:        92243  10.51%        98   0.96%      1275  12.45%
 Whitespace bytes:     16241   1.85%         1   0.01%       263   2.57%
@@ -235,6 +241,7 @@ Size: 4096
 
                    File(s)
 Entropy:           8.000000
+Unique bytes:           256   6.25%
 NULL bytes:              16   0.39%
 Control bytes:          432  10.55%
 Whitespace bytes:        96   2.34%
@@ -291,6 +298,7 @@ def CalculateByteStatistics(dPrevalence):
     countNullByte = dPrevalence[0]
     countControlBytes = 0
     countWhitespaceBytes = 0
+    countUniqueBytes = 0
     for iter in range(1, 0x21):
         if chr(iter) in string.whitespace:
             countWhitespaceBytes += dPrevalence[iter]
@@ -308,7 +316,8 @@ def CalculateByteStatistics(dPrevalence):
         if dPrevalence[iter] > 0:
             prevalence = float(dPrevalence[iter]) / float(sumValues)
             entropy += - prevalence * math.log(prevalence, 2)
-    return sumValues, entropy, countNullByte, countControlBytes, countWhitespaceBytes, countPrintableBytes, countHighBytes
+            countUniqueBytes += 1
+    return sumValues, entropy, countUniqueBytes, countNullByte, countControlBytes, countWhitespaceBytes, countPrintableBytes, countHighBytes
 
 def GenerateLine(prefix, counter, sumValues, buckets, index, options):
     line = '%-18s%9d %6.2f%%' % (prefix + ':', counter, float(counter) / sumValues * 100.0)
@@ -403,9 +412,9 @@ def ByteStats(args, options):
         print('Empty file(s)! Statistics can not be calclated.')
         return
 
-    sumValues, entropy, countNullByte, countControlBytes, countWhitespaceBytes, countPrintableBytes, countHighBytes = CalculateByteStatistics(dPrevalence)
+    sumValues, entropy, countUniqueBytes, countNullByte, countControlBytes, countWhitespaceBytes, countPrintableBytes, countHighBytes = CalculateByteStatistics(dPrevalence)
     if options.list:
-        dProperties = {'e': 1, 'n': 2, 'c': 3, 'w': 4, 'p': 5, 'h': 6}
+        dProperties = {'e': 1, 'u': 2, 'n': 3, 'c': 4, 'w': 5, 'p': 6, 'h': 7}
         if options.property not in dProperties:
             print('Unknown property: %s' % options.property)
             return
@@ -457,11 +466,12 @@ def ByteStats(args, options):
             if len(buckets) > 1:
                 line += '        0x%08x' % MaximumAndPosition(buckets, 1)[1]
             print(line)
-        print(GenerateLine('NULL bytes', countNullByte, sumValues, buckets, 2, options))
-        print(GenerateLine('Control bytes', countControlBytes, sumValues, buckets, 3, options))
-        print(GenerateLine('Whitespace bytes', countWhitespaceBytes, sumValues, buckets, 4, options))
-        print(GenerateLine('Printable bytes', countPrintableBytes, sumValues, buckets, 5, options))
-        print(GenerateLine('High bytes', countHighBytes, sumValues, buckets, 6, options))
+        print(GenerateLine('Unique bytes', countUniqueBytes, sumValues, buckets, 2, options))
+        print(GenerateLine('NULL bytes', countNullByte, sumValues, buckets, 3, options))
+        print(GenerateLine('Control bytes', countControlBytes, sumValues, buckets, 4, options))
+        print(GenerateLine('Whitespace bytes', countWhitespaceBytes, sumValues, buckets, 5, options))
+        print(GenerateLine('Printable bytes', countPrintableBytes, sumValues, buckets, 6, options))
+        print(GenerateLine('High bytes', countHighBytes, sumValues, buckets, 7, options))
 
     if options.sequence:
         print('')
@@ -493,7 +503,7 @@ https://DidierStevens.com'''
     oParser.add_option('-k', '--keys', action='store_true', default=False, help='Sort on keys in stead of counts')
     oParser.add_option('-b', '--bucket', type=int, default=10240, help='Size of bucket (default is 10240 bytes)')
     oParser.add_option('-l', '--list', action='store_true', default=False, help='Print list of bucket property')
-    oParser.add_option('-p', '--property', default='e', help='Property to list: encwph')
+    oParser.add_option('-p', '--property', default='e', help='Property to list: euncwph')
     oParser.add_option('-a', '--all', action='store_true', default=False, help='Print all byte stats')
     oParser.add_option('-s', '--sequence', action='store_true', default=False, help='Detect simple sequences')
     oParser.add_option('-f', '--filter', type=int, default=0, help='Minimum length of sequence for displaying (default 0)')
