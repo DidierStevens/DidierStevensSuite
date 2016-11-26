@@ -2,7 +2,7 @@
 
 __description__ = 'pdf-parser, use it to parse a PDF document'
 __author__ = 'Didier Stevens'
-__version__ = '0.6.5'
+__version__ = '0.6.6'
 __date__ = '2016/11/20'
 __minimum_python_version__ = (2, 5, 1)
 __maximum_python_version__ = (3, 4, 3)
@@ -56,7 +56,7 @@ History:
   2015/04/24: V0.6.3 when option dump's filename is -, content is dumped to stdout
   2015/08/12: V0.6.4 option hash now also calculates hashes of streams when selecting or searching objects; and displays hexasciidump first line
   2016/07/27: V0.6.5 bugfix whitespace 0x00 0x0C after stream 0x0D 0x0A reported by @mr_me
-  2016/11/20: added workaround zlib errors FlateDecode
+  2016/11/20: V0.6.6 added workaround zlib errors FlateDecode
 
 Todo:
   - handle printf todo
