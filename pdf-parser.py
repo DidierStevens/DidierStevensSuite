@@ -3,7 +3,7 @@
 __description__ = 'pdf-parser, use it to parse a PDF document'
 __author__ = 'Didier Stevens'
 __version__ = '0.6.5'
-__date__ = '2016/07/27'
+__date__ = '2016/11/20'
 __minimum_python_version__ = (2, 5, 1)
 __maximum_python_version__ = (3, 4, 3)
 
@@ -56,6 +56,7 @@ History:
   2015/04/24: V0.6.3 when option dump's filename is -, content is dumped to stdout
   2015/08/12: V0.6.4 option hash now also calculates hashes of streams when selecting or searching objects; and displays hexasciidump first line
   2016/07/27: V0.6.5 bugfix whitespace 0x00 0x0C after stream 0x0D 0x0A reported by @mr_me
+  2016/11/20: added workaround zlib errors FlateDecode
 
 Todo:
   - handle printf todo
@@ -883,8 +884,26 @@ def ASCII85Decode(data):
 def ASCIIHexDecode(data):
     return binascii.unhexlify(''.join([c for c in data if c not in ' \t\n\r']).rstrip('>'))
 
+# if inflating fails, we try to inflate byte per byte (sample 4da299d6e52bbb79c0ac00bad6a1d51d4d5fe42965a8d94e88a359e5277117e2)
 def FlateDecode(data):
-    return zlib.decompress(C2BIP3(data))
+    try:
+        return zlib.decompress(C2BIP3(data))
+    except:
+        if len(data) <= 10:
+            raise
+        oDecompress = zlib.decompressobj()
+        oStringIO = StringIO()
+        count = 0
+        for byte in C2BIP3(data):
+            try:
+                oStringIO.write(oDecompress.decompress(byte))
+                count += 1
+            except:
+                break
+        if len(data) - count <= 2:
+            return oStringIO.getvalue()
+        else:
+            raise
 
 def RunLengthDecode(data):
     f = StringIO(data)
@@ -1146,7 +1165,7 @@ def HexAsciiDump(data):
 
 def HexAsciiDumpLine(data):
     return HexAsciiDump(data[0:16])[10:-1]
-    
+
 def Main():
     """pdf-parser, use it to parse a PDF document
     """

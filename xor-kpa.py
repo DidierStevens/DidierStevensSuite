@@ -2,8 +2,8 @@
 
 __description__ = 'XOR known-plaintext attack'
 __author__ = 'Didier Stevens'
-__version__ = '0.0.3'
-__date__ = '2016/08/02'
+__version__ = '0.0.4'
+__date__ = '2016/11/18'
 
 """
 
@@ -18,6 +18,9 @@ History:
   2016/01/10: 0.0.2 added support for zipfiles
   2016/08/01: 0.0.3 added support for pipes
   2016/08/02: added option -n
+  2016/11/08: 0.0.4 added option -x
+  2016/11/16: added key in hex
+  2016/11/18: updated man
 
 Todo:
 """
@@ -46,6 +49,7 @@ Example:
  xor-kpa.py "#secret message" encoded.txt
 Output:
  Key:       ABC
+ Key (hex): 0x414243
  Extra:     11
  Keystream: BCABCABCABCABC
 
@@ -57,14 +61,17 @@ Example:
  xor-kpa.py #secret encoded.txt
 Output:
  Key:       ABC
+ Key (hex): 0x414243
  Extra:     3
  Keystream: BCABCA
 
  Key:       'KU\x11W^'
+ Key (hex): 0x4b5511575e
  Extra:     1
  Keystream: '^KU\x11W^'
 
  Key:       '\x07S@E\x1f'
+ Key (hex): 0x075340451f
  Extra:     1
  Keystream: 'S@E\x1f\x07S'
 
@@ -76,6 +83,7 @@ Example:
  xor-kpa.py -e 2 #secret encoded.txt
 Output:
  Key:       ABC
+ Key (hex): 0x414243
  Extra:     3
  Keystream: BCABCA
 
@@ -85,6 +93,12 @@ xor-kpa can also decode the ciphertext file with the recovered key (the key with
 
 Example:
  xor-kpa.py -d #secret encoded.txt
+Output:
+ This is a secret message, do not share!
+
+Using option -x xor-kpa can encode/decode a message with a provided key.
+Example:
+ xor-kpa.py -x #h#152A2A32622A32622261312622302635622E2431302025266D62272E622D2E3663322A22332762 #ABC
 Output:
  This is a secret message, do not share!
 
@@ -244,6 +258,11 @@ def XOR(filenamePlaintext, filenameCiphertext, options):
             print('Error reading: %s' % filenameCiphertext)
             return
 
+    if options.xor:
+        IfWIN32SetBinary(sys.stdout)
+        StdoutWriteChunked(XORData(plaintext, ciphertext))
+        return
+
     results = []
     for i in range(len(ciphertext) - len(plaintext)):
         extractedKeyStream = XORData(plaintext, ciphertext[i:])
@@ -271,6 +290,7 @@ def XOR(filenamePlaintext, filenameCiphertext, options):
         for result in results:
             oPrintSeparatingLine.Print()
             print('Key:       %s' % ReprIfNeeded(result.key))
+            print('Key (hex): 0x%s' % binascii.b2a_hex(result.key))
             print('Extra:     %s' % result.extra)
             print('Keystream: %s' % ReprIfNeeded(result.keystream))
 
@@ -295,6 +315,7 @@ https://DidierStevens.com'''
     oParser.add_option('-n', '--name', action='store_true', default=False, help='Use predefined plaintext')
     oParser.add_option('-e', '--extra', type=int, default=1, help='Minimum number of extras')
     oParser.add_option('-d', '--decode', action='store_true', default=False, help='Decode the ciphertext')
+    oParser.add_option('-x', '--xor', action='store_true', default=False, help='XOR data with key')
     (options, args) = oParser.parse_args()
 
     if options.man:
