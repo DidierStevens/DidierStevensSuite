@@ -2,8 +2,8 @@
 
 __description__ = 'Analyze OLE files (Compound Binary Files)'
 __author__ = 'Didier Stevens'
-__version__ = '0.0.25'
-__date__ = '2016/10/16'
+__version__ = '0.0.26'
+__date__ = '2016/12/11'
 
 """
 
@@ -64,6 +64,7 @@ History:
   2016/06/08: 0.0.24 option -v works with option -E
   2016/08/01: 0.0.25 added Magic to info
   2016/10/16: decompressed.replace('\r\n', '\n'); added plugindir and decoderdir options by Remi Pointel
+  2016/12/11: 0.0.26 added indicator O for OLE10Native
 
 Todo:
 """
@@ -242,14 +243,14 @@ C:\Demo>oledump.py -s 7 --vbadecompresscorrupt Book2-vba.xls
 
 Option -r can be used together with option -v to decompress a VBA macro stream that was extracted through some other mean than oledump. In such case, you provide the file that contains the compressed macro, instead of the OLE file.
 
-Microsoft Office files can contain embedded objects. They show up like this (notice stream 6 Ole10Native):
+Microsoft Office files can contain embedded objects. They show up like this (notice stream 6 Ole10Native with indicator O):
 C:\Demo>oledump.py Book1-insert-object-calc-rol3.exe.xls
   1:       109 '\\x01CompObj'
   2:       276 '\\x05DocumentSummaryInformation'
   3:       224 '\\x05SummaryInformation'
   4:        80 'MBD0004D0D1/\\x01CompObj'
   5:        20 'MBD0004D0D1/\\x01Ole'
-  6:    114798 'MBD0004D0D1/\\x01Ole10Native'
+  6: O  114798 'MBD0004D0D1/\\x01Ole10Native'
   7:     11312 'Workbook'
 
 To get more info about the embedded object, use option -i like this:
@@ -308,7 +309,7 @@ C:\Demo>oledump.py -y contains_pe_file.yara Book1-insert-object-exe.xls
   2:       256 '\\x05DocumentSummaryInformation'
   3:       216 '\\x05SummaryInformation'
   4:        76 'MBD0049DB15/\\x01CompObj'
-  5:     60326 'MBD0049DB15/\\x01Ole10Native'
+  5: O   60326 'MBD0049DB15/\\x01Ole10Native'
                YARA rule: Contains_PE_File
   6:     19567 'Workbook'
 
@@ -320,7 +321,7 @@ C:\Demo>oledump.py -y contains_pe_file.yara --yarastrings Book1-insert-object-ex
   2:       256 '\\x05DocumentSummaryInformation'
   3:       216 '\\x05SummaryInformation'
   4:        76 'MBD0049DB15/\\x01CompObj'
-  5:     60326 'MBD0049DB15/\\x01Ole10Native'
+  5: O   60326 'MBD0049DB15/\\x01Ole10Native'
                YARA rule: Contains_PE_File
                000064 $a:
                 4d5a
@@ -351,7 +352,7 @@ C:\Demo>oledump.py -y contains_pe_file.yara -D decoder_xor1 Book1-insert-object-
   2:       256 '\\x05DocumentSummaryInformation'
   3:       216 '\\x05SummaryInformation'
   4:        76 'MBD0049DB15/\\x01CompObj'
-  5:     60326 'MBD0049DB15/\\x01Ole10Native'
+  5: O   60326 'MBD0049DB15/\\x01Ole10Native'
                YARA rule (stream decoder: XOR 1 byte key 0x14): Contains_PE_File
   6:     19567 'Workbook'
 
@@ -364,7 +365,7 @@ C:\Demo>oledump.py -y contains_pe_file.yara -D decoder_xor1,decoder_rol1,decoder
   2:       256 '\\x05DocumentSummaryInformation'
   3:       216 '\\x05SummaryInformation'
   4:        76 'MBD0049DB15/\\x01CompObj'
-  5:     60326 'MBD0049DB15/\\x01Ole10Native'
+  5: O   60326 'MBD0049DB15/\\x01Ole10Native'
                YARA rule (stream decoder: XOR 1 byte key 0x14): Contains_PE_File
   6:     19567 'Workbook'
 
@@ -1275,6 +1276,18 @@ def GenerateExtraInfo(extra, index, indicator, name, stream):
             extra = extra.replace(variable, dExtras[variable](stream))
     return prefix + extra.replace(r'\t', '\t').replace(r'\n', '\n')
 
+def OLE10HeaderPresent(data):
+    length = len(data)
+    if length < 6:
+        return False
+    size, data = ReadDWORD(data)
+    if size == None:
+        return False
+    if size + 4 != length:
+        return False
+    version, data = ReadWORD(data)
+    return version ==2
+
 def OLESub(ole, prefix, rules, options):
     global plugins
     global decoders
@@ -1322,6 +1335,8 @@ def OLESub(ole, prefix, rules, options):
                         indicator = 'M'
                         if MacrosContainsOnlyAttributesOrOptions(stream):
                             indicator = 'm'
+                elif OLE10HeaderPresent(stream):
+                    indicator = 'O'
             if not options.quiet:
                 index = '%s%d' % (prefix, counter)
                 line = '%3s: %s %s %s' % (index, indicator, lengthString, PrintableName(fname))
