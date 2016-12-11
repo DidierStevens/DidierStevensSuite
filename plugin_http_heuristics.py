@@ -2,8 +2,8 @@
 
 __description__ = 'HTTP Heuristics plugin for oledump.py'
 __author__ = 'Didier Stevens'
-__version__ = '0.0.8'
-__date__ = '2015/04/01'
+__version__ = '0.0.9'
+__date__ = '2016/12/11'
 
 """
 
@@ -25,6 +25,7 @@ History:
   2015/03/18: 0.0.6 also handle empty strings
   2015/03/23: 0.0.7 fixed regression bug Heuristics
   2015/04/01: 0.0.8 added PreProcess
+  2016/12/11: 0.0.9 added iOffset loop
 
 Todo:
 """
@@ -83,10 +84,11 @@ class cHTTPHeuristics(cPluginParent):
         for key in keys:
             if key != '':
                 for ciphertext in ciphertexts:
-                    cleartext = ''
-                    for iIter in range(len(ciphertext)):
-                        cleartext += chr(ord(ciphertext[iIter]) ^ ord(key[iIter % len(key)]))
-                    result.append(self.Heuristics(cleartext))
+                    for iOffset in range(2):
+                        cleartext = ''
+                        for iIter in range(len(ciphertext)):
+                            cleartext += chr(ord(ciphertext[iIter]) ^ ord(key[(iIter + iOffset)% len(key)]))
+                        result.append(self.Heuristics(cleartext))
 
         return result
 
