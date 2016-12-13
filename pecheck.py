@@ -2,8 +2,8 @@
 
 __description__ = 'Tool for displaying PE file info'
 __author__ = 'Didier Stevens'
-__version__ = '0.5.2'
-__date__ = '2016/12/01'
+__version__ = '0.6.0'
+__date__ = '2016/12/12'
 
 """
 
@@ -30,6 +30,7 @@ History:
   2016/05/24: fixed bug GetPEObject
   2016/08/02: V0.5.2 added signature analysis if pyasn installed
   2016/12/01: added options -g -D -x -a -S
+  2016/12/12: V0.6.0 added option -o
 
 Todo:
 """
@@ -350,10 +351,60 @@ def ParseGetData(expression):
         return None
     return (int(terms[0].strip()[2:], 16), int(terms[1].strip()[2:], 16))
 
-def SingleFile(filename, signatures, options):
-    if options.getdata == '':
-        SingleFileInfo(filename, signatures, options)
+def GenerateMAGIC(data):
+    return binascii.b2a_hex(data) + ' ' + ''.join([IFF(ord(c) >= 32 and ord(c) <= 128, c, '.') for c in data])
+
+def Resources(filename, options):
+    counter = 1
+    pe = GetPEObject(filename)
+
+    if options.dump:
+        DumpFunction = lambda x:x
+        IfWIN32SetBinary(sys.stdout)
+    elif options.hexdump:
+        DumpFunction = HexDump
+    elif options.asciidump:
+        DumpFunction = HexAsciiDump
+    elif options.strings:
+        DumpFunction = DumpFunctionStrings
     else:
+        DumpFunction = HexAsciiDump
+
+    if hasattr(pe, 'DIRECTORY_ENTRY_RESOURCE'):
+        for resource_type in pe.DIRECTORY_ENTRY_RESOURCE.entries:
+            if resource_type.name is not None:
+                column1 = str(resource_type.name)
+            else:
+                column1 = '[%s]' % pefile.RESOURCE_TYPE.get(resource_type.struct.Id, '-')
+            if hasattr(resource_type, 'directory'):
+                for resource_id in resource_type.directory.entries:
+                    if resource_id.name is not None:
+                        column2 = str(resource_id.name)
+                    else:
+                        column2 = '%d' % resource_id.struct.Id
+                    if hasattr(resource_id, 'directory'):
+                        for resource_lang in resource_id.directory.entries:
+                            if hasattr(resource_lang, 'data'):
+                                column3 = '(%d,%d)' % (resource_lang.data.lang, resource_lang.data.sublang)
+                                data = pe.get_data(resource_lang.data.struct.OffsetToData, resource_lang.data.struct.Size)
+                                if options.getdata == '':
+                                    print('%4d: %-20s %-20s %s %7d %s' % (counter, column1, column2, column3, resource_lang.data.struct.Size, GenerateMAGIC(data[0:8])))
+                                elif int(options.getdata) == counter:
+                                    StdoutWriteChunked(DumpFunction(data))
+                                counter += 1
+                    else:
+                        if options.getdata == '':
+                            print('%4d: %-20s %-20s' % (counter, column1, column2))
+                        counter += 1
+            else:
+                if options.getdata == '':
+                    print('%4d: %-20s' % (counter, column1))
+                counter += 1
+
+def SingleFile(filename, signatures, options):
+    if options.overview == 'r':
+        Resources(filename, options)
+    elif options.getdata != '':
         pe = GetPEObject(filename)
         if options.dump:
             DumpFunction = lambda x:x
@@ -371,6 +422,8 @@ def SingleFile(filename, signatures, options):
             print('Error getdata syntax error: %s' % options.getdata)
             return
         StdoutWriteChunked(DumpFunction(pe.get_data(parsed[0], parsed[1])))
+    else:
+        SingleFileInfo(filename, signatures, options)
 
 def FileContentsStartsWithMZ(filename):
     try:
@@ -478,9 +531,10 @@ def Main():
     oParser.add_option('-x', '--hexdump', action='store_true', default=False, help='perform hex dump')
     oParser.add_option('-a', '--asciidump', action='store_true', default=False, help='perform ascii dump')
     oParser.add_option('-S', '--strings', action='store_true', default=False, help='perform strings dump')
+    oParser.add_option('-o', '--overview', type=str, default='', help='Accepted value: r for overview of resources')
     (options, args) = oParser.parse_args(GetArgumentsUpdatedWithEnvironmentVariable('PECHECK_OPTIONS'))
 
-    if len(args) > 1:
+    if len(args) > 1 or options.overview != '' and options.overview != 'r':
         oParser.print_help()
         print('')
         print('  Source code put in the public domain by Didier Stevens, no Copyright')
