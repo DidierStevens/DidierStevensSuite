@@ -2,8 +2,8 @@
 
 __description__ = 'pdf-parser, use it to parse a PDF document'
 __author__ = 'Didier Stevens'
-__version__ = '0.6.6'
-__date__ = '2016/11/20'
+__version__ = '0.6.7'
+__date__ = '2016/12/17'
 __minimum_python_version__ = (2, 5, 1)
 __maximum_python_version__ = (3, 4, 3)
 
@@ -57,6 +57,7 @@ History:
   2015/08/12: V0.6.4 option hash now also calculates hashes of streams when selecting or searching objects; and displays hexasciidump first line
   2016/07/27: V0.6.5 bugfix whitespace 0x00 0x0C after stream 0x0D 0x0A reported by @mr_me
   2016/11/20: V0.6.6 added workaround zlib errors FlateDecode
+  2016/12/17: V0.6.7 added option -k
 
 Todo:
   - handle printf todo
@@ -690,6 +691,15 @@ class cPDFParseDictionary:
                     dictionary.append((key, value))
                     value = []
                     state = 1
+                elif value == [] and tokens[0][1] == '(':
+                    value.append(tokens[0][1])
+                elif value != [] and value[0] == '(' and tokens[0][1] != ')':
+                    value.append(tokens[0][1])
+                elif value != [] and value[0] == '(' and tokens[0][1] == ')':
+                    value.append(tokens[0][1])
+                    dictionary.append((key, value))
+                    value = []
+                    state = 1
                 elif value != [] and tokens[0][1][0] == '/':
                     dictionary.append((key, value))
                     key = ConditionalCanonicalize(tokens[0][1], self.nocanonicalizedoutput)
@@ -702,25 +712,28 @@ class cPDFParseDictionary:
     def Retrieve(self):
         return self.parsed
 
+    def PrettyPrintSubElement(self, prefix, e):
+        if e[1] == []:
+            print('%s  %s' % (prefix, e[0]))
+        elif type(e[1][0]) == type(''):
+            if len(e[1]) == 3 and IsNumeric(e[1][0]) and e[1][1] == '0' and e[1][2] == 'R':
+                joiner = ' '
+            else:
+                joiner = ''
+            value = joiner.join(e[1]).strip()
+            reprValue = repr(value)
+            if "'" + value + "'" != reprValue:
+                value = reprValue
+            print('%s  %s %s' % (prefix, e[0], value))
+        else:
+            print('%s  %s' % (prefix, e[0]))
+            self.PrettyPrintSub(prefix + '    ', e[1])
+
     def PrettyPrintSub(self, prefix, dictionary):
         if dictionary != None:
             print('%s<<' % prefix)
             for e in dictionary:
-                if e[1] == []:
-                    print('%s  %s' % (prefix, e[0]))
-                elif type(e[1][0]) == type(''):
-                    if len(e[1]) == 3 and IsNumeric(e[1][0]) and e[1][1] == '0' and e[1][2] == 'R':
-                        joiner = ' '
-                    else:
-                        joiner = ''
-                    value = joiner.join(e[1]).strip()
-                    reprValue = repr(value)
-                    if "'" + value + "'" != reprValue:
-                        value = reprValue
-                    print('%s  %s %s' % (prefix, e[0], value))
-                else:
-                    print('%s  %s' % (prefix, e[0]))
-                    self.PrettyPrintSub(prefix + '    ', e[1])
+                self.PrettyPrintSubElement(prefix, e)
             print('%s>>' % prefix)
 
     def PrettyPrint(self, prefix):
@@ -731,6 +744,19 @@ class cPDFParseDictionary:
             if key == select:
                 return value
         return None
+
+    def GetNestedSub(self, dictionary, select):
+        for key, value in dictionary:
+            if key == select:
+                return self.PrettyPrintSubElement('', [select, value])
+            if type(value) == type([]) and type(value[0]) == type((None,)):
+                result = self.GetNestedSub(value, select)
+                if result !=None:
+                    return self.PrettyPrintSubElement('', [select, result])
+        return None
+
+    def GetNested(self, select):
+        return self.GetNestedSub(self.parsed, select)
 
 def FormatOutput(data, raw):
     if raw:
@@ -1198,6 +1224,7 @@ def Main():
     oParser.add_option('--yarastrings', action='store_true', default=False, help='Print YARA strings')
     oParser.add_option('--decoders', type=str, default='', help='decoders to load (separate decoders with a comma , ; @file supported)')
     oParser.add_option('--decoderoptions', type=str, default='', help='options for the decoder')
+    oParser.add_option('-k', '--key', help='key to search in dictionaries')
     (options, args) = oParser.parse_args()
 
     if len(args) != 1:
@@ -1242,12 +1269,12 @@ def Main():
                     return
         else:
             selectIndirectObject = True
-            if not options.search and not options.object and not options.reference and not options.type and not options.searchstream:
+            if not options.search and not options.object and not options.reference and not options.type and not options.searchstream and not options.key:
                 selectComment = True
                 selectXref = True
                 selectTrailer = True
                 selectStartXref = True
-            if options.search:
+            if options.search or options.key:
                 selectTrailer = True
 
         if options.type == '-':
@@ -1340,13 +1367,18 @@ def Main():
                             if result != None:
                                 savedRoot = result
                         elif options.yara == None and options.generateembedded == 0:
-                            if not options.search or options.search and object.Contains(options.search):
+                            if not options.search and not options.key or options.search and object.Contains(options.search):
                                 if oPDFParseDictionary == None:
                                     print('trailer %s' % FormatOutput(object.content, options.raw))
                                 else:
                                     print('trailer')
                                     oPDFParseDictionary.PrettyPrint('  ')
                                 print('')
+                            elif options.key:
+                                if oPDFParseDictionary.parsed != None:
+                                    result = oPDFParseDictionary.GetNested(options.key)
+                                    if result != None:
+                                        print(result)
                     elif object.type == PDF_ELEMENT_STARTXREF and selectStartXref:
                         if not options.generate and options.yara == None and options.generateembedded == 0:
                             print('startxref %d' % object.index)
@@ -1355,6 +1387,12 @@ def Main():
                         if options.search:
                             if object.Contains(options.search):
                                 PrintObject(object, options)
+                        elif options.key:
+                            oPDFParseDictionary = cPDFParseDictionary(object.content[1:], options.nocanonicalizedoutput)
+                            if oPDFParseDictionary.parsed != None:
+                                result = oPDFParseDictionary.GetNested(options.key)
+                                if result != None:
+                                    print(result)
                         elif options.object:
                             if object.id == eval(options.object):
                                 PrintObject(object, options)
