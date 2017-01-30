@@ -2,8 +2,8 @@
 
 __description__ = 'ZIP dump utility'
 __author__ = 'Didier Stevens'
-__version__ = '0.0.4'
-__date__ = '2016/11/16'
+__version__ = '0.0.5'
+__date__ = '2017/01/29'
 
 """
 
@@ -33,6 +33,7 @@ History:
   2016/05/29: continue man, updated cut option
   2016/11/15: 0.0.4: Added support ZIP comment
   2016/11/16: added Unique bytes
+  2017/01/29: 0.0.5: added # for option extra
 
 Todo:
 """
@@ -49,6 +50,7 @@ import math
 import binascii
 import re
 import textwrap
+import operator
 try:
     import yara
 except:
@@ -189,6 +191,13 @@ Example:
 C:\Demo>zipdump.py -E "!%FILENAME%;%SHA256%" example.zip
 Dialog42.exe;0a391054e50a4808553466263c9c3b63e895be02c957dbb957da3ba96670cf34
 readme.txt;9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08
+
+If the extra parameter starts with #, then it produces a summary of output.
+Example:
+C:\Demo>zipdump.py -E "#%HEADASCII%;%HEADHEX%" Book1.xlsm
+   1: --..............;d0cf11e0a1b11ae10000000000000000
+   1: <xml xmlns:v="ur;3c786d6c20786d6c6e733a763d227572
+  12: <?xml version="1;3c3f786d6c2076657273696f6e3d2231
 
 To include extra data with each use of zipdump, define environment variable ZIPDUMP_EXTRA with the parameter that should be passed to -E. When environment variable ZIPDUMP_EXTRA is defined, option -E can be ommited. When option -E is used together with environment variable ZIPDUMP_EXTRA, the parameter of option -E is used and the environment variable is ignored.
 
@@ -699,7 +708,7 @@ def ExtraInfoBYTESTATS(data):
 def GenerateExtraInfo(extra, index, zipfilename, filename, encrypted, timestamp, stream):
     if extra == '':
         return ''
-    if extra.startswith('!'):
+    if extra.startswith('!') or extra.startswith('#'):
         extra = extra[1:]
     dExtras = {'%INDEX%': lambda x: '%d' % index,
                '%ZIPFILENAME%': lambda x: zipfilename,
@@ -734,6 +743,15 @@ def PrintOutput(output, outputExtraInfo, extra, separator, quote, fOut):
     if extra.startswith('!'):
         for line in outputExtraInfo[1:]:
             Print(line, fOut)
+    elif extra.startswith('#'):
+        dOutput = {}
+        for line in outputExtraInfo[1:]:
+            if line in dOutput:
+                dOutput[line] += 1
+            else:
+                dOutput[line] = 1
+        for line, counter in sorted(dOutput.items(), key=operator.itemgetter(1)):
+            Print('%4d: %s' % (counter, line), fOut)
     else:
         if separator != '':
             for i in range(len(output)):
