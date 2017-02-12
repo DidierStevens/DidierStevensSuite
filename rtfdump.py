@@ -2,8 +2,8 @@
 
 __description__ = 'Analyze RTF files'
 __author__ = 'Didier Stevens'
-__version__ = '0.0.4'
-__date__ = '2016/08/12'
+__version__ = '0.0.5'
+__date__ = '2017/02/11'
 
 """
 
@@ -29,6 +29,7 @@ History:
   2016/07/30: 0.0.3 added option recursionlimit
   2016/08/09: 0.0.4 refactoring
   2016/08/12: continue
+  2017/02/11: added \dde000... handling; added option -E
 
 Todo:
 """
@@ -289,7 +290,19 @@ def BuildTree(rtfdata, level, index, sequence, options):
     oIteminfo.countChildren = children
     return index
 
+def Trimdde(data):
+    if not data.startswith('\r\n\\dde'):
+        return data
+    data = data[6:]
+    counter = 0
+    while data[counter] == '0' and counter < 250:
+        counter += 1
+    return data[counter:]
+
 def ExtractHex(data):
+    data = Trimdde(data)
+    if data.startswith('\r\n\\dde'):
+        print(repr(data[0:40]))
     backslash = False
     backslashtext = ''
     hexstring = [cStringIO.StringIO()]
@@ -402,6 +415,10 @@ CUTTERM_NOTHING = 0
 CUTTERM_POSITION = 1
 CUTTERM_FIND = 2
 CUTTERM_LENGTH = 3
+
+def ExtractPackage(data):
+    result = ExtractOleInfo(data)
+    return data[result[1]:result[1] + result[2]]
 
 def Replace(string, dReplacements):
     if string in dReplacements:
@@ -665,7 +682,11 @@ def RTFSub(oStringIO, prefix, rules, options):
             DumpFunction = Info
         else:
             DumpFunction = HexAsciiDump
-        StdoutWriteChunked(DumpFunction(DecodeFunction(decoders, options, CutData(HexDecodeIfRequested(dAnalysis[int(options.select)], options), options.cut))))
+        if options.extract:
+            ExtractFunction = ExtractPackage
+        else:
+            ExtractFunction = lambda x:x
+        StdoutWriteChunked(DumpFunction(ExtractFunction(DecodeFunction(decoders, options, CutData(HexDecodeIfRequested(dAnalysis[int(options.select)], options), options.cut)))))
 
     return returnCode
 
@@ -734,6 +755,7 @@ def Main():
     oParser.add_option('-V', '--verbose', action='store_true', default=False, help='verbose output with decoder errors')
     oParser.add_option('-c', '--cut', type=str, default='', help='cut data')
     oParser.add_option('-i', '--info', action='store_true', default=False, help='print extra info for selected item')
+    oParser.add_option('-E', '--extract', action='store_true', default=False, help='extract package')
     oParser.add_option('-f', '--filter', type=str, default='', help='filter')
     oParser.add_option('--recursionlimit', type=int, default=2000, help='set recursionlimit for Python (default 2000)')
     (options, args) = oParser.parse_args()
