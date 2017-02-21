@@ -2,8 +2,8 @@
 
 __description__ = 'Extract base64 strings from file'
 __author__ = 'Didier Stevens'
-__version__ = '0.0.5'
-__date__ = '2016/11/18'
+__version__ = '0.0.6'
+__date__ = '2017/02/13'
 
 """
 
@@ -22,6 +22,8 @@ History:
   2016/01/23: updated CutData
   2016/11/08: 0.0.5 added option -e; unique bytes; option -S
   2016/11/18: added hex encoding
+  2017/02/12: 0.0.6 added encoding all and option -u
+  2017/02/13: updated man
 
 Todo:
 """
@@ -66,7 +68,7 @@ The fourth column (Decoded) is the ASCII dump of the start of the decoded base64
 The fifth column (MD5 decoded) is the MD5 hash of the decoded base64 string.
 
 By default, base64dump will search for base64 encoding strings. It's possible to specify other encodings by using option -e. This option takes the following values:
-base64
+b64
 bu
 pu
 hex
@@ -101,6 +103,29 @@ Here is an example of an ascii dump (-s 2 -a):
 You can also specify the minimum length of the decoded base64 datastream with option -n.
 
 With option -w (ignorewhitespace), you can instruct base64dump to ignore all whitespace characters. So for example if the base64 text is split into lines, then you will get one base64 stream.
+
+It's also possible to try all encodings: all
+Example:
+base64dump.py -e all -n 80 sample.vir
+
+Enc  Size    Encoded          Decoded          MD5 decoded                     
+---  ----    -------          -------          -----------                     
+b64:     176 bebafeca41414141 m.+}t.p^5p^5p^5p e3bed37dcd137c9bb5da103d3c45be49
+hex:     176 bebafeca41414141 +..-AAAAAAAAAAAA 56464bd2b2c42bbf2edda87d54ab91f5
+b64:     192 28000e1358000e13 .-4-fwt-4-fwm.+} 81c587874b1c3ddc5479a283179d29f7
+hex:     192 28000e1358000e13 (...X...+..-AAAA 3a604ca304d1dbbcc1734a430cf6dc82
+b64:    2144 6064a1000000008b dN+k]4+M4+O.pM8. 46d100d435a37f89f3ab0ac6db3e9cac
+hex:    2144 6064a1000000008b .d......@.%....f a2ae7b55955262ada177862ceb683977
+b64:    3640 48895C2408488974 p-=S-+++<=....tp f0384b0c74e9402ab3f1aacc4a270ed3
+hex:    3640 48895C2408488974 H.\$.H.t$.H.|$.U 3320b9e508862886d2c3f556cacc67ec
+b64:  213024 5555555566666666 tPytPyd..d....Z. c7ff5e1a5a01698f99f67fd3f0d20d6d
+hex:  213024 5555555566666666 UUUUffffMZ...... 7a618dc1ef3f52693b8ec22dbe0300ec
+b64:  246816 5555555566666666 tPytPyd..d....Z. bdec177dc760d4296aefbbdc4c47bcf2
+hex:  246816 5555555566666666 UUUUffffMZ...... a69fa966087f38241544523d437f9a8b
+
+The list is sorted by increasing size.
+
+Identical decoded content can be made unique with option -u.
 
 Option -c (--cut) allows for the partial selection of a stream. Use this option to "cut out" part of the stream.
 The --cut option takes an argument to specify which section of bytes to select from the stream. This argument is composed of 2 terms separated by a colon (:), like this:
@@ -468,7 +493,7 @@ def DecodeDataPU(data):
 
 def BASE64Dump(filename, options):
     dEncodings = {
-        'base64': ('BASE64, example: TVqQAAMAAAAEAAAA...', DecodeDataBase64),
+        'b64': ('BASE64, example: TVqQAAMAAAAEAAAA...', DecodeDataBase64),
         'bu': ('\\u UNICODE, example: \\u9090\\ueb77...', DecodeDataBU),
         'pu': ('% UNICODE, example: %u9090%ueb77...', DecodeDataPU),
         'hex': ('hexadecimal, example: 6D6573736167652C...', DecodeDataHex)
@@ -480,7 +505,7 @@ def BASE64Dump(filename, options):
             print(' %s -> %s' % (key, value[0]))
         return
 
-    if not options.encoding in dEncodings:
+    if options.encoding != 'all' and not options.encoding in dEncodings:
         print('Error: invalid encoding: %s' % options.encoding)
         print('Valid encodings:')
         for key, value in dEncodings.items():
@@ -507,51 +532,73 @@ def BASE64Dump(filename, options):
     elif options.asciidump:
         DumpFunction = HexAsciiDump
     elif options.strings:
-    	  DumpFunction = DumpFunctionStrings
+        DumpFunction = DumpFunctionStrings
     else:
         DumpFunction = None
 
-    if options.select == '':
+    if options.encoding == 'all':
+        formatString = '%3s  %-7s %-16s %-16s %-32s'
+        columnNames = ('Enc', 'Size', 'Encoded', 'Decoded', 'MD5 decoded')
+        print(formatString % columnNames)
+        print(formatString % tuple(['-' * len(s) for s in columnNames]))
+    elif options.select == '':
         formatString = '%-2s  %-7s %-16s %-16s %-32s'
         columnNames = ('ID', 'Size', 'Encoded', 'Decoded', 'MD5 decoded')
         print(formatString % columnNames)
         print(formatString % tuple(['-' * len(s) for s in columnNames]))
 
-    counter = 1
     data = oStringIO.read()
     if options.ignorewhitespace:
         for whitespacecharacter in string.whitespace:
             data = data.replace(whitespacecharacter, '')
-    for encodeddata, decodeddata in dEncodings[options.encoding][1](data):
-        if options.number and len(decodeddata) < options.number:
-            continue
-        if options.select == '':
-            print('%2d: %7d %-16s %-16s %s' % (counter, len(encodeddata), encodeddata[0:16], AsciiDump(decodeddata[0:16]), hashlib.md5(decodeddata).hexdigest()))
-        elif ('%s' % counter) == options.select or options.select == 'a':
-            if DumpFunction == None:
-                filehash, magicPrintable, magicHex, fileSize, entropy, countUniqueBytes, countNullByte, countControlBytes, countWhitespaceBytes, countPrintableBytes, countHighBytes = CalculateFileMetaData(decodeddata)
-                print('Info:')
-                print(' %s: %s' % ('MD5', filehash))
-                print(' %s: %d' % ('Filesize', fileSize))
-                print(' %s: %f' % ('Entropy', entropy))
-                print(' %s: %d (%.2f%%)' % ('Unique bytes', countUniqueBytes, countUniqueBytes / 2.560))
-                print(' %s: %s' % ('Magic HEX', magicHex))
-                print(' %s: %s' % ('Magic ASCII', magicPrintable))
-                print(' %s: %s' % ('Null bytes', countNullByte))
-                print(' %s: %s' % ('Control bytes', countControlBytes))
-                print(' %s: %s' % ('Whitespace bytes', countWhitespaceBytes))
-                print(' %s: %s' % ('Printable bytes', countPrintableBytes))
-                print(' %s: %s' % ('High bytes', countHighBytes))
-            else:
-                StdoutWriteChunked(DumpFunction(CutData(decodeddata, options.cut)))
-        counter += 1
+    dDecodedData = {}
+    if options.encoding == 'all':
+        report = []
+        for encoding in dEncodings:
+            for encodeddata, decodeddata in dEncodings[encoding][1](data):
+                if options.number and len(decodeddata) < options.number:
+                    continue
+                if options.unique and decodeddata in dDecodedData:
+                    continue
+                dDecodedData[decodeddata] = True
+                report.append([len(encodeddata), '%3s: %7d %-16s %-16s %s' % (encoding, len(encodeddata), encodeddata[0:16], AsciiDump(decodeddata[0:16]), hashlib.md5(decodeddata).hexdigest())])
+        for key, value in sorted(report):
+            print(value)
+    else:
+        counter = 1
+        for encodeddata, decodeddata in dEncodings[options.encoding][1](data):
+            if options.number and len(decodeddata) < options.number:
+                continue
+            if options.unique and decodeddata in dDecodedData:
+                continue
+            dDecodedData[decodeddata] = True
+            if options.select == '':
+                print('%2d: %7d %-16s %-16s %s' % (counter, len(encodeddata), encodeddata[0:16], AsciiDump(decodeddata[0:16]), hashlib.md5(decodeddata).hexdigest()))
+            elif ('%s' % counter) == options.select or options.select == 'a':
+                if DumpFunction == None:
+                    filehash, magicPrintable, magicHex, fileSize, entropy, countUniqueBytes, countNullByte, countControlBytes, countWhitespaceBytes, countPrintableBytes, countHighBytes = CalculateFileMetaData(decodeddata)
+                    print('Info:')
+                    print(' %s: %s' % ('MD5', filehash))
+                    print(' %s: %d' % ('Filesize', fileSize))
+                    print(' %s: %f' % ('Entropy', entropy))
+                    print(' %s: %d (%.2f%%)' % ('Unique bytes', countUniqueBytes, countUniqueBytes / 2.560))
+                    print(' %s: %s' % ('Magic HEX', magicHex))
+                    print(' %s: %s' % ('Magic ASCII', magicPrintable))
+                    print(' %s: %s' % ('Null bytes', countNullByte))
+                    print(' %s: %s' % ('Control bytes', countControlBytes))
+                    print(' %s: %s' % ('Whitespace bytes', countWhitespaceBytes))
+                    print(' %s: %s' % ('Printable bytes', countPrintableBytes))
+                    print(' %s: %s' % ('High bytes', countHighBytes))
+                else:
+                    StdoutWriteChunked(DumpFunction(CutData(decodeddata, options.cut)))
+            counter += 1
 
     return 0
 
 def Main():
     oParser = optparse.OptionParser(usage='usage: %prog [options] [file]\n' + __description__, version='%prog ' + __version__)
     oParser.add_option('-m', '--man', action='store_true', default=False, help='Print manual')
-    oParser.add_option('-e', '--encoding', default='base64', help='select encoding to use (default base64)')
+    oParser.add_option('-e', '--encoding', default='b64', help='select encoding to use (default base64)')
     oParser.add_option('-s', '--select', default='', help='select item nr for dumping (a for all)')
     oParser.add_option('-d', '--dump', action='store_true', default=False, help='perform dump')
     oParser.add_option('-x', '--hexdump', action='store_true', default=False, help='perform hex dump')
@@ -560,6 +607,7 @@ def Main():
     oParser.add_option('-n', '--number', type=int, default=None, help='minimum number of bytes in decoded data')
     oParser.add_option('-c', '--cut', type=str, default='', help='cut data')
     oParser.add_option('-w', '--ignorewhitespace', action='store_true', default=False, help='ignore whitespace')
+    oParser.add_option('-u', '--unique', action='store_true', default=False, help='do not repeat identical decoded data')
     (options, args) = oParser.parse_args()
 
     if options.man:
