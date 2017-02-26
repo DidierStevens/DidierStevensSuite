@@ -2,8 +2,8 @@
 
 __description__ = 'Translate bytes according to a Python expression'
 __author__ = 'Didier Stevens'
-__version__ = '2.3.1'
-__date__ = '2016/09/13'
+__version__ = '2.4.0'
+__date__ = '2017/02/26'
 
 """
 
@@ -26,6 +26,8 @@ History:
   2016/09/07: 2.3.1 added option -e
   2016/09/09: continue
   2016/09/13: man
+  2017/02/10: 2.4.0 added input filename # support
+  2017/02/26: fixed Python 3 str vs bytes bug
 
 Todo:
 """
@@ -36,6 +38,11 @@ import os
 import textwrap
 import re
 import math
+import binascii
+try:
+    from StringIO import StringIO
+except ImportError:
+    from io import BytesIO as StringIO
 
 def PrintManual():
     manual = '''
@@ -89,6 +96,15 @@ Output: ABCD
 Option -e (execute) is used to execute Python commands before the command is executed. This can, for example, be used to import modules.
 Here is an example to decompress a Flash file (.swf):
  translate.py -f -e "import zlib" sample.swf "lambda b: zlib.decompress(b[8:])"
+
+In stead of using an input filename, the content can also be passed in the argument. To achieve this, precede the text with character #.
+If the text to pass via the argument contains control characters or non-printable characters, hexadecimal (#h#) or base64 (#b#) can be used.
+
+Example:
+ translate.py #h#89B5B4AEFDB4AEFDBCFDAEB8BEAFB8A9FC "byte ^0xDD"
+Output:
+ This is a secret!
+
 '''
     for line in manual.split('\n'):
         print(textwrap.fill(line))
@@ -126,6 +142,23 @@ def Output(fOut, data):
     else:
         StdoutWriteChunked(data)
 
+def FilenameCheckHash(filename):
+    decoded = None
+    if filename.startswith('#h#'):
+        try:
+            decoded = binascii.a2b_hex(filename[3:])
+        finally:
+            return decoded
+    elif filename.startswith('#b#'):
+        try:
+            decoded = binascii.a2b_base64(filename[3:])
+        finally:
+            return decoded
+    elif filename.startswith('#'):
+        return filename[1:]
+    else:
+        return ''
+
 def Transform(fIn, fOut, commandPython):
     position = 0
     while True:
@@ -134,7 +167,7 @@ def Transform(fIn, fOut, commandPython):
             break
         byte = ord(inbyte)
         outbyte = eval(commandPython)
-        fOut.write(CS2BIP3(chr(outbyte)))
+        fOut.write(chr(outbyte))
         position += 1
 
 #Fix for http://bugs.python.org/issue11395
@@ -154,7 +187,14 @@ def Translate(filenameInput, commandPython, options):
             msvcrt.setmode(sys.stdin.fileno(), os.O_BINARY)
         fIn = sys.stdin
     else:
-        fIn = open(filenameInput, 'rb')
+        decoded = FilenameCheckHash(filenameInput)
+        if decoded == '':
+            fIn = open(filenameInput, 'rb')
+        elif decoded == None:
+            print('Error parsing filename: ' + filenameInput)
+            return
+        else:
+            fIn = StringIO(decoded)
 
     if options.output == '':
         if sys.platform == 'win32':
