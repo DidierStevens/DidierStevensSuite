@@ -2,8 +2,8 @@
 
 __description__ = 'Cut a section of bytes out of a file'
 __author__ = 'Didier Stevens'
-__version__ = '0.0.4'
-__date__ = '2016/08/02'
+__version__ = '0.0.5'
+__date__ = '2017/03/04'
 
 """
 
@@ -17,6 +17,7 @@ History:
   2015/12/16: 0.0.3 added support [...]number+number
   2015/12/17: continue
   2016/08/02: 0.0.4 added dumps
+  2017/03/04: 0.0.5 updated man
 
 Todo:
 """
@@ -37,7 +38,7 @@ def PrintManual():
     manual = '''
 Manual:
 
-cut-bytes.py reads a file (from disk, from stdin or from inside a (password protected) ZIP file) and outputs it (partially) to stdout.
+cut-bytes.py reads a file (from disk, from stdin or from inside a (password protected) ZIP file) or a here document (#), and outputs it (partially) to stdout.
 cut-bytes.py can be instructed via a cut-expression to only send partial input to stdout.
 
 The cut-expression allows for the partial selection of a stream. Use this expression to "cut out" part of the stream.
@@ -65,7 +66,30 @@ Examples:
 This cut-expression can be used to dump the first 256 bytes of a PE file located inside the stream: ['MZ']:0x100l
 This cut-expression can be used to dump the OLE file located inside the stream: [d0cf11e0]:
 
-By default the output uses the same representation as the input, but this can be changed to hex, ascii dump or base64 with options -x, -a and -b.
+By default the output uses the same representation as the input, but this can be changed to hex, ascii dump or base64 with options -x, -X, -a, -b and -B.
+
+In stead of cutting from a file, the file argument can be a here document. To achieve this, precede the text with character #.
+If the text to pass via the argument contains control characters or non-printable characters, hexadecimal (#h#) or base64 (#b#) can be used.
+
+Example:
+ cut-bytes.py : #Hello
+Output:
+ Hello
+
+Example:
+ cut-bytes.py : #h#48656C6C6F
+Output:
+ Hello
+
+Example:
+ cut-bytes.py : #b#SGVsbG8=
+Output:
+ Hello
+
+To process a file that starts with #, prefix it with a relatie path to the current directory:
+ cut-bytes.py : .\#data
+Output:
+ Test!
 
 '''
     for line in manual.split('\n'):

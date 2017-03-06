@@ -2,8 +2,8 @@
 
 __description__ = 'Analyze OLE files (Compound Binary Files)'
 __author__ = 'Didier Stevens'
-__version__ = '0.0.26'
-__date__ = '2016/12/11'
+__version__ = '0.0.27'
+__date__ = '2017/03/04'
 
 """
 
@@ -65,6 +65,7 @@ History:
   2016/08/01: 0.0.25 added Magic to info
   2016/10/16: decompressed.replace('\r\n', '\n'); added plugindir and decoderdir options by Remi Pointel
   2016/12/11: 0.0.26 added indicator O for OLE10Native
+  2017/03/04: 0.0.27 added externals for YARA rules
 
 Todo:
 """
@@ -343,6 +344,8 @@ rule Contains_PE_File
 }
 
 Distributed together with oledump are the YARA rules maldoc.yara. These are YARA rules to detect shellcode, based on Frank Boldewin's shellcode detector used in OfficeMalScanner.
+
+Two external variables are declared for use in YARA rules: streamname contains the stream name, and VBA is True when the YARA engine is given VBA source code to scan. 
 
 When looking for traces of Windows executable code (PE files, shellcode, ...) with YARA rules, one must take into account the fact that the executable code might have been encoded (for example via XOR and a key) to evade detection.
 To deal with this possibility, oledump supports decoders. A decoder is another type of plugin, that will bruteforce a type of encoding on each stream. For example, decoder_xor1 will encode each stream via XOR and a key of 1 byte. So effectively, 256 different encodings of the stream will be scanned by the YARA rules. 256 encodings because: XOR key 0x00, XOR key 0x01, XOR key 0x02, ..., XOR key 0xFF
@@ -1316,6 +1319,7 @@ def OLESub(ole, prefix, rules, options):
 
     if options.select == '':
         counter = 1
+        vbaConcatenate = ''
         for fname in ole.listdir():
             stream = None
             indicator = ' '
@@ -1387,13 +1391,24 @@ def OLESub(ole, prefix, rules, options):
                         return returnCode
                 for oDecoder in oDecoders:
                     while oDecoder.Available():
-                        for result in rules.match(data=oDecoder.Decode()):
+                        for result in rules.match(data=oDecoder.Decode(), externals={'streamname': PrintableName(fname), 'VBA': False}):
                             print('               YARA rule%s: %s' % (IFF(oDecoder.Name() == '', '', ' (stream decoder: %s)' % oDecoder.Name()), result.rule))
                             if options.yarastrings:
                                 for stringdata in result.strings:
                                     print('               %06x %s:' % (stringdata[0], stringdata[1]))
                                     print('                %s' % binascii.hexlify(C2BIP3(stringdata[2])))
                                     print('                %s' % repr(stringdata[2]))
+            if indicator.lower() == 'm':
+                vbaConcatenate += SearchAndDecompress(stream) + '\n'
+        if options.yara != None and vbaConcatenate != '':
+            print('All VBA source code:')
+            for result in rules.match(data=vbaConcatenate, externals={'streamname': '', 'VBA': True}):
+                print('               YARA rule: %s' % result.rule)
+                if options.yarastrings:
+                    for stringdata in result.strings:
+                        print('               %06x %s:' % (stringdata[0], stringdata[1]))
+                        print('                %s' % binascii.hexlify(C2BIP3(stringdata[2])))
+                        print('                %s' % repr(stringdata[2]))
     else:
         if len(decoders) > 1:
             print('Error: provide only one decoder when using option select')
@@ -1441,7 +1456,7 @@ def YARACompile(fileordirname):
     else:
         for filename in ProcessAt(fileordirname):
             dFilepaths[filename] = filename
-    return yara.compile(filepaths=dFilepaths)
+    return yara.compile(filepaths=dFilepaths, externals={'streamname': '', 'VBA': False})
 
 def FilenameInSimulations(filename):
     if dslsimulationdb == None:
