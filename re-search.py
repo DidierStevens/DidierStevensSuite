@@ -2,8 +2,8 @@
 
 __description__ = "Program to use Python's re.findall on files"
 __author__ = 'Didier Stevens'
-__version__ = '0.0.3'
-__date__ = '2017/03/03'
+__version__ = '0.0.4'
+__date__ = '2017/04/10'
 
 """
 
@@ -27,6 +27,7 @@ History:
   2015/07/28: 0.0.2 added option dotall
   2016/07/22: fix for binary files/data
   2017/03/03: added str regex
+  2017/04/10: 0.0.4 added option grepall
 
 Todo:
   add hostname to header
@@ -108,6 +109,7 @@ ahsnvyetdhfkg
 By default the regular expression matching is not case sensitive. You can make it case sensitive with option -c. To surround the regular expression with boundaries (\b), use option -b. Output can be mode lowercase with option -l and unique with option -u. Output can be saved to a file with option -o filename. And if you also want to output the regular expression used for matching, use option -d.
 To get grep-like output, use option -g. Option -r removes the anchor (^and $) or the regular expression. Use option -D (dotall) to make the . expression match newline characters. 
 By default, re-search reads the file(s) line-by-line. Binary files can also be processed, but are best read completely and not line-by-line. Use option -f (fullread) to perform a fule read of the file (and not line-by-line).
+Option -G (grepall) will also do a full binary read of the (like -f --fulread), but output the complete file if there is a match. This is usefull to select files for further processing, like string searching.
 
 If you have a list of regular expressions to match, put them in a csv file, and use option -v, -S, -I, -H, -R and -C.
 Example:
@@ -238,19 +240,41 @@ def IFF(expression, valueTrue, valueFalse):
     else:
         return CIC(valueFalse)
 
+#Fix for http://bugs.python.org/issue11395
+def StdoutWriteChunked(data):
+    while data != '':
+        sys.stdout.write(data[0:10000])
+        try:
+            sys.stdout.flush()
+        except IOError:
+            return
+        data = data[10000:]
+
 class cOutput():
-    def __init__(self, filename=None):
+    def __init__(self, grepall, filename=None):
+        self.grepall = grepall
         self.filename = filename
         if self.filename and self.filename != '':
-            self.f = open(self.filename, 'w')
+            if self.grepall:
+                self.f = open(self.filename, 'wb')
+            else:
+                self.f = open(self.filename, 'w')
         else:
             self.f = None
+            if self.grepall:
+                IfWIN32SetBinary(sys.stdout)
 
     def Line(self, line):
-        if self.f:
-            self.f.write(line + '\n')
+        if self.grepall:
+            if self.f:
+                self.f.write(line)
+            else:
+                print(line)
         else:
-            print(line)
+            if self.f:
+                self.f.write(line + '\n')
+            else:
+                StdoutWriteChunked(line)
 
     def Close(self):
         if self.f:
@@ -295,18 +319,21 @@ def Library(name):
 class cOutputResult():
     def __init__(self, options):
         if options.output:
-            self.oOutput = cOutput(options.output)
+            self.oOutput = cOutput(options.grepall, options.output)
         else:
-            self.oOutput = cOutput()
+            self.oOutput = cOutput(options.grepall)
         self.options = options
         self.dLines = {}
 
     def Line(self, line):
-        line = IFF(self.options.lower, lambda: line.lower(), line)
-        if not line in self.dLines:
+        if self.options.grepall:
             self.oOutput.Line(line)
-        if self.options.unique and not line in self.dLines:
-            self.dLines[line] = True
+        else:
+            line = IFF(self.options.lower, lambda: line.lower(), line)
+            if not line in self.dLines:
+                self.oOutput.Line(line)
+            if self.options.unique and not line in self.dLines:
+                self.dLines[line] = True
 
     def Close(self):
         self.oOutput.Close()
@@ -337,14 +364,14 @@ def RESearchSingle(regex, filenames, oOutput, options):
         oOutput.Line('Regex: %s' % regex)
     for filename in filenames:
         if filename == '':
-            if options.fullread:
+            if options.fullread or options.grepall:
                 IfWIN32SetBinary(sys.stdin)
             fIn = sys.stdin
         else:
-            fIn = open(filename, IFF(options.fullread, 'rb', 'r'))
-        for line in ProcessFile(fIn, options.fullread):
+            fIn = open(filename, IFF(options.fullread or options.grepall, 'rb', 'r'))
+        for line in ProcessFile(fIn, options.fullread or options.grepall):
             results = oREExtra.Findall(line)
-            if options.grep:
+            if options.grepall or options.grep:
                 if results != []:
                     oOutput.Line(line)
             else:
@@ -382,12 +409,12 @@ def RESearchCSV(csvFilename, filenames, oOutput, options):
 
     for filename in filenames:
         if filename == '':
-            if options.fullread:
+            if options.fullread or options.grepall:
                 IfWIN32SetBinary(sys.stdin)
             fIn = sys.stdin
         else:
-            fIn = open(filename, IFF(options.fullread, 'rb', 'r'))
-        for line in ProcessFile(fIn, options.fullread):
+            fIn = open(filename, IFF(options.fullread or options.grepall, 'rb', 'r'))
+        for line in ProcessFile(fIn, options.fullread or options.grepall):
             for regex, (oREExtra, comment) in dRegex.items():
                 results = oREExtra.Findall(line)
                 newRow = [regex]
@@ -468,6 +495,7 @@ https://DidierStevens.com'''
     oParser.add_option('-R', '--regexindex', default='', help='Index or title of the regex column in the CSV file')
     oParser.add_option('-C', '--commentindex', default='', help='Index or title of the comment column in the CSV file')
     oParser.add_option('-f', '--fullread', action='store_true', default=False, help='Do a full read of the input, not line per line')
+    oParser.add_option('-G', '--grepall', action='store_true', default=False, help='Do a full read of the input and a full write when there is a match, not line per line')
     oParser.add_option('-D', '--dotall', action='store_true', default=False, help='. matches newline too')
     (options, args) = oParser.parse_args()
 
