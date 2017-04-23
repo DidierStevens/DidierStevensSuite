@@ -2,8 +2,8 @@
 
 __description__ = 'tool to create a PDF document with an embedded file'
 __author__ = 'Didier Stevens'
-__version__ = '0.5.0'
-__date__ = '2011/07/01'
+__version__ = '0.5.1'
+__date__ = '2017/04/23'
 
 """
 Source code put in public domain by Didier Stevens, no Copyright
@@ -19,12 +19,27 @@ History:
   2008/11/09: V0.3, added autostart and button
   2009/06/15: V0.4.0: added stego
   2011/07/01: V0.5.0: added support for Python 3
-  
+  2017/04/23: V0.5.1: added option -n
+
 Todo:
 """
 
 import mPDF
 import optparse
+
+# CIC: Call If Callable
+def CIC(expression):
+    if callable(expression):
+        return expression()
+    else:
+        return expression
+
+# IFF: IF Function
+def IFF(expression, valueTrue, valueFalse):
+    if expression:
+        return CIC(valueTrue)
+    else:
+        return CIC(valueFalse)
 
 def ReadBinaryFile(name):
     """Read a binary file and return the content, return None if error occured
@@ -93,6 +108,7 @@ def Main():
     oParser.add_option('-b', '--button', action='store_true', default=False, help='add a "button" to launch the embedded file')
     oParser.add_option('-s', '--stego', action='store_true', default=False, help='"hide" the embedded file by replacing /EmbeddedFiles with /Embeddedfiles')
     oParser.add_option('-m', '--message', default='', help='text to display in the PDF document')
+    oParser.add_option('-n', '--name', default='', help='filename to use in the PDF objects (by default same as file-to-embed name)')
     (options, args) = oParser.parse_args()
 
     if len(args) != 2:
@@ -111,7 +127,7 @@ def Main():
         if embeddedFileContent == None:
             print('Error opening/reading file %s' % embeddedFileName)
         else:
-            CreatePDFWithEmbeddedFile(pdfFileName, embeddedFileName, embeddedFileContent, options.filters, options.nobinary, options.autoopen, options.button, options.stego, options.message)
+            CreatePDFWithEmbeddedFile(pdfFileName, IFF(options.name == '', embeddedFileName, options.name), embeddedFileContent, options.filters, options.nobinary, options.autoopen, options.button, options.stego, options.message)
 
 if __name__ == '__main__':
     Main()
