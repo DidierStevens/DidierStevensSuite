@@ -2,8 +2,8 @@
 
 __description__ = 'ZIP dump utility'
 __author__ = 'Didier Stevens'
-__version__ = '0.0.5'
-__date__ = '2017/01/29'
+__version__ = '0.0.6'
+__date__ = '2017/05/02'
 
 """
 
@@ -34,6 +34,7 @@ History:
   2016/11/15: 0.0.4: Added support ZIP comment
   2016/11/16: added Unique bytes
   2017/01/29: 0.0.5: added # for option extra
+  2017/05/02: 0.0.6: added options --passwordfile and --passwordfilestop
 
 Todo:
 """
@@ -51,6 +52,8 @@ import binascii
 import re
 import textwrap
 import operator
+import time
+import gzip
 try:
     import yara
 except:
@@ -120,7 +123,20 @@ When options -X, -A or -D are used without selecting a file (option -s), all fil
 
 The output produced by zipdump.py can de written to a file with option -o.
 
-If the ZIP file is password protected, zipdump.py will try with password 'infected'. Option -p can be used to provide a different password to open the ZIP file.
+If the ZIP file is password protected, zipdump.py will try with password 'infected'. Option -p can be used to provide a different password to open the ZIP file. To provide a list of passwords to try, 
+use option -P with the name of the file containing passwords to try (dictionary attack). This file can be a text file or a gzip compressed text file. The password file is completely read into memory before the dictionary attack is executed.
+After the dictionary attack, the selected commands (via other options) are executed.
+Example:
+C:\Demo>zipdump.py -P passwords.txt -s 1 -a password-protected.zip
+00000000: 73 65 63 72 65 74 20 74 65 78 74                 secret text
+
+To perform just a dictionary attack, without additional commands, use option --passwordfilestop. This option will produce progress output, like this:
+C:\Demo>zipdump.py --passwordfilestop rockyou.txt.gz secret.zip
+Passwords:    10000 0.07% p/s: 7727 ETC: 2017/05/01 20:18:50
+Passwords:    20000 0.14% p/s: 7883 ETC: 2017/05/01 20:18:13
+Passwords:    30000 0.21% p/s: 7947 ETC: 2017/05/01 20:17:58
+Passwords:    40000 0.28% p/s: 7964 ETC: 2017/05/01 20:17:54
+Password: loveyoubaby
 
 If the ZIP file contains a single ZIP file, the contained ZIP file will be considered to be the ZIP file to analyze. To prevent this, use option -r. Option -r handles the contained ZIP file as a regular file.
 
@@ -295,6 +311,11 @@ def Quote(value, separator, quote):
     else:
         return value
 
+def FormatTime(epoch=None):
+    if epoch == None:
+        epoch = time.time()
+    return '%04d/%02d/%02d %02d:%02d:%02d' % time.localtime(epoch)[0:6]
+
 def MakeCSVLine(row, separator, quote):
     return separator.join([Quote(value, separator, quote) for value in row])
 
@@ -322,11 +343,14 @@ def IFF(expression, valueTrue, valueFalse):
 
 def File2Strings(filename):
     try:
-        f = open(filename, 'r')
+         if os.path.splitext(filename)[1].lower() == '.gz':
+             f = gzip.GzipFile(filename, 'rb')
+         else:
+             f = open(filename, 'r')
     except:
         return None
     try:
-        return map(lambda line:line.rstrip('\n'), f.readlines())
+        return map(lambda line:line.rstrip('\n\r'), f.readlines())
     except:
         return None
     finally:
@@ -782,6 +806,37 @@ def DecideToSelect(selectvalue, counter, zipfilename):
         return True
     return selectvalue == zipfilename
 
+def DictionaryAttack(passwordfile, oZipfile, fOut, stop):
+    try:
+        oZipfile.open(oZipfile.infolist()[0], 'r').read(2)
+        if stop:
+            Print('ZIP file is not password protected', fOut)
+        return ''
+    except RuntimeError:
+        pass
+
+    counter = 0
+    passwords = File2Strings(passwordfile)
+    start = time.time()
+    for password in passwords:
+        try:
+            oZipfile.open(oZipfile.infolist()[0], 'r', password).read(2)
+            if stop:
+                Print('Password: %s' % password, fOut)
+            return password
+        except KeyboardInterrupt:
+            return None
+        except RuntimeError:
+            pass
+        except zipfile.BadZipfile:
+            pass
+        counter += 1
+        if counter % 10000 == 0:
+            pps = float(counter) / float(time.time() - start)
+            if stop:
+                Print('Passwords: %8d %.2f%% p/s: %d ETC: %s' % (counter, float(counter) / float(len(passwords)) * 100.0, pps, FormatTime(start + len(passwords) / pps)), fOut)
+    return None
+
 def ZIPDump(zipfilename, options):
     global decoders
     decoders = []
@@ -795,10 +850,11 @@ def ZIPDump(zipfilename, options):
         oZipfile = zipfile.ZipFile(cStringIO.StringIO(sys.stdin.read()), 'r')
     else:
         oZipfile = zipfile.ZipFile(zipfilename, 'r')
+    zippassword = options.password
     if not options.regular and len(oZipfile.infolist()) == 1:
         try:
-            if oZipfile.open(oZipfile.infolist()[0], 'r', options.password).read(2) == 'PK':
-                oZipfile2 = zipfile.ZipFile(cStringIO.StringIO(oZipfile.open(oZipfile.infolist()[0], 'r', options.password).read()), 'r')
+            if oZipfile.open(oZipfile.infolist()[0], 'r', zippassword).read(2) == 'PK':
+                oZipfile2 = zipfile.ZipFile(cStringIO.StringIO(oZipfile.open(oZipfile.infolist()[0], 'r', zippassword).read()), 'r')
                 oZipfile.close()
                 oZipfile = oZipfile2
         except:
@@ -808,6 +864,16 @@ def ZIPDump(zipfilename, options):
         fOut = open(options.output, 'w')
     else:
         fOut = None
+
+    if options.passwordfile != '':
+        passwordfound = DictionaryAttack(options.passwordfile, oZipfile, fOut, False)
+        if passwordfound != None:
+            zippassword = passwordfound
+    elif options.passwordfilestop != '':
+        DictionaryAttack(options.passwordfilestop, oZipfile, fOut, True)
+        if fOut:
+            fOut.close()
+        return
 
     if options.yara != None:
         if not 'yara' in sys.modules:
@@ -829,7 +895,7 @@ def ZIPDump(zipfilename, options):
         for oZipInfo in oZipfile.infolist():
             counter += 1
             if DecideToSelect(options.select, counter, oZipInfo.filename):
-                file = oZipfile.open(oZipInfo, 'r', options.password)
+                file = oZipfile.open(oZipInfo, 'r', zippassword)
                 if options.output:
                     fOut.write(DumpFunction(CutData(file.read(), options.cut)))
                 else:
@@ -858,7 +924,7 @@ def ZIPDump(zipfilename, options):
         for oZipInfo in oZipfile.infolist():
             counter += 1
             if DecideToSelect(options.select, counter, oZipInfo.filename):
-                file = oZipfile.open(oZipInfo, 'r', options.password)
+                file = oZipfile.open(oZipInfo, 'r', zippassword)
                 filecontent = file.read()
                 file.close()
                 encrypted = oZipInfo.flag_bits & 1
@@ -925,6 +991,8 @@ def Main():
     oParser.add_option('-A', '--asciidumpall', action='store_true', default=False, help='perform ascii dump of all files or selected file')
     oParser.add_option('-e', '--extended', action='store_true', default=False, help='report extended information')
     oParser.add_option('-p', '--password', default='infected', help='The ZIP password to be used (default infected)')
+    oParser.add_option('-P', '--passwordfile', default='', help='A file with ZIP passwords to be used in a dictionary attack')
+    oParser.add_option('--passwordfilestop', default='', help='A file with ZIP passwords to be used in a dictionary attack, stop after the attack')
     oParser.add_option('-y', '--yara', help="YARA rule file (or directory or @file) to check files (YARA search doesn't work with -s option)")
     oParser.add_option('--yarastrings', action='store_true', default=False, help='Print YARA strings')
     oParser.add_option('-C', '--decoders', type=str, default='', help='decoders to load (separate decoders with a comma , ; @file supported)')
