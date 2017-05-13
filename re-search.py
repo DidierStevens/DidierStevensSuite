@@ -2,8 +2,8 @@
 
 __description__ = "Program to use Python's re.findall on files"
 __author__ = 'Didier Stevens'
-__version__ = '0.0.4'
-__date__ = '2017/04/10'
+__version__ = '0.0.5'
+__date__ = '2017/05/13'
 
 """
 
@@ -28,6 +28,7 @@ History:
   2016/07/22: fix for binary files/data
   2017/03/03: added str regex
   2017/04/10: 0.0.4 added option grepall
+  2017/05/13: 0.0.5 bugfix output line
 
 Todo:
   add hostname to header
@@ -269,12 +270,12 @@ class cOutput():
             if self.f:
                 self.f.write(line)
             else:
-                print(line)
+                StdoutWriteChunked(line)
         else:
             if self.f:
                 self.f.write(line + '\n')
             else:
-                StdoutWriteChunked(line)
+                print(line)
 
     def Close(self):
         if self.f:
