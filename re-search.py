@@ -2,8 +2,8 @@
 
 __description__ = "Program to use Python's re.findall on files"
 __author__ = 'Didier Stevens'
-__version__ = '0.0.5'
-__date__ = '2017/05/13'
+__version__ = '0.0.7'
+__date__ = '2017/05/18'
 
 """
 
@@ -29,6 +29,8 @@ History:
   2017/03/03: added str regex
   2017/04/10: 0.0.4 added option grepall
   2017/05/13: 0.0.5 bugfix output line
+  2017/05/17: 0.0.6 added regex btc
+  2017/05/18: 0.0.7 fixed regex btc, thanks @SecurityBeard
 
 Todo:
   add hostname to header
@@ -56,6 +58,7 @@ dLibrary = {
             'url': r'[a-zA-Z]+://[-a-zA-Z0-9.]+(?:/[-a-zA-Z0-9+&@#/%=~_|!:,.;]*)?(?:\?[a-zA-Z0-9+&@#/%=~_|!:,.;]*)?',
             'ipv4': r'\b(?:(?:25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9])\.){3}(?:25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9])\b',
             'str': r'"[^"]+"',
+            'btc': r'(?#extra=P:BTCValidate)\b[13][a-km-zA-HJ-NP-Z1-9]{25,34}\b',
            }
 
 def PrintManual():
@@ -284,6 +287,20 @@ class cOutput():
 
 def ExpandFilenameArguments(filenames):
     return list(collections.OrderedDict.fromkeys(sum(map(glob.glob, sum(map(ProcessAt, filenames), [])), [])))
+
+def decode_base58(bc, length):
+    digits58 = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz'
+    n = 0
+    for char in bc:
+        n = n * 58 + digits58.index(char)
+#    print(n.to_bytes(length, 'big'))
+    print 
+#    return n.to_bytes(length, 'big')
+    return ''.join([chr((n >> i*8) & 0xff) for i in reversed(range(length))])
+
+def BTCValidate(bc):
+    bcbytes = decode_base58(bc, 25)
+    return bcbytes[-4:] == sha256(sha256(bcbytes[:-4]).digest()).digest()[:4]
 
 def PrintLibrary():
     global dLibrary

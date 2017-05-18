@@ -2,13 +2,14 @@
 
 __description__ = 're extra'
 __author__ = 'Didier Stevens'
-__version__ = '0.0.1'
-__date__ = '2014/04/04'
+__version__ = '0.0.2'
+__date__ = '2017/05/17'
 
 """
 
 History:
   2014/04/04: refactoring from proxy-snort.py
+  2017/05/17: 0.0.2 added extra=P
 
 Todo:
 """
@@ -19,6 +20,7 @@ import math
 import os
 import glob
 import datetime
+import hashlib
 
 def File2Strings(filename, comment=None):
     try:
@@ -109,6 +111,19 @@ def File2StringsFiltered(filename):
     finally:
         f.close()
     return result
+
+def decode_base58(bc, length):
+    digits58 = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz'
+    n = 0
+    for char in bc:
+        n = n * 58 + digits58.index(char)
+#    print(n.to_bytes(length, 'big'))
+#    return n.to_bytes(length, 'big')
+    return ''.join([chr((n >> i*8) & 0xff) for i in reversed(range(length))])
+
+def BTCValidate(bc):
+    bcbytes = decode_base58(bc, 25)
+    return bcbytes[-4:] == hashlib.sha256(hashlib.sha256(bcbytes[:-4]).digest()).digest()[:4]
 
 class cGibberishDetector():
     def __init__(self, filenamePickle='', acceptedCharacters='abcdefghijklmnopqrstuvwxyz '):
@@ -1004,6 +1019,13 @@ class cExtraList():
         else:
             return not found
 
+class cExtraPython():
+    def __init__(self, functionname):
+       self.function = eval(functionname)
+
+    def Test(self, data):
+        return self.function(data)
+
 class cREExtra():
     def __init__(self, regex, flags, sensicalPickle='', listsDirectory=''):
         self.regex = regex
@@ -1034,6 +1056,10 @@ class cREExtra():
                 if condition[2:] == '':
                     raise Exception('Error extra regex comment: 5')
                 self.conditions.append(cExtraList(True, condition[2:], dLists))
+            elif condition.startswith('P:'):
+                if condition[2:] == '':
+                    raise Exception('Error extra regex comment: 6')
+                self.conditions.append(cExtraPython(condition[2:]))
             else:
                 raise Exception('Error extra regex comment: 2')
 
