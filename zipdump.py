@@ -139,7 +139,7 @@ Passwords:    30000 0.21% p/s: 7947 ETC: 2017/05/01 20:17:58
 Passwords:    40000 0.28% p/s: 7964 ETC: 2017/05/01 20:17:54
 Password: loveyoubaby
 
-zipdump also has an internal password list (a few thousand passwords), that can be use by providing filename . (a single dot) to options -P and --passwordfilestop.
+zipdump also has an internal password list (a few thousand passwords), that can be used by providing filename . (a single dot) to options -P and --passwordfilestop.
 Example:
 C:\Demo>zipdump.py --passwordfilestop . secret.zip
 Password: letmein
