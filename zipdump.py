@@ -2,8 +2,8 @@
 
 __description__ = 'ZIP dump utility'
 __author__ = 'Didier Stevens'
-__version__ = '0.0.7'
-__date__ = '2017/05/20'
+__version__ = '0.0.8'
+__date__ = '2017/05/21'
 
 """
 
@@ -36,6 +36,7 @@ History:
   2017/01/29: 0.0.5: added # for option extra
   2017/05/02: 0.0.6: added options --passwordfile and --passwordfilestop
   2017/05/20: 0.0.7: added internal password list
+  2017/05/21: 0.0.8: added extra exception DictionaryAttack
 
 Todo:
 """
@@ -55,6 +56,7 @@ import textwrap
 import operator
 import time
 import gzip
+import zlib
 try:
     import yara
 except:
@@ -4389,6 +4391,8 @@ def DictionaryAttack(passwordfile, oZipfile, fOut, stop):
         except RuntimeError:
             pass
         except zipfile.BadZipfile:
+            pass
+        except zlib.error:
             pass
         counter += 1
         if counter % 10000 == 0:
