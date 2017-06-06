@@ -2,8 +2,8 @@
 
 __description__ = 'XOR known-plaintext attack'
 __author__ = 'Didier Stevens'
-__version__ = '0.0.4'
-__date__ = '2016/11/18'
+__version__ = '0.0.5'
+__date__ = '2017/06/04'
 
 """
 
@@ -21,8 +21,11 @@ History:
   2016/11/08: 0.0.4 added option -x
   2016/11/16: added key in hex
   2016/11/18: updated man
+  2017/06/03: 0.0.5 added #e# support; changed output
+  2017/06/04: continued #e# support
 
 Todo:
+  updated man starting changes 2017/06/03
 """
 
 import optparse
@@ -32,6 +35,8 @@ import collections
 import zipfile
 import sys
 import os
+import re
+import random
 
 MALWARE_PASSWORD = 'infected'
 dPlaintext = {'dos': 'This program cannot be run in DOS mode'}
@@ -51,6 +56,8 @@ Output:
  Key:       ABC
  Key (hex): 0x414243
  Extra:     11
+ Divide:    4
+ Counts:    1
  Keystream: BCABCABCABCABC
 
 In this example, we assume that the plaintext contains "secret message". xor-kpa finds one keystream: BCABCABCABCABC. From this keystream, xor-kpa extracts the key: ABC.
@@ -60,22 +67,28 @@ In this case, because the ciphertext is a small file, xor-kpa found only one key
 Example:
  xor-kpa.py #secret encoded.txt
 Output:
- Key:       ABC
- Key (hex): 0x414243
- Extra:     3
- Keystream: BCABCA
-
  Key:       'KU\x11W^'
  Key (hex): 0x4b5511575e
  Extra:     1
+ Divide:    1
+ Counts:    1
  Keystream: '^KU\x11W^'
 
  Key:       '\x07S@E\x1f'
  Key (hex): 0x075340451f
  Extra:     1
+ Divide:    1
+ Counts:    1
  Keystream: 'S@E\x1f\x07S'
 
-In this example, xor-kpa has identified 3 potential keys. The potential keys are sorted by descending extra-value. So the most promising keys are listed first.
+ Key:       ABC
+ Key (hex): 0x414243
+ Extra:     3
+ Divide:    2
+ Counts:    1
+ Keystream: BCABCA
+
+In this example, xor-kpa has identified 3 potential keys. The potential keys are sorted by ascending extra-value. So the most promising keys are listed last.
 Keystreams with an extra value of 1 (1 extra character) rarely contain the correct key.
 Option -e (--extra) allows us to reduce the amount of displayed potential keys by specifying the minimum value for extras.
 
@@ -147,7 +160,40 @@ def File2String(filename):
     finally:
         f.close()
 
-def File2StringHash(filename):
+def LoremIpsumSentence(minimum, maximum):
+    words = ['lorem', 'ipsum', 'dolor', 'sit', 'amet', 'consectetur', 'adipiscing', 'elit', 'etiam', 'tortor', 'metus', 'cursus', 'sed', 'sollicitudin', 'ac', 'sagittis', 'eget', 'massa', 'praesent', 'sem', 'fermentum', 'dignissim', 'in', 'vel', 'augue', 'scelerisque', 'auctor', 'libero', 'nam', 'a', 'gravida', 'odio', 'duis', 'vestibulum', 'vulputate', 'quam', 'nec', 'cras', 'nibh', 'feugiat', 'ut', 'vitae', 'ornare', 'justo', 'orci', 'varius', 'natoque', 'penatibus', 'et', 'magnis', 'dis', 'parturient', 'montes', 'nascetur', 'ridiculus', 'mus', 'curabitur', 'nisl', 'egestas', 'urna', 'iaculis', 'lectus', 'maecenas', 'ultrices', 'velit', 'eu', 'porta', 'hac', 'habitasse', 'platea', 'dictumst', 'integer', 'id', 'commodo', 'mauris', 'interdum', 'malesuada', 'fames', 'ante', 'primis', 'faucibus', 'accumsan', 'pharetra', 'aliquam', 'nunc', 'at', 'est', 'non', 'leo', 'nulla', 'sodales', 'porttitor', 'facilisis', 'aenean', 'condimentum', 'rutrum', 'facilisi', 'tincidunt', 'laoreet', 'ultricies', 'neque', 'diam', 'euismod', 'consequat', 'tempor', 'elementum', 'lobortis', 'erat', 'ligula', 'risus', 'donec', 'phasellus', 'quisque', 'vivamus', 'pellentesque', 'tristique', 'venenatis', 'purus', 'mi', 'dictum', 'posuere', 'fringilla', 'quis', 'magna', 'pretium', 'felis', 'pulvinar', 'lacinia', 'proin', 'viverra', 'lacus', 'suscipit', 'aliquet', 'dui', 'molestie', 'dapibus', 'mollis', 'suspendisse', 'sapien', 'blandit', 'morbi', 'tellus', 'enim', 'maximus', 'semper', 'arcu', 'bibendum', 'convallis', 'hendrerit', 'imperdiet', 'finibus', 'fusce', 'congue', 'ullamcorper', 'placerat', 'nullam', 'eros', 'habitant', 'senectus', 'netus', 'turpis', 'luctus', 'volutpat', 'rhoncus', 'mattis', 'nisi', 'ex', 'tempus', 'eleifend', 'vehicula', 'class', 'aptent', 'taciti', 'sociosqu', 'ad', 'litora', 'torquent', 'per', 'conubia', 'nostra', 'inceptos', 'himenaeos']
+    sample = random.sample(words, random.randint(minimum, maximum))
+    sample[0] = sample[0].capitalize()
+    return ' '.join(sample) + '.'
+
+def LoremIpsum(sentences):
+    return ' '.join([LoremIpsumSentence(15, 30) for i in range(sentences)])
+
+def FilenameCheckHashExpression(expression):
+    oMatch = re.match(r'repeat\((\d+),(0x[0-9a-fA-F]+)\)$', expression)
+    if oMatch != None:
+        try:
+            return int(oMatch.groups()[0]) * binascii.a2b_hex(oMatch.groups()[1][2:])
+        except:
+            return None
+    else:
+        oMatch = re.match(r'random\((\d+)\)$', expression)
+        if oMatch != None:
+            try:
+                return ''.join([chr(random.randint(0, 255)) for x in range(int(oMatch.groups()[0]))])
+            except:
+                return None
+        else:
+            oMatch = re.match(r'loremipsum\((\d+)\)$', expression)
+            if oMatch != None:
+                try:
+                    return LoremIpsum(int(oMatch.groups()[0]))
+                except:
+                    return None
+            else:
+                return None
+
+def FilenameCheckHash(filename):
     decoded = None
     if filename.startswith('#h#'):
         try:
@@ -159,8 +205,24 @@ def File2StringHash(filename):
             decoded = binascii.a2b_base64(filename[3:])
         finally:
             return decoded
+    elif filename.startswith('#e#'):
+        decoded = ''
+        for expression in filename[3:].split('+'):
+            result = FilenameCheckHashExpression(expression)
+            if result == None:
+                return None
+            else:
+                decoded += result
+        return decoded
     elif filename.startswith('#'):
         return filename[1:]
+    else:
+        return ''
+
+def File2StringHash(filename):
+    decoded = FilenameCheckHash(filename)
+    if decoded != '':
+        return decoded
     elif filename.lower().endswith('.zip'):
         oZipfile = zipfile.ZipFile(filename, 'r')
         if len(oZipfile.infolist()) == 1:
@@ -230,6 +292,8 @@ def FilterKeys(keyss):
     while len(result) > 1:
         if result[0] * (len(result[1]) / len(result[0])) == result[1]:
             del result[1]
+        else:
+            break
 
     return result
 
@@ -271,7 +335,7 @@ def XOR(filenamePlaintext, filenameCiphertext, options):
             key = keys[0]
             start = len(key) - i % len(key)
             results.append(nKeydata(len(extractedKeyStream) - len(keys[0]), extractedKeyStream, key[start:] + key[0:start]))
-        elif len(keys) > 1:
+        elif len(keys) > 1 and options.verbose:
             print('Found more than one repeating key in key stream')
             print('Extracted key stream: %s' % repr(extractedKeyStream))
             print(keys)
@@ -281,17 +345,26 @@ def XOR(filenamePlaintext, filenameCiphertext, options):
         print('No key found')
         return
 
-    results = sorted(results, reverse=True)
+    dKeys = {}
+    reduced = []
+    for result in sorted(results, key=lambda x: x.extra, reverse=True):
+        if result.key in dKeys:
+            dKeys[result.key] += 1
+        else:
+            dKeys[result.key] = 1
+            reduced.insert(0, result)
     if options.decode:
         IfWIN32SetBinary(sys.stdout)
-        StdoutWriteChunked(XORData(ciphertext, results[0].key))
+        StdoutWriteChunked(XORData(ciphertext, reduced[-1].key))
     else:
         oPrintSeparatingLine = cPrintSeparatingLine()
-        for result in results:
+        for result in reduced:
             oPrintSeparatingLine.Print()
             print('Key:       %s' % ReprIfNeeded(result.key))
             print('Key (hex): 0x%s' % binascii.b2a_hex(result.key))
             print('Extra:     %s' % result.extra)
+            print('Divide:    %d' % (len(result.keystream) / len(result.key)))
+            print('Counts:    %d' % dKeys[result.key])
             print('Keystream: %s' % ReprIfNeeded(result.keystream))
 
 def Main():
@@ -316,6 +389,7 @@ https://DidierStevens.com'''
     oParser.add_option('-e', '--extra', type=int, default=1, help='Minimum number of extras')
     oParser.add_option('-d', '--decode', action='store_true', default=False, help='Decode the ciphertext')
     oParser.add_option('-x', '--xor', action='store_true', default=False, help='XOR data with key')
+    oParser.add_option('-v', '--verbose', action='store_true', default=False, help='Verbose output')
     (options, args) = oParser.parse_args()
 
     if options.man:
