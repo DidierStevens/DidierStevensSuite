@@ -2,8 +2,8 @@
 
 __description__ = 'Extract base64 strings from file'
 __author__ = 'Didier Stevens'
-__version__ = '0.0.6'
-__date__ = '2017/02/13'
+__version__ = '0.0.7'
+__date__ = '2017/07/01'
 
 """
 
@@ -24,6 +24,7 @@ History:
   2016/11/18: added hex encoding
   2017/02/12: 0.0.6 added encoding all and option -u
   2017/02/13: updated man
+  2017/07/01: 0.0.7 added option -z
 
 Todo:
 """
@@ -103,6 +104,7 @@ Here is an example of an ascii dump (-s 2 -a):
 You can also specify the minimum length of the decoded base64 datastream with option -n.
 
 With option -w (ignorewhitespace), you can instruct base64dump to ignore all whitespace characters. So for example if the base64 text is split into lines, then you will get one base64 stream.
+With option -z (ignorenullbytes), you can instruct base64dump to ignore all leading 0x00 bytes. This can help to decode UNICODE text.
 
 It's also possible to try all encodings: all
 Example:
@@ -551,6 +553,19 @@ def BASE64Dump(filename, options):
     if options.ignorewhitespace:
         for whitespacecharacter in string.whitespace:
             data = data.replace(whitespacecharacter, '')
+    if options.ignorenullbytes:
+        previous_char_was_zero = False
+        result = ''
+        for char in data:
+            if char == '\x00':
+                if previous_char_was_zero:
+                    result += char
+                previous_char_was_zero = True
+            else:
+                result += char
+                previous_char_was_zero = False
+        data = result
+        result = None
     dDecodedData = {}
     if options.encoding == 'all':
         report = []
@@ -608,6 +623,7 @@ def Main():
     oParser.add_option('-c', '--cut', type=str, default='', help='cut data')
     oParser.add_option('-w', '--ignorewhitespace', action='store_true', default=False, help='ignore whitespace')
     oParser.add_option('-u', '--unique', action='store_true', default=False, help='do not repeat identical decoded data')
+    oParser.add_option('-z', '--ignorenullbytes', action='store_true', default=False, help='ignore null (zero) bytes')
     (options, args) = oParser.parse_args()
 
     if options.man:
