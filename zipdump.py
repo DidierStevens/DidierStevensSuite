@@ -2,8 +2,8 @@
 
 __description__ = 'ZIP dump utility'
 __author__ = 'Didier Stevens'
-__version__ = '0.0.8'
-__date__ = '2017/05/21'
+__version__ = '0.0.9'
+__date__ = '2017/07/02'
 
 """
 
@@ -37,6 +37,7 @@ History:
   2017/05/02: 0.0.6: added options --passwordfile and --passwordfilestop
   2017/05/20: 0.0.7: added internal password list
   2017/05/21: 0.0.8: added extra exception DictionaryAttack
+  2017/07/02: 0.0.9: added # support for option -y
 
 Todo:
 """
@@ -227,6 +228,7 @@ To include extra data with each use of zipdump, define environment variable ZIPD
 
 zipdump supports YARA rules. Installation of the YARA Python module is not mandatory if you don't use YARA rules.
 You provide the YARA rules with option -y. You can provide one file with YARA rules, an at-file (@file containing the filenames of the YARA files) or a directory. In case of a directory, all files inside the directory are read as YARA files.
+Or you can provide the YARA rule with the option value if it starts with # (literal), #h# (hexadecimal) or #b# (base64). Example: -y "#rule demo {strings: $a=\"demo\" condition: $a}"
 All files inside the ZIP file are scanned with the provided YARA rules, you can not use option -s to select an individual file.
 
 Example:
@@ -374,17 +376,26 @@ def ProcessAt(argument):
     else:
         return [argument]
 
-def YARACompile(fileordirname):
-    dFilepaths = {}
-    if os.path.isdir(fileordirname):
-        for root, dirs, files in os.walk(fileordirname):
-            for file in files:
-                filename = os.path.join(root, file)
-                dFilepaths[filename] = filename
+def YARACompile(ruledata):
+    if ruledata.startswith('#'):
+        if ruledata.startswith('#h#'):
+            rule = binascii.a2b_hex(ruledata[3:])
+        elif ruledata.startswith('#b#'):
+            rule = binascii.a2b_base64(ruledata[3:])
+        else:
+            rule = ruledata[1:]
+        return yara.compile(source=rule)
     else:
-        for filename in ProcessAt(fileordirname):
-            dFilepaths[filename] = filename
-    return yara.compile(filepaths=dFilepaths)
+        dFilepaths = {}
+        if os.path.isdir(ruledata):
+            for root, dirs, files in os.walk(ruledata):
+                for file in files:
+                    filename = os.path.join(root, file)
+                    dFilepaths[filename] = filename
+        else:
+            for filename in ProcessAt(ruledata):
+                dFilepaths[filename] = filename
+        return yara.compile(filepaths=dFilepaths)
 
 class cDumpStream():
     def __init__(self):
