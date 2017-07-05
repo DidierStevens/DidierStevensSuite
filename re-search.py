@@ -2,8 +2,8 @@
 
 __description__ = "Program to use Python's re.findall on files"
 __author__ = 'Didier Stevens'
-__version__ = '0.0.7'
-__date__ = '2017/05/18'
+__version__ = '0.0.8'
+__date__ = '2017/06/13'
 
 """
 
@@ -31,6 +31,7 @@ History:
   2017/05/13: 0.0.5 bugfix output line
   2017/05/17: 0.0.6 added regex btc
   2017/05/18: 0.0.7 fixed regex btc, thanks @SecurityBeard
+  2017/06/13: 0.0.8 added --script and --execute
 
 Todo:
   add hostname to header
@@ -67,7 +68,7 @@ Manual:
 
 re-search is a program to match regular expressions. It is like grep -o, it will match regular expressions in text files, not the complete line.
 
-It has 2 major features: a small, extendable library of regular expressions selectable by name; and extra functionality like gibberish detection and whitelists/blacklists.
+It has 2 major features: a small, extendable library of regular expressions selectable by name; and extra functionality like gibberish detection, whitelists/blacklists and Python functions.
 
 We will use this list of URLs in our examples:
 http://didierstevens.com
@@ -119,11 +120,11 @@ If you have a list of regular expressions to match, put them in a csv file, and 
 Example:
 re-search.py -vHrg -o result -S , -I " " -R PCRE -C pcre.csv logs
 
-Gibberish detection and whitelists/blacklists filtering is done by prefixing the regular expression with a comment. Regular expressions can contain comments, like programming languages. This is a comment for regular expressions: (?#comment).
+Gibberish detection, whitelists/blacklists filtering and matching with Python functions is done by prefixing the regular expression with a comment. Regular expressions can contain comments, like programming languages. This is a comment for regular expressions: (?#comment).
 If you use re-search with regular expression comments, nothing special happens:
 re-search.py "(?#comment)[a-z]+\.com" list.txt
 
-However, if your regular expression comment prefixes the regular expression, and the comment starts with keyword extra=, then you can use gibberish detection and whitelist/blacklist filtering.
+However, if your regular expression comment prefixes the regular expression, and the comment starts with keyword extra=, then you can use gibberish detection, whitelist/blacklist filtering and Python function matching.
 To use gibberisch detection, you use directive S (S stands for sensical). If you want to filter all strings that match the regular expression and are gibberish, you use the following regular expression comment: (?#extra=S:g). :g means that you want to filter for gibberish.
 
 Example to extract alphabetical .com domains from file list.txt with a regular expression that are gibberish:
@@ -164,9 +165,14 @@ re-search.py "(?#extra=I:whitelistlist)[a-z]+\.com" list.txt
 Output:
 didierstevens.com
 
+Python function matching is defined via directive P (Python). If you want to validate a string with a Python function, you use the following regular expression comment: (?#extra=P:Validate). Validate is a Python function that takes a string as argument and returns a boolean: True for a match and False if there is no match. You can provide your custom Python function(s) in a file via option --script or as a commandline argument via option --execute.
+
+Example: Bitcoin address matching. Regular expression [13][a-km-zA-HJ-NP-Z1-9]{25,34} will match Bitcoin addresses, but also other strings that look like a Bitcoin address but are not a valid Bitcoin address. A valid Bitcoin address has a particular syntax, and a valid checksum. The regular expression can check the syntax, but not validate the checksum. Python function BTCValidate can check the checksum of a Bitcoin address. The following regular expression matches Bitcoin addresses with a valid syntax and uses Python function BTCValidate to validate the checksum:
+(?#extra=P:BTCValidate)[13][a-km-zA-HJ-NP-Z1-9]{25,34}
+
 You can use more than one directive in a regular expression. Directives are separated by the ; character.
 
-Example to extract alphabetical .com domains from file list.txt with a regular expression that are not gibberish and that are not blacklist:
+Example to extract alphabetical .com domains from file list.txt with a regular expression that are not gibberish and that are not blacklisted:
 re-search.py "(?#extra=S:s;E:blacklist)[a-z]+\.com" list.txt
 
 Output:
@@ -287,20 +293,6 @@ class cOutput():
 
 def ExpandFilenameArguments(filenames):
     return list(collections.OrderedDict.fromkeys(sum(map(glob.glob, sum(map(ProcessAt, filenames), [])), [])))
-
-def decode_base58(bc, length):
-    digits58 = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz'
-    n = 0
-    for char in bc:
-        n = n * 58 + digits58.index(char)
-#    print(n.to_bytes(length, 'big'))
-    print 
-#    return n.to_bytes(length, 'big')
-    return ''.join([chr((n >> i*8) & 0xff) for i in reversed(range(length))])
-
-def BTCValidate(bc):
-    bcbytes = decode_base58(bc, 25)
-    return bcbytes[-4:] == sha256(sha256(bcbytes[:-4]).digest()).digest()[:4]
 
 def PrintLibrary():
     global dLibrary
@@ -466,6 +458,10 @@ def RESearchCSV(csvFilename, filenames, oOutput, options):
 
 def RESearch(regex, filenames, options):
     oOutput = cOutputResult(options)
+    if options.script != '':
+        reextra.Script(options.script)
+    if options.execute != '':
+        reextra.Execute(options.execute)
     if options.csv:
         RESearchCSV(regex, filenames, oOutput, options)
     else:
@@ -515,6 +511,8 @@ https://DidierStevens.com'''
     oParser.add_option('-f', '--fullread', action='store_true', default=False, help='Do a full read of the input, not line per line')
     oParser.add_option('-G', '--grepall', action='store_true', default=False, help='Do a full read of the input and a full write when there is a match, not line per line')
     oParser.add_option('-D', '--dotall', action='store_true', default=False, help='. matches newline too')
+    oParser.add_option('--script', default='', help='Python script file with definitions to include')
+    oParser.add_option('--execute', default='', help='Python commands to execute')
     (options, args) = oParser.parse_args()
 
     if options.man:
