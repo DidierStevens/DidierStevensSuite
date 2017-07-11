@@ -2,8 +2,8 @@
 
 __description__ = 'ZIP dump utility'
 __author__ = 'Didier Stevens'
-__version__ = '0.0.9'
-__date__ = '2017/07/02'
+__version__ = '0.0.10'
+__date__ = '2017/07/11'
 
 """
 
@@ -38,6 +38,7 @@ History:
   2017/05/20: 0.0.7: added internal password list
   2017/05/21: 0.0.8: added extra exception DictionaryAttack
   2017/07/02: 0.0.9: added # support for option -y
+  2017/07/11: 0.0.10: added option --yarastringsraw
 
 Todo:
 """
@@ -242,6 +243,8 @@ If you want more information about what was detected by the YARA rule, use optio
 C:\Demo>zipdump.py -y contains_pe_file.yara --yarastrings example.zip
 Index Filename     Decoder YARA namespace        YARA rule        
     1 Dialog42.exe         contains_pe_file.yara Contains_PE_File 000000 $a 4d5a 'MZ' 
+
+Use option --yarastringsraw to see only the matched strings, and nothing more.
 
 YARA rule contains_pe_file detects PE files by finding string MZ followed by string PE at the correct offset (AddressOfNewExeHeader).
 The rule looks like this:
@@ -4494,7 +4497,8 @@ def ZIPDump(zipfilename, options):
                 headers.extend(['Encrypted', 'Timestamp', 'MD5', 'Filesize', 'Entropy', 'Unique bytes', 'Magic HEX', 'Magic ASCII', 'Null bytes', 'Control bytes', 'Whitespace bytes', 'Printable bytes', 'High bytes'])
             else:
                 headers.extend(['Encrypted', 'Timestamp'])
-        outputRows.append(headers)
+        if not options.yarastringsraw:
+            outputRows.append(headers)
         counter = 0
         for oZipInfo in oZipfile.infolist():
             counter += 1
@@ -4529,18 +4533,23 @@ def ZIPDump(zipfilename, options):
                     for oDecoder in oDecoders:
                         while oDecoder.Available():
                             for result in rules.match(data=oDecoder.Decode()):
-                                row = [oZipInfo.filename, oDecoder.Name(), result.namespace, result.rule]
-                                if options.zipfilename:
-                                    row.insert(0, zipfilename)
-                                row.insert(0, counter)
-                                if options.yarastrings:
+                                if options.yarastringsraw:
                                     for stringdata in result.strings:
-                                        row.append('%06x' % stringdata[0])
-                                        row.append(stringdata[1])
-                                        row.append(binascii.hexlify(stringdata[2]))
-                                        row.append(repr(stringdata[2]))
-                                outputExtraInfo.append('')
-                                outputRows.append(row)
+                                        outputExtraInfo.append('')
+                                        outputRows.append([stringdata[2]])
+                                else:
+                                    row = [oZipInfo.filename, oDecoder.Name(), result.namespace, result.rule]
+                                    if options.zipfilename:
+                                        row.insert(0, zipfilename)
+                                    row.insert(0, counter)
+                                    if options.yarastrings:
+                                        for stringdata in result.strings:
+                                            row.append('%06x' % stringdata[0])
+                                            row.append(stringdata[1])
+                                            row.append(binascii.hexlify(stringdata[2]))
+                                            row.append(repr(stringdata[2]))
+                                    outputExtraInfo.append('')
+                                    outputRows.append(row)
 
         PrintOutput(outputRows, outputExtraInfo, options.extra, options.separator, QUOTE, fOut)
 
@@ -4570,6 +4579,7 @@ def Main():
     oParser.add_option('--passwordfilestop', default='', help='A file with ZIP passwords to be used in a dictionary attack, stop after the attack')
     oParser.add_option('-y', '--yara', help="YARA rule file (or directory or @file) to check files (YARA search doesn't work with -s option)")
     oParser.add_option('--yarastrings', action='store_true', default=False, help='Print YARA strings')
+    oParser.add_option('--yarastringsraw', action='store_true', default=False, help='Print only YARA strings')
     oParser.add_option('-C', '--decoders', type=str, default='', help='decoders to load (separate decoders with a comma , ; @file supported)')
     oParser.add_option('--decoderoptions', type=str, default='', help='options for the decoder')
     oParser.add_option('-v', '--verbose', action='store_true', default=False, help='verbose output with decoder errors')
