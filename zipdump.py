@@ -2,8 +2,8 @@
 
 __description__ = 'ZIP dump utility'
 __author__ = 'Didier Stevens'
-__version__ = '0.0.10'
-__date__ = '2017/07/11'
+__version__ = '0.0.11'
+__date__ = '2017/07/18'
 
 """
 
@@ -39,6 +39,7 @@ History:
   2017/05/21: 0.0.8: added extra exception DictionaryAttack
   2017/07/02: 0.0.9: added # support for option -y
   2017/07/11: 0.0.10: added option --yarastringsraw
+  2017/07/18: 0.0.11: added #s# and #q# support for option -y
 
 Todo:
 """
@@ -229,7 +230,8 @@ To include extra data with each use of zipdump, define environment variable ZIPD
 
 zipdump supports YARA rules. Installation of the YARA Python module is not mandatory if you don't use YARA rules.
 You provide the YARA rules with option -y. You can provide one file with YARA rules, an at-file (@file containing the filenames of the YARA files) or a directory. In case of a directory, all files inside the directory are read as YARA files.
-Or you can provide the YARA rule with the option value if it starts with # (literal), #h# (hexadecimal) or #b# (base64). Example: -y "#rule demo {strings: $a=\"demo\" condition: $a}"
+Or you can provide the YARA rule with the option value if it starts with # (literal), #s# (string), #q# (quote), #h# (hexadecimal) or #b# (base64). Example: -y "#rule demo {strings: $a=\"demo\" condition: $a}"
+Using #s#demo will instruct zipdump to generate a rule to search for string demo (rule string {strings: $a = "demo" ascii wide nocase condition: $a) and use that rule.
 All files inside the ZIP file are scanned with the provided YARA rules, you can not use option -s to select an individual file.
 
 Example:
@@ -385,6 +387,10 @@ def YARACompile(ruledata):
             rule = binascii.a2b_hex(ruledata[3:])
         elif ruledata.startswith('#b#'):
             rule = binascii.a2b_base64(ruledata[3:])
+        elif ruledata.startswith('#s#'):
+            rule = 'rule string {strings: $a = "%s" ascii wide nocase condition: $a}' % ruledata[3:]
+        elif ruledata.startswith('#q#'):
+            rule = ruledata[3:].replace("'", '"')
         else:
             rule = ruledata[1:]
         return yara.compile(source=rule)
