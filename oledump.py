@@ -2,8 +2,8 @@
 
 __description__ = 'Analyze OLE files (Compound Binary Files)'
 __author__ = 'Didier Stevens'
-__version__ = '0.0.27'
-__date__ = '2017/03/04'
+__version__ = '0.0.28'
+__date__ = '2017/07/20'
 
 """
 
@@ -66,6 +66,7 @@ History:
   2016/10/16: decompressed.replace('\r\n', '\n'); added plugindir and decoderdir options by Remi Pointel
   2016/12/11: 0.0.26 added indicator O for OLE10Native
   2017/03/04: 0.0.27 added externals for YARA rules
+  2017/07/20: 0.0.28 added # to option -y
 
 Todo:
 """
@@ -302,7 +303,9 @@ oledump.py -p @all-plugins.txt sample.xls
 
 Some plugins take options too. Use --pluginoptions to specify these options.
 
-oledump can scan the content of the streams with YARA rules (the YARA Python module must be installed). You provide the YARA rules with option -y. You can provide one file with YARA rules, an at-file (@file containing the filenames of the YARA files) or a directory. In case of a directory, all files inside the directory are read as YARA files. All streams are scanned with the provided YARA rules, you can not use option -s to select an individual stream.
+oledump can scan the content of the streams with YARA rules (the YARA Python module must be installed). You provide the YARA rules with option -y. You can provide one file with YARA rules, an at-file (@file containing the filenames of the YARA files) or a directory. In case of a directory, all files inside the directory are read as YARA files. Or you can provide the YARA rule with the option value if it starts with # (literal), #s# (string), #q# (quote), #h# (hexadecimal) or #b# (base64). Example: -y "#rule demo {strings: $a=\"demo\" condition: $a}"
+Using #s#demo will instruct oledump to generate a rule to search for string demo (rule string {strings: $a = "demo" ascii wide nocase condition: $a) and use that rule.
+All streams are scanned with the provided YARA rules, you can not use option -s to select an individual stream.
 
 Example:
 C:\Demo>oledump.py -y contains_pe_file.yara Book1-insert-object-exe.xls
@@ -1446,17 +1449,30 @@ def OLESub(ole, prefix, rules, options):
 
     return returnCode
 
-def YARACompile(fileordirname):
-    dFilepaths = {}
-    if os.path.isdir(fileordirname):
-        for root, dirs, files in os.walk(fileordirname):
-            for file in files:
-                filename = os.path.join(root, file)
-                dFilepaths[filename] = filename
+def YARACompile(ruledata):
+    if ruledata.startswith('#'):
+        if ruledata.startswith('#h#'):
+            rule = binascii.a2b_hex(ruledata[3:])
+        elif ruledata.startswith('#b#'):
+            rule = binascii.a2b_base64(ruledata[3:])
+        elif ruledata.startswith('#s#'):
+            rule = 'rule string {strings: $a = "%s" ascii wide nocase condition: $a}' % ruledata[3:]
+        elif ruledata.startswith('#q#'):
+            rule = ruledata[3:].replace("'", '"')
+        else:
+            rule = ruledata[1:]
+        return yara.compile(source=rule, externals={'streamname': '', 'VBA': False})
     else:
-        for filename in ProcessAt(fileordirname):
-            dFilepaths[filename] = filename
-    return yara.compile(filepaths=dFilepaths, externals={'streamname': '', 'VBA': False})
+        dFilepaths = {}
+        if os.path.isdir(ruledata):
+            for root, dirs, files in os.walk(ruledata):
+                for file in files:
+                    filename = os.path.join(root, file)
+                    dFilepaths[filename] = filename
+        else:
+            for filename in ProcessAt(ruledata):
+                dFilepaths[filename] = filename
+        return yara.compile(filepaths=dFilepaths, externals={'streamname': '', 'VBA': False})
 
 def FilenameInSimulations(filename):
     if dslsimulationdb == None:
@@ -1632,7 +1648,7 @@ def Main():
     oParser.add_option('--pluginoptions', type=str, default='', help='options for the plugin')
     oParser.add_option('--plugindir', type=str, default='', help='directory for the plugin')
     oParser.add_option('-q', '--quiet', action='store_true', default=False, help='only print output from plugins')
-    oParser.add_option('-y', '--yara', help="YARA rule-file, @file or directory to check streams (YARA search doesn't work with -s option)")
+    oParser.add_option('-y', '--yara', help="YARA rule-file, @file, directory or #rule to check streams (YARA search doesn't work with -s option)")
     oParser.add_option('-D', '--decoders', type=str, default='', help='decoders to load (separate decoders with a comma , ; @file supported)')
     oParser.add_option('--decoderoptions', type=str, default='', help='options for the decoder')
     oParser.add_option('--decoderdir', type=str, default='', help='directory for the decoder')
