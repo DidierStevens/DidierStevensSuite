@@ -2,8 +2,8 @@
 
 __description__ = 'EML dump utility'
 __author__ = 'Didier Stevens'
-__version__ = '0.0.9'
-__date__ = '2016/04/13'
+__version__ = '0.0.10'
+__date__ = '2017/07/21'
 
 """
 
@@ -28,6 +28,7 @@ History:
   2016/02/28: 0.0.7 added option -f
   2016/03/02: 0.0.8 extra deobfuscation code for option -f
   2016/04/13: 0.0.9 changed handling of obfuscating lines
+  2017/07/21: 0.0.10 added filename to parts
 
 Todo:
 """
@@ -750,7 +751,12 @@ def EMLDump(emlfilename, options):
                 else:
                     lengthString = '%7d' % len(data)
                 extrainfo = GenerateExtraInfo(options.extra, counter, IFF(oPart.is_multipart(), 'M', ''), oPart.get_content_type(), data)
-                line = '%d: %s %s %s' % (counter, IFF(oPart.is_multipart(), 'M', ' '), lengthString, oPart.get_content_type())
+                fieldfilename = oPart.get_filename()
+                if fieldfilename == None:
+                    fieldfilename = ''
+                else:
+                    fieldfilename = ' (' + fieldfilename + ')'
+                line = '%d: %s %s %s%s' % (counter, IFF(oPart.is_multipart(), 'M', ' '), lengthString, oPart.get_content_type(), fieldfilename)
                 if options.extra.startswith('!'):
                     line = ''
                 line += extrainfo
