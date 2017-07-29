@@ -2,8 +2,8 @@
 
 __description__ = 'Translate bytes according to a Python expression'
 __author__ = 'Didier Stevens'
-__version__ = '2.4.0'
-__date__ = '2017/02/26'
+__version__ = '2.5.0'
+__date__ = '2017/07/29'
 
 """
 
@@ -28,6 +28,9 @@ History:
   2016/09/13: man
   2017/02/10: 2.4.0 added input filename # support
   2017/02/26: fixed Python 3 str vs bytes bug
+  2017/06/04: 2.5.0 added #e# support
+  2017/06/16: continued #e# support
+  2017/07/29: added -2 option
 
 Todo:
 """
@@ -39,6 +42,7 @@ import textwrap
 import re
 import math
 import binascii
+import random
 try:
     from StringIO import StringIO
 except ImportError:
@@ -97,6 +101,13 @@ Option -e (execute) is used to execute Python commands before the command is exe
 Here is an example to decompress a Flash file (.swf):
  translate.py -f -e "import zlib" sample.swf "lambda b: zlib.decompress(b[8:])"
 
+A second file can be used as input with option -2. The value of the current byte of the second input file is stored in variable byte2 (this too advances byte per byte together with the primary input file).
+
+Example:
+ translate.py -2 #021230 #Scbpbt "byte + byte2 - 0x30"
+Output:
+ Secret
+
 In stead of using an input filename, the content can also be passed in the argument. To achieve this, precede the text with character #.
 If the text to pass via the argument contains control characters or non-printable characters, hexadecimal (#h#) or base64 (#b#) can be used.
 
@@ -142,30 +153,277 @@ def Output(fOut, data):
     else:
         StdoutWriteChunked(data)
 
+def LoremIpsumSentence(minimum, maximum):
+    words = ['lorem', 'ipsum', 'dolor', 'sit', 'amet', 'consectetur', 'adipiscing', 'elit', 'etiam', 'tortor', 'metus', 'cursus', 'sed', 'sollicitudin', 'ac', 'sagittis', 'eget', 'massa', 'praesent', 'sem', 'fermentum', 'dignissim', 'in', 'vel', 'augue', 'scelerisque', 'auctor', 'libero', 'nam', 'a', 'gravida', 'odio', 'duis', 'vestibulum', 'vulputate', 'quam', 'nec', 'cras', 'nibh', 'feugiat', 'ut', 'vitae', 'ornare', 'justo', 'orci', 'varius', 'natoque', 'penatibus', 'et', 'magnis', 'dis', 'parturient', 'montes', 'nascetur', 'ridiculus', 'mus', 'curabitur', 'nisl', 'egestas', 'urna', 'iaculis', 'lectus', 'maecenas', 'ultrices', 'velit', 'eu', 'porta', 'hac', 'habitasse', 'platea', 'dictumst', 'integer', 'id', 'commodo', 'mauris', 'interdum', 'malesuada', 'fames', 'ante', 'primis', 'faucibus', 'accumsan', 'pharetra', 'aliquam', 'nunc', 'at', 'est', 'non', 'leo', 'nulla', 'sodales', 'porttitor', 'facilisis', 'aenean', 'condimentum', 'rutrum', 'facilisi', 'tincidunt', 'laoreet', 'ultricies', 'neque', 'diam', 'euismod', 'consequat', 'tempor', 'elementum', 'lobortis', 'erat', 'ligula', 'risus', 'donec', 'phasellus', 'quisque', 'vivamus', 'pellentesque', 'tristique', 'venenatis', 'purus', 'mi', 'dictum', 'posuere', 'fringilla', 'quis', 'magna', 'pretium', 'felis', 'pulvinar', 'lacinia', 'proin', 'viverra', 'lacus', 'suscipit', 'aliquet', 'dui', 'molestie', 'dapibus', 'mollis', 'suspendisse', 'sapien', 'blandit', 'morbi', 'tellus', 'enim', 'maximus', 'semper', 'arcu', 'bibendum', 'convallis', 'hendrerit', 'imperdiet', 'finibus', 'fusce', 'congue', 'ullamcorper', 'placerat', 'nullam', 'eros', 'habitant', 'senectus', 'netus', 'turpis', 'luctus', 'volutpat', 'rhoncus', 'mattis', 'nisi', 'ex', 'tempus', 'eleifend', 'vehicula', 'class', 'aptent', 'taciti', 'sociosqu', 'ad', 'litora', 'torquent', 'per', 'conubia', 'nostra', 'inceptos', 'himenaeos']
+    sample = random.sample(words, random.randint(minimum, maximum))
+    sample[0] = sample[0].capitalize()
+    return ' '.join(sample) + '.'
+
+def LoremIpsum(sentences):
+    return ' '.join([LoremIpsumSentence(15, 30) for i in range(sentences)])
+
+STATE_START = 0
+STATE_IDENTIFIER = 1
+STATE_STRING = 2
+STATE_SPECIAL_CHAR = 3
+STATE_ERROR = 4
+
+def Tokenize(expression):
+    result = []
+    token = ''
+    state = STATE_START
+    while expression != '':
+        char = expression[0]
+        expression = expression[1:]
+        if char == "'":
+            if state == STATE_START:
+                state = STATE_STRING
+            elif state == STATE_IDENTIFIER:
+                result.append([STATE_IDENTIFIER, token])
+                state = STATE_STRING
+                token = ''
+            elif state == STATE_STRING:
+                result.append([STATE_STRING, token])
+                state = STATE_START
+                token = ''
+        elif char >= '0' and char <= '9' or char.lower() >= 'a' and char.lower() <= 'z':
+            if state == STATE_START:
+                token = char
+                state = STATE_IDENTIFIER
+            else:
+                token += char
+        elif char == ' ':
+            if state == STATE_IDENTIFIER:
+                result.append([STATE_IDENTIFIER, token])
+                token = ''
+                state = STATE_START
+            elif state == STATE_STRING:
+                token += char
+        else:
+            if state == STATE_IDENTIFIER:
+                result.append([STATE_IDENTIFIER, token])
+                token = ''
+                state = STATE_START
+                result.append([STATE_SPECIAL_CHAR, char])
+            elif state == STATE_STRING:
+                token += char
+            else:
+                result.append([STATE_SPECIAL_CHAR, char])
+                token = ''
+    if state == STATE_IDENTIFIER:
+        result.append([state, token])
+    elif state == STATE_STRING:
+        result = [[STATE_ERROR, 'Error: string not closed', token]]
+    return result
+
+def ParseFunction(tokens):
+    if len(tokens) == 0:
+        print('Parsing error')
+        return None, tokens
+    if tokens[0][0] != STATE_IDENTIFIER:
+        print('Parsing error')
+        return None, tokens
+    function = tokens[0][1]
+    tokens = tokens[1:]
+    if len(tokens) == 0:
+        print('Parsing error')
+        return None, tokens
+    if tokens[0][0] != STATE_SPECIAL_CHAR or tokens[0][1] != '(':
+        print('Parsing error')
+        return None, tokens
+    tokens = tokens[1:]
+    if len(tokens) == 0:
+        print('Parsing error')
+        return None, tokens
+    arguments = []
+    while True:
+        if tokens[0][0] != STATE_IDENTIFIER and tokens[0][0] != STATE_STRING:
+            print('Parsing error')
+            return None, tokens
+        arguments.append(tokens[0])
+        tokens = tokens[1:]
+        if len(tokens) == 0:
+            print('Parsing error')
+            return None, tokens
+        if tokens[0][0] != STATE_SPECIAL_CHAR or (tokens[0][1] != ',' and tokens[0][1] != ')'):
+            print('Parsing error')
+            return None, tokens
+        if tokens[0][0] == STATE_SPECIAL_CHAR and tokens[0][1] == ')':
+            tokens = tokens[1:]
+            break
+        tokens = tokens[1:]
+        if len(tokens) == 0:
+            print('Parsing error')
+            return None, tokens
+    return [[function, arguments], tokens]
+
+def Parse(expression):
+    tokens = Tokenize(expression)
+    if len(tokens) == 0:
+        print('Parsing error')
+        return None
+    if tokens[0][0] == STATE_ERROR:
+        print(tokens[0][1])
+        print(tokens[0][2])
+        print(expression)
+        return None
+    functioncalls = []
+    while True:
+        functioncall, tokens = ParseFunction(tokens)
+        if functioncall == None:
+            return None
+        functioncalls.append(functioncall)
+        if len(tokens) == 0:
+            return functioncalls
+        if tokens[0][0] != STATE_SPECIAL_CHAR or tokens[0][1] != '+':
+            print('Parsing error')
+            return None
+        tokens = tokens[1:]
+
+def InterpretInteger(token):
+    if token[0] != STATE_IDENTIFIER:
+        return None
+    try:
+        return int(token[1])
+    except:
+        return None
+
+def Hex2Bytes(hexadecimal):
+    if len(hexadecimal) % 2 == 1:
+        hexadecimal = '0' + hexadecimal
+    try:
+        return binascii.a2b_hex(hexadecimal)
+    except:
+        return None
+    
+def InterpretHexInteger(token):
+    if token[0] != STATE_IDENTIFIER:
+        return None
+    if not token[1].startswith('0x'):
+        return None
+    bytes = Hex2Bytes(token[1][2:])
+    if bytes == None:
+        return None
+    integer = 0
+    for byte in bytes:
+        integer = integer * 0x100 + ord(byte)
+    return integer
+
+def InterpretNumber(token):
+    number = InterpretInteger(token)
+    if number == None:
+        return InterpretHexInteger(token)
+    else:
+        return number
+
+def InterpretBytes(token):
+    if token[0] == STATE_STRING:
+        return token[1]
+    if token[0] != STATE_IDENTIFIER:
+        return None
+    if not token[1].startswith('0x'):
+        return None
+    return Hex2Bytes(token[1][2:])
+
+def CheckFunction(functionname, arguments, countarguments):
+    if countarguments == 0 and len(arguments) != 0:
+        print('Error: function %s takes no arguments, %d are given' % (functionname, len(arguments)))
+        return True
+    if countarguments == 1 and len(arguments) != 1:
+        print('Error: function %s takes 1 argument, %d are given' % (functionname, len(arguments)))
+        return True
+    if countarguments != len(arguments):
+        print('Error: function %s takes %d arguments, %d are given' % (functionname, countarguments, len(arguments)))
+        return True
+    return False
+
+def CheckNumber(argument, minimum=None, maximum=None):
+    number = InterpretNumber(argument)
+    if number == None:
+        print('Error: argument should be a number: %s' % argument[1])
+        return None
+    if minimum != None and number < minimum:
+        print('Error: argument should be minimum %d: %d' % (minimum, number))
+        return None
+    if maximum != None and number > maximum:
+        print('Error: argument should be maximum %d: %d' % (maximum, number))
+        return None
+    return number
+    
+FUNCTIONNAME_REPEAT = 'repeat'
+FUNCTIONNAME_RANDOM = 'random'
+FUNCTIONNAME_CHR = 'chr'
+FUNCTIONNAME_LOREMIPSUM = 'loremipsum'
+
+def Interpret(expression):
+    functioncalls = Parse(expression)
+    if functioncalls == None:
+        return None
+    decoded = ''
+    for functioncall in functioncalls:
+        functionname, arguments = functioncall
+        if functionname == FUNCTIONNAME_REPEAT:
+            if CheckFunction(functionname, arguments, 2):
+                return None
+            number = CheckNumber(arguments[0], minimum=1)
+            if number == None:
+                return None
+            bytes = InterpretBytes(arguments[1])
+            if bytes == None:
+                print('Error: argument should be a byte sequence: %s' % arguments[1][1])
+                return None
+            decoded += number * bytes
+        elif functionname == FUNCTIONNAME_RANDOM:
+            if CheckFunction(functionname, arguments, 1):
+                return None
+            number = CheckNumber(arguments[0], minimum=1)
+            if number == None:
+                return None
+            decoded += ''.join([chr(random.randint(0, 255)) for x in range(number)])
+        elif functionname == FUNCTIONNAME_LOREMIPSUM:
+            if CheckFunction(functionname, arguments, 1):
+                return None
+            number = CheckNumber(arguments[0], minimum=1)
+            if number == None:
+                return None
+            decoded += LoremIpsum(number)
+        elif functionname == FUNCTIONNAME_CHR:
+            if CheckFunction(functionname, arguments, 1):
+                return None
+            number = CheckNumber(arguments[0], minimum=1, maximum=255)
+            if number == None:
+                return None
+            decoded += chr(number)
+        else:
+            print('Error: unknown function: %s' % functionname)
+            return None
+    return decoded
+
 def FilenameCheckHash(filename):
-    decoded = None
     if filename.startswith('#h#'):
-        try:
-            decoded = binascii.a2b_hex(filename[3:])
-        finally:
-            return decoded
+        return Hex2Bytes(filename[3:])
     elif filename.startswith('#b#'):
         try:
-            decoded = binascii.a2b_base64(filename[3:])
-        finally:
-            return decoded
+            return binascii.a2b_base64(filename[3:])
+        except:
+            return None
+    elif filename.startswith('#e#'):
+        return Interpret(filename[3:])
     elif filename.startswith('#'):
         return filename[1:]
     else:
         return ''
 
-def Transform(fIn, fOut, commandPython):
+def Transform(fIn, fIn2, fOut, commandPython):
     position = 0
     while True:
         inbyte = fIn.read(1)
         if not inbyte:
             break
         byte = ord(inbyte)
+        if fIn2 != None:
+            inbyte2 = fIn2.read(1)
+            byte2 = ord(inbyte2)
         outbyte = eval(commandPython)
         fOut.write(chr(outbyte))
         position += 1
@@ -196,6 +454,18 @@ def Translate(filenameInput, commandPython, options):
         else:
             fIn = StringIO(decoded)
 
+    if options.secondbytestream != '':
+        decoded = FilenameCheckHash(options.secondbytestream)
+        if decoded == '':
+            fIn2 = open(options.secondbytestream, 'rb')
+        elif decoded == None:
+            print('Error parsing filename: ' + options.secondbytestream)
+            return
+        else:
+            fIn2 = StringIO(decoded)
+    else:
+        fIn2 = None
+
     if options.output == '':
         if sys.platform == 'win32':
             import msvcrt
@@ -219,10 +489,12 @@ def Translate(filenameInput, commandPython, options):
         else:
             Output(fOut, re.sub(options.filterregex, eval(commandPython), ''.join([x.group() for x in re.finditer(options.filterregex, content)])))
     else:
-        Transform(fIn, fOut, commandPython)
+        Transform(fIn, fIn2, fOut, commandPython)
 
     if fIn != sys.stdin:
         fIn.close()
+    if fIn2 != None:
+        fIn2.close()
     if fOut != sys.stdout:
         fOut.close()
 
@@ -248,6 +520,7 @@ https://DidierStevens.com'''
     oParser.add_option('-r', '--regex', default='', help='Regex to search input file for and apply function to')
     oParser.add_option('-R', '--filterregex', default='', help='Regex to filter input file for and apply function to')
     oParser.add_option('-e', '--execute', default='', help='Commands to execute')
+    oParser.add_option('-2', '--secondbytestream', default='', help='Second bytestream')
     oParser.add_option('-m', '--man', action='store_true', default=False, help='print manual')
     (options, args) = oParser.parse_args()
 
