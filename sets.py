@@ -1,9 +1,9 @@
 #!/usr/bin/env python
 
-__description__ = 'Set operations on 2 files: union, intersection, subtraction, exclusive or'
+__description__ = 'Set operations on 2 files: union, intersection, subtraction, exclusive or, sample'
 __author__ = 'Didier Stevens'
-__version__ = '0.0.1'
-__date__ = '2017/03/03'
+__version__ = '0.0.2'
+__date__ = '2017/08/02'
 
 """
 
@@ -16,6 +16,7 @@ History:
   2015/07/08: added stdin input
   2017/03/01: added # filename and option -b
   2017/03/03: added man
+  2017/08/02: 0.0.2: added operation sample
 
 Todo:
 """
@@ -25,12 +26,13 @@ import sys
 import binascii
 import StringIO
 import textwrap
+import random
 
 def PrintManual():
     manual = '''
 Manual:
 
-This program performs set operations on 2 text files. The elements of the set are the lines of the files.
+This program performs set operations on text files. The elements of the set are the lines of the files.
 
 Content of file set1.txt:
  Line 1
@@ -84,6 +86,13 @@ Output:
  Line 7
  Line 8
  Line 9
+
+Example to select a random subset of 3 elements of file set1.txt:
+ sets.py set1.txt sample 3
+Output:
+ Line 3
+ Line 4
+ Line 5
 
 This program can also work on bytes/characters in stead of lines. This is done with option -b.
 
@@ -189,9 +198,14 @@ def Intersect(set1, set2):
 def Subtract(set1, set2):
     return [line for line in set1 if not line in set2]
 
+def Sample(set1, k):
+    random.seed()
+    return random.sample(set1, k)
+
 def SetOperation(file1, operation, file2, options):
     content1 = File2List(file1, options.bytemode)
-    content2 = File2List(file2, options.bytemode)
+    if operation != 'sample':
+        content2 = File2List(file2, options.bytemode)
     if operation == 'union':
         result = content1 + Subtract(content2, content1)
     elif operation == 'intersect':
@@ -200,6 +214,8 @@ def SetOperation(file1, operation, file2, options):
         result = Subtract(content1, content2)
     elif operation == 'xor':
         result = Subtract(content1, content2) + Subtract(content2, content1)
+    elif operation == 'sample':
+        result = Sample(content1, int(file2))
     else:
         print('Unknown operation: %s' % operation)
         return
@@ -212,7 +228,7 @@ def SetOperation(file1, operation, file2, options):
     oOutput.Close()
 
 def Main():
-    oParser = optparse.OptionParser(usage='usage: %prog [options] [file1] union|intersect|subtract|xor file2\n' + __description__, version='%prog ' + __version__)
+    oParser = optparse.OptionParser(usage='usage: %prog [options] [file1] union|intersect|subtract|xor|sample file2\n' + __description__, version='%prog ' + __version__)
     oParser.add_option('-m', '--man', action='store_true', default=False, help='Print manual')
     oParser.add_option('-o', '--output', default='', help='Output file')
     oParser.add_option('-b', '--bytemode', action='store_true', default=False, help='byte mode')
