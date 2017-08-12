@@ -2,8 +2,8 @@
 
 __description__ = 'Calculate byte statistics'
 __author__ = 'Didier Stevens'
-__version__ = '0.0.5'
-__date__ = '2017/01/22'
+__version__ = '0.0.6'
+__date__ = '2017/08/12'
 
 """
 Source code put in public domain by Didier Stevens, no Copyright
@@ -21,6 +21,7 @@ History:
   2015/11/08: added position for minimum and maximum entropy
   2016/11/16: 0.0.4 added unique bytes
   2017/01/22: 0.0.5 added hex and base64 counts
+  2017/08/12: 0.0.6 added option -r
 
 Todo:
 """
@@ -263,6 +264,54 @@ BASE64 bytes:          1040  25.39%
 
 Position    Length Diff Bytes
 0x00000000:   4096    1 0x000102030405060708090a0b0c0d0e0f10111213...
+
+
+Option -r (ranges) instructs byte-stats to produce a report of the byte ranges in the analyzed file(s). A byte range is a contiguous sequence of bytes.
+
+A range report can help in indentifying the type of data, like base64 data:
+
+$byte-stats.py -s base64.bin
+
+Byte ASCII Count     Pct
+0x00           0   0.00%
+0x01           0   0.00%
+0x02           0   0.00%
+0x03           0   0.00%
+0x04           0   0.00%
+...
+0x63 c        28   2.05%
+0x6d m        28   2.05%
+0x54 T        29   2.12%
+0x51 Q        30   2.19%
+0x57 W        31   2.27%
+
+Size: 1368
+
+                   File(s)
+Entropy:           5.978290
+Unique bytes:            65  25.39%
+NULL bytes:               0   0.00%
+Control bytes:            0   0.00%
+Whitespace bytes:         0   0.00%
+Printable bytes:       1368 100.00%
+High bytes:               0   0.00%
+Hexadecimal bytes:      462  33.77%
+BASE64 bytes:          1368 100.00%
+
+Number of ranges: 5
+Fir. Last Len. Range
+0x2b        1: +
+0x2f 0x39  11: /0123456789
+0x3d        1: =
+0x41 0x5a  26: ABCDEFGHIJKLMNOPQRSTUVWXYZ
+0x61 0x7a  26: abcdefghijklmnopqrstuvwxyz
+
+In this example, 5 ranges are reported.
+Each range is characterized by 4 properties:
+Fir. (First) is the first byte value in the range.
+Last is the last byte value in the range (this value is not displayed for ranges of a single byte).
+Len. (length) is the number of unique byte values in the range.
+Range is the printout of the byte values in the range (. is printed if the byte value is not printable).
 '''
     for line in manual.split('\n'):
         print(textwrap.fill(line, 79))
@@ -521,6 +570,35 @@ def ByteStats(args, options):
             if len(sequence[1]) >= options.filter:
                 print('0x%08x: %6d %4d 0x%s' % (sequence[0], len(sequence[1]), ByteSub(sequence[1][1], sequence[1][0]), TruncateString(binascii.hexlify(''.join([chr(c) for c in sequence[1]])), 40)))
 
+    def Chr(number):
+        return IFF(number >= 0x20 and number < 0x7F, chr(number), '.')
+
+    def RangeToSTring(sequence):
+        if sequence == []:
+            return None
+        if len(sequence) == 1:
+            return '0x%02x        1: %s' % (sequence[0], ''.join(map(Chr, sequence)))
+        else:
+            return '0x%02x 0x%02x %3d: %s' % (sequence[0], sequence[-1], len(sequence), ''.join(map(Chr, sequence)))
+
+    if options.ranges:
+        print('')
+        result = []
+        byterange = []
+        for i in range(256):
+            if dPrevalence[i] != 0:
+                byterange.append(i)
+            else:
+                result.append(RangeToSTring(byterange))
+                byterange = []
+        result.append(RangeToSTring(byterange))
+        result = [s for s in result if s != None]
+        print('Number of ranges: %d' % len(result))
+        if len(result) != 0:
+            print('Fir. Last Len. Range')
+        for s in result:
+            print(s)
+
 def Main():
     moredesc = '''
 
@@ -542,6 +620,7 @@ https://DidierStevens.com'''
     oParser.add_option('-a', '--all', action='store_true', default=False, help='Print all byte stats')
     oParser.add_option('-s', '--sequence', action='store_true', default=False, help='Detect simple sequences')
     oParser.add_option('-f', '--filter', type=int, default=0, help='Minimum length of sequence for displaying (default 0)')
+    oParser.add_option('-r', '--ranges', action='store_true', default=False, help='Report byte ranges')
     (options, args) = oParser.parse_args()
 
     if options.man:
