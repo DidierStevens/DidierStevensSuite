@@ -2,8 +2,8 @@
 
 __description__ = "Program to convert numbers into a string"
 __author__ = 'Didier Stevens'
-__version__ = '0.0.1'
-__date__ = '2016/09/13'
+__version__ = '0.0.2'
+__date__ = '2017/08/11'
 
 """
 
@@ -15,6 +15,7 @@ History:
   2015/11/02: start
   2015/11/12: added import math
   2016/09/10: added option -j
+  2017/08/11: 0.0.2 added option -i
 
 Todo:
 """
@@ -114,6 +115,12 @@ def ProcessFile(fIn, fullread):
         for line in fIn:
             yield line.strip('\n')
 
+def Chr(number):
+    try:
+        return chr(number)
+    except:
+        return ''
+
 def NumbersToStringSingle(function, filenames, oOutput, options):
     if function == '':
         Function = lambda x: x
@@ -122,6 +129,10 @@ def NumbersToStringSingle(function, filenames, oOutput, options):
     else:
         Function = None
     oRE = re.compile('\d+')
+    if options.ignore:
+        ChrFunction = Chr
+    else:
+        ChrFunction = chr
     for filename in filenames:
         joined = ''
         if filename == '':
@@ -134,14 +145,15 @@ def NumbersToStringSingle(function, filenames, oOutput, options):
                 error = True
                 if Function == None:
                     try:
-                        result = ''.join(map(chr, [eval(function) for n in map(int, results)]))
+                        result = ''.join(map(ChrFunction, [eval(function) for n in map(int, results)]))
                         error = False
                     except:
                         if options.error:
+                            print('n = %d' % n)
                             raise
                 else:
                     try:
-                        result = ''.join(map(chr, Function(map(int, results))))
+                        result = ''.join(map(ChrFunction, Function(map(int, results))))
                         error = False
                     except:
                         if options.error:
@@ -178,6 +190,7 @@ https://DidierStevens.com'''
     oParser.add_option('-m', '--man', action='store_true', default=False, help='Print manual')
     oParser.add_option('-o', '--output', type=str, default='', help='Output to file')
     oParser.add_option('-e', '--error', action='store_true', default=False, help='Generate error when error occurs in Python expression')
+    oParser.add_option('-i', '--ignore', action='store_true', default=False, help='Ignore numbers greater than 255')
     oParser.add_option('-n', '--number', type=int, default=3, help='Minimum number of numbers (3 by default)')
     oParser.add_option('-j', '--join', action='store_true', default=False, help='Join output')
     (options, args) = oParser.parse_args()
