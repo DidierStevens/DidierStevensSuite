@@ -2,8 +2,8 @@
 
 __description__ = "Program to use Python's re.findall on files"
 __author__ = 'Didier Stevens'
-__version__ = '0.0.8'
-__date__ = '2017/06/13'
+__version__ = '0.0.9'
+__date__ = '2017/09/06'
 
 """
 
@@ -32,6 +32,7 @@ History:
   2017/05/17: 0.0.6 added regex btc
   2017/05/18: 0.0.7 fixed regex btc, thanks @SecurityBeard
   2017/06/13: 0.0.8 added --script and --execute
+  2017/09/06: 0.0.9 added option -x
 
 Todo:
   add hostname to header
@@ -47,6 +48,7 @@ import pickle
 import math
 import textwrap
 import csv
+import binascii
 
 try:
     import reextra
@@ -115,6 +117,7 @@ By default the regular expression matching is not case sensitive. You can make i
 To get grep-like output, use option -g. Option -r removes the anchor (^and $) or the regular expression. Use option -D (dotall) to make the . expression match newline characters. 
 By default, re-search reads the file(s) line-by-line. Binary files can also be processed, but are best read completely and not line-by-line. Use option -f (fullread) to perform a fule read of the file (and not line-by-line).
 Option -G (grepall) will also do a full binary read of the (like -f --fulread), but output the complete file if there is a match. This is usefull to select files for further processing, like string searching.
+Option -x (hex) will produce hexadecimal output.
 
 If you have a list of regular expressions to match, put them in a csv file, and use option -v, -S, -I, -H, -R and -C.
 Example:
@@ -368,6 +371,12 @@ def ProcessFile(fIn, fullread):
         for line in fIn:
             yield line.strip('\n')
 
+def Hex(data, dohex):
+    if dohex:
+        return binascii.b2a_hex(data)
+    else:
+        return data
+
 def RESearchSingle(regex, filenames, oOutput, options):
     regex, oREExtra = CompileRegex(regex, options)
     if options.display:
@@ -383,13 +392,13 @@ def RESearchSingle(regex, filenames, oOutput, options):
             results = oREExtra.Findall(line)
             if options.grepall or options.grep:
                 if results != []:
-                    oOutput.Line(line)
+                    oOutput.Line(Hex(line, options.hex))
             else:
                 for result in results:
                     if isinstance(result, str):
-                        oOutput.Line(result)
+                        oOutput.Line(Hex(result, options.hex))
                     if isinstance(result, tuple):
-                        oOutput.Line(result[0])
+                        oOutput.Line(Hex(result[0], options.hex))
         if fIn != sys.stdin:
             fIn.close()
 
@@ -511,6 +520,7 @@ https://DidierStevens.com'''
     oParser.add_option('-f', '--fullread', action='store_true', default=False, help='Do a full read of the input, not line per line')
     oParser.add_option('-G', '--grepall', action='store_true', default=False, help='Do a full read of the input and a full write when there is a match, not line per line')
     oParser.add_option('-D', '--dotall', action='store_true', default=False, help='. matches newline too')
+    oParser.add_option('-x', '--hex', action='store_true', default=False, help='output in hex format')
     oParser.add_option('--script', default='', help='Python script file with definitions to include')
     oParser.add_option('--execute', default='', help='Python commands to execute')
     (options, args) = oParser.parse_args()
