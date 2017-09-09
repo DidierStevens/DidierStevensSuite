@@ -2,8 +2,8 @@
 
 __description__ = 'Translate bytes according to a Python expression'
 __author__ = 'Didier Stevens'
-__version__ = '2.5.0'
-__date__ = '2017/07/29'
+__version__ = '2.5.1'
+__date__ = '2017/09/09'
 
 """
 
@@ -31,6 +31,8 @@ History:
   2017/06/04: 2.5.0 added #e# support
   2017/06/16: continued #e# support
   2017/07/29: added -2 option
+  2017/08/09: 2.5.1 #e# chr can take a second argument
+  2017/09/09: added functions Sani1 and Sani2 to help with input/output sanitization
 
 Todo:
 """
@@ -80,6 +82,8 @@ translate.py malware -o malware.decoded "rol(byte, 2)"
 
 Another function I defined is IFF (the IF Function): IFF(expression, valueTrue, valueFalse). This function allows you to write conditional code without an if statement. When expression evaluates to True, IFF returns valueTrue, otherwise it returns valueFalse.
 
+And yet 2 other functions I defined are Sani1 and Sani2. They can help you with input/output sanitization: Sani1 accepts a byte as input and returns the same byte, except if it is a control character. All control characters (except VT, LF and CR) are replaced by a space character (0x20). Sani2 is like Sani1, but sanitizes even more bytes: it sanitizes control characters like Sani1, and also all bytes equal to 0x80 and higher.
+
 translate.py malware -o malware.decoded "IFF(position >= 0x10 and position < 0x20, byte ^ 0x10, byte)"
 
 By default this program translates individual bytes via the provided Python expression. With option -f (fullread), translate.py reads the input file as one byte sequence and passes it to the function specified by the expression. This function needs to take one string as an argument and return one string (the translated file).
@@ -125,6 +129,24 @@ def rol(byte, count):
 
 def ror(byte, count):
     return (byte >> count | byte << (8- count)) & 0xFF
+
+#Sanitize 1: Sanitize input: return space (0x20) for all control characters, except HT, LF and CR
+def Sani1(byte):
+    if byte in [0x09, 0x0A, 0x0D]:
+        return byte
+    if byte < 0x20:
+        return 0x20
+    return byte
+
+#Sanitize 2: Sanitize input: return space (0x20) for all bytes equal to 0x80 and higher, and all control characters, except HT, LF and CR
+def Sani2(byte):
+    if byte in [0x09, 0x0A, 0x0D]:
+        return byte
+    if byte < 0x20:
+        return 0x20
+    if byte >= 0x80:
+        return 0x20
+    return byte
 
 # CIC: Call If Callable
 def CIC(expression):
@@ -295,7 +317,7 @@ def Hex2Bytes(hexadecimal):
         return binascii.a2b_hex(hexadecimal)
     except:
         return None
-    
+
 def InterpretHexInteger(token):
     if token[0] != STATE_IDENTIFIER:
         return None
@@ -325,16 +347,21 @@ def InterpretBytes(token):
         return None
     return Hex2Bytes(token[1][2:])
 
-def CheckFunction(functionname, arguments, countarguments):
-    if countarguments == 0 and len(arguments) != 0:
-        print('Error: function %s takes no arguments, %d are given' % (functionname, len(arguments)))
-        return True
-    if countarguments == 1 and len(arguments) != 1:
-        print('Error: function %s takes 1 argument, %d are given' % (functionname, len(arguments)))
-        return True
-    if countarguments != len(arguments):
-        print('Error: function %s takes %d arguments, %d are given' % (functionname, countarguments, len(arguments)))
-        return True
+def CheckFunction(functionname, arguments, countarguments, maxcountarguments=None):
+    if maxcountarguments == None:
+        if countarguments == 0 and len(arguments) != 0:
+            print('Error: function %s takes no arguments, %d are given' % (functionname, len(arguments)))
+            return True
+        if countarguments == 1 and len(arguments) != 1:
+            print('Error: function %s takes 1 argument, %d are given' % (functionname, len(arguments)))
+            return True
+        if countarguments != len(arguments):
+            print('Error: function %s takes %d arguments, %d are given' % (functionname, countarguments, len(arguments)))
+            return True
+    else:
+        if len(arguments) < countarguments or len(arguments) > maxcountarguments:
+            print('Error: function %s takes between %d and %d arguments, %d are given' % (functionname, countarguments, maxcountarguments, len(arguments)))
+            return True
     return False
 
 def CheckNumber(argument, minimum=None, maximum=None):
@@ -349,7 +376,7 @@ def CheckNumber(argument, minimum=None, maximum=None):
         print('Error: argument should be maximum %d: %d' % (maximum, number))
         return None
     return number
-    
+
 FUNCTIONNAME_REPEAT = 'repeat'
 FUNCTIONNAME_RANDOM = 'random'
 FUNCTIONNAME_CHR = 'chr'
@@ -388,12 +415,18 @@ def Interpret(expression):
                 return None
             decoded += LoremIpsum(number)
         elif functionname == FUNCTIONNAME_CHR:
-            if CheckFunction(functionname, arguments, 1):
+            if CheckFunction(functionname, arguments, 1, 2):
                 return None
             number = CheckNumber(arguments[0], minimum=1, maximum=255)
             if number == None:
                 return None
-            decoded += chr(number)
+            if len(arguments) == 1:
+                decoded += chr(number)
+            else:
+                number2 = CheckNumber(arguments[1], minimum=1, maximum=255)
+                if number2 == None:
+                    return None
+                decoded += ''.join([chr(n) for n in range(number, number2 + 1)])
         else:
             print('Error: unknown function: %s' % functionname)
             return None
@@ -507,6 +540,8 @@ Extra functions:
   rol(byte, count)
   ror(byte, count)
   IFF(expression, valueTrue, valueFalse)
+  Sani1(byte)
+  Sani2(byte)
 Variable "position" is an index into the input file, starting at 0
 
 Source code put in the public domain by Didier Stevens, no Copyright
