@@ -2,8 +2,8 @@
 
 __description__ = 'Analyze OLE files (Compound Binary Files)'
 __author__ = 'Didier Stevens'
-__version__ = '0.0.28'
-__date__ = '2017/07/20'
+__version__ = '0.0.29'
+__date__ = '2017/10/14'
 
 """
 
@@ -67,6 +67,7 @@ History:
   2016/12/11: 0.0.26 added indicator O for OLE10Native
   2017/03/04: 0.0.27 added externals for YARA rules
   2017/07/20: 0.0.28 added # to option -y
+  2017/10/14: 0.0.29 added options -t, -S; and \x00Attribut bugfix provided by Charles Smutz
 
 Todo:
 """
@@ -84,6 +85,7 @@ import hashlib
 import textwrap
 import re
 import string
+import codecs
 
 try:
     import dslsimulationdb
@@ -107,6 +109,7 @@ dumplinelength = 16
 MALWARE_PASSWORD = 'infected'
 OLEFILE_MAGIC = '\xD0\xCF\x11\xE0'
 ACTIVEMIME_MAGIC = 'ActiveMime'
+REGEX_STANDARD = '[\x09\x20-\x7E]'
 
 def PrintManual():
     manual = '''
@@ -148,11 +151,17 @@ C:\Demo>oledump.py -s 1 -x Book1.xls
 00000040: 0F 00 00 00 58 00 00 00 17 00 00 00 70 00 00 00
 ...
 
+Option -S dumps the strings.
+
 Option -d produces a raw dump of the content of the stream. This content can be redirected to a file, like this:
 C:\Demo>oledump.py -s 1 -d Book1.xls > content.bin
 
 or it can be piped into another command, like this:
 C:\Demo>oledump.py -s 1 -d Book1.xls | pdfid.py -f
+
+If the raw dump needs to be processed by a string codec, like utf16, use option -t instead of -d and provide the codec:
+C:\Demo>oledump.py -s 1 -t utf16 Book1.xls
+You can also provide a Python string expression, like .decode('utf16').encode('utf8').
 
 Option -C (--cut) allows for the partial selection of a stream. Use this option to "cut out" part of the stream.
 The --cut option takes an argument to specify which section of bytes to select from the stream. This argument is composed of 2 terms separated by a colon (:), like this:
@@ -559,6 +568,28 @@ def HexAsciiDump(data):
     oDumpStream.Addline(CombineHexAscii(hexDump, asciiDump))
     return oDumpStream.Content()
 
+def Translate(expression):
+    try:
+        codecs.lookup(expression)
+        command = '.decode("%s")' % expression
+    except LookupError:
+        command = expression
+    return lambda x: eval('x' + command)
+
+def ExtractStringsASCII(data):
+    regex = REGEX_STANDARD + '{%d,}'
+    return re.findall(regex % 4, data)
+
+def ExtractStringsUNICODE(data):
+    regex = '((' + REGEX_STANDARD + '\x00){%d,})'
+    return [foundunicodestring.replace('\x00', '') for foundunicodestring, dummy in re.findall(regex % 4, data)]
+
+def ExtractStrings(data):
+    return ExtractStringsASCII(data) + ExtractStringsUNICODE(data)
+
+def DumpFunctionStrings(data):
+    return ''.join([extractedstring + '\n' for extractedstring in ExtractStrings(data)])
+
 #Fix for http://bugs.python.org/issue11395
 def StdoutWriteChunked(data):
     while data != '':
@@ -650,11 +681,7 @@ def Decompress(compressedData):
     return (True, decompressed.replace('\r\n', '\n'))
 
 def FindCompression(data):
-    searchString = '\x00Attribut'
-    position = data.find(searchString)
-    if position != -1 and data[position + len(searchString)] == 'e':
-        position = -1
-    return position
+    return data.find('\x00Attribut\x00e ')
 
 def SearchAndDecompressSub(data):
     position = FindCompression(data)
@@ -1437,6 +1464,10 @@ def OLESub(ole, prefix, rules, options):
             IfWIN32SetBinary(sys.stdout)
         elif options.info:
             DumpFunction = Info
+        elif options.translate != '':
+            DumpFunction = Translate(options.translate)
+        elif options.strings:
+            DumpFunction = DumpFunctionStrings
         else:
             DumpFunction = HexAsciiDump
         counter = 1
@@ -1639,9 +1670,11 @@ def Main():
     oParser.add_option('-d', '--dump', action='store_true', default=False, help='perform dump')
     oParser.add_option('-x', '--hexdump', action='store_true', default=False, help='perform hex dump')
     oParser.add_option('-a', '--asciidump', action='store_true', default=False, help='perform ascii dump')
+    oParser.add_option('-S', '--strings', action='store_true', default=False, help='perform strings dump')
     oParser.add_option('-v', '--vbadecompress', action='store_true', default=False, help='VBA decompression')
     oParser.add_option('--vbadecompresscorrupt', action='store_true', default=False, help='VBA decompression, display beginning if corrupted')
     oParser.add_option('-r', '--raw', action='store_true', default=False, help='read raw file (use with options -v or -p')
+    oParser.add_option('-t', '--translate', type=str, default='', help='string translation, like utf16 or .decode("utf8")')
     oParser.add_option('-e', '--extract', action='store_true', default=False, help='extract OLE embedded file')
     oParser.add_option('-i', '--info', action='store_true', default=False, help='print extra info for selected item')
     oParser.add_option('-p', '--plugins', type=str, default='', help='plugins to load (separate plugins with a comma , ; @file supported)')
