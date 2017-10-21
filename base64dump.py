@@ -2,8 +2,8 @@
 
 __description__ = 'Extract base64 strings from file'
 __author__ = 'Didier Stevens'
-__version__ = '0.0.7'
-__date__ = '2017/07/01'
+__version__ = '0.0.8'
+__date__ = '2017/10/21'
 
 """
 
@@ -25,6 +25,7 @@ History:
   2017/02/12: 0.0.6 added encoding all and option -u
   2017/02/13: updated man
   2017/07/01: 0.0.7 added option -z
+  2017/10/21: 0.0.8 added option -t
 
 Todo:
 """
@@ -41,6 +42,7 @@ import hashlib
 import string
 import math
 import string
+import codecs
 
 dumplinelength = 16
 MALWARE_PASSWORD = 'infected'
@@ -96,6 +98,10 @@ Info:
 This displays information for the datastream, like the entropy of the datastream.
 
 The selected stream can be dumped (-d), hexdumped (-x), ASCII dumped (-a) or dump the strings (-S). Use the dump option (-d) to extract the stream and save it to disk (with file redirection >) or to pipe it (|) into the next command.
+If the dump needs to be processed by a string codec, like utf16, use option -t instead of -d and provide the codec:
+C:\Demo>base64dump.py -s 1 -t utf16 test.bin
+You can also provide a Python string expression, like .decode('utf16').encode('utf8').
+
 Here is an example of an ascii dump (-s 2 -a):
 
 00000000: 53 63 72 69 70 74 69 6E 67 2E 46 69 6C 65 53 79  Scripting.FileSy
@@ -462,6 +468,14 @@ def ExtractStrings(data):
 def DumpFunctionStrings(data):
     return ''.join([extractedstring + '\n' for extractedstring in ExtractStrings(data)])
 
+def Translate(expression):
+    try:
+        codecs.lookup(expression)
+        command = '.decode("%s")' % expression
+    except LookupError:
+        command = expression
+    return lambda x: eval('x' + command)
+
 def DecodeDataBase64(data):
     for base64string in re.findall('[ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/]+={0,2}', data):
         if len(base64string) % 4 == 0:
@@ -535,6 +549,8 @@ def BASE64Dump(filename, options):
         DumpFunction = HexAsciiDump
     elif options.strings:
         DumpFunction = DumpFunctionStrings
+    elif options.translate != '':
+        DumpFunction = Translate(options.translate)
     else:
         DumpFunction = None
 
@@ -619,6 +635,7 @@ def Main():
     oParser.add_option('-x', '--hexdump', action='store_true', default=False, help='perform hex dump')
     oParser.add_option('-a', '--asciidump', action='store_true', default=False, help='perform ascii dump')
     oParser.add_option('-S', '--strings', action='store_true', default=False, help='perform strings dump')
+    oParser.add_option('-t', '--translate', type=str, default='', help='string translation, like utf16 or .decode("utf8")')
     oParser.add_option('-n', '--number', type=int, default=None, help='minimum number of bytes in decoded data')
     oParser.add_option('-c', '--cut', type=str, default='', help='cut data')
     oParser.add_option('-w', '--ignorewhitespace', action='store_true', default=False, help='ignore whitespace')
