@@ -2,10 +2,10 @@
 
 __description__ = 'pdf-parser, use it to parse a PDF document'
 __author__ = 'Didier Stevens'
-__version__ = '0.6.7'
-__date__ = '2016/12/17'
+__version__ = '0.6.8'
+__date__ = '2017/10/29'
 __minimum_python_version__ = (2, 5, 1)
-__maximum_python_version__ = (3, 4, 3)
+__maximum_python_version__ = (3, 6, 3)
 
 """
 Source code put in public domain by Didier Stevens, no Copyright
@@ -58,6 +58,9 @@ History:
   2016/07/27: V0.6.5 bugfix whitespace 0x00 0x0C after stream 0x0D 0x0A reported by @mr_me
   2016/11/20: V0.6.6 added workaround zlib errors FlateDecode
   2016/12/17: V0.6.7 added option -k
+  2017/01/07: V0.6.8 changed cPDFParseDictionary to handle strings () with % character
+  2017/10/28: fixed bug
+  2017/10/29: added # support for option -y
 
 Todo:
   - handle printf todo
@@ -146,7 +149,9 @@ def Obj2Str(content):
 class cPDFDocument:
     def __init__(self, file):
         self.file = file
-        if file.lower().startswith('http://') or file.lower().startswith('https://'):
+        if type(file) != str:
+        	  self.infile = file
+        elif file.lower().startswith('http://') or file.lower().startswith('https://'):
             try:
                 if sys.hexversion >= 0x020601F0:
                     self.infile = urllib23.urlopen(file, timeout=5)
@@ -274,6 +279,14 @@ class cPDFTokenizer:
         while token != None and token[0] == CHAR_WHITESPACE:
             token = self.Token()
         return token
+
+    def Tokens(self):
+        tokens = []
+        token = self.Token()
+        while token != None:
+            tokens.append(token)
+            token = self.Token()
+        return tokens
 
     def unget(self, byte):
         self.ungetted.append(byte)
@@ -643,7 +656,7 @@ class cPDFParseDictionary:
         dataTrimmed = TrimLWhiteSpace(TrimRWhiteSpace(self.content))
         if dataTrimmed == []:
             self.parsed = None
-        elif self.isOpenDictionary(dataTrimmed[0]) and self.isCloseDictionary(dataTrimmed[-1]):
+        elif self.isOpenDictionary(dataTrimmed[0]) and (self.isCloseDictionary(dataTrimmed[-1]) or self.couldBeCloseDictionary(dataTrimmed[-1])):
             self.parsed = self.ParseDictionary(dataTrimmed)[0]
         else:
             self.parsed = None
@@ -653,6 +666,9 @@ class cPDFParseDictionary:
 
     def isCloseDictionary(self, token):
         return token[0] == CHAR_DELIMITER and token[1] == '>>'
+
+    def couldBeCloseDictionary(self, token):
+        return token[0] == CHAR_DELIMITER and token[1].rstrip().endswith('>>')
 
     def ParseDictionary(self, tokens):
         state = 0 # start
@@ -694,7 +710,11 @@ class cPDFParseDictionary:
                 elif value == [] and tokens[0][1] == '(':
                     value.append(tokens[0][1])
                 elif value != [] and value[0] == '(' and tokens[0][1] != ')':
-                    value.append(tokens[0][1])
+                    if tokens[0][1][0] == '%':
+                        tokens = [tokens[0]] + cPDFTokenizer(StringIO(tokens[0][1][1:])).Tokens() + tokens[1:]
+                        value.append('%')
+                    else:
+                        value.append(tokens[0][1])
                 elif value != [] and value[0] == '(' and tokens[0][1] == ')':
                     value.append(tokens[0][1])
                     dictionary.append((key, value))
@@ -749,7 +769,7 @@ class cPDFParseDictionary:
         for key, value in dictionary:
             if key == select:
                 return self.PrettyPrintSubElement('', [select, value])
-            if type(value) == type([]) and type(value[0]) == type((None,)):
+            if type(value) == type([]) and len(value) > 0 and type(value[0]) == type((None,)):
                 result = self.GetNestedSub(value, select)
                 if result !=None:
                     return self.PrettyPrintSubElement('', [select, result])
@@ -1085,17 +1105,30 @@ def ProcessAt(argument):
     else:
         return [argument]
 
-def YARACompile(fileordirname):
-    dFilepaths = {}
-    if os.path.isdir(fileordirname):
-        for root, dirs, files in os.walk(fileordirname):
-            for file in files:
-                filename = os.path.join(root, file)
-                dFilepaths[filename] = filename
+def YARACompile(ruledata):
+    if ruledata.startswith('#'):
+        if ruledata.startswith('#h#'):
+            rule = binascii.a2b_hex(ruledata[3:])
+        elif ruledata.startswith('#b#'):
+            rule = binascii.a2b_base64(ruledata[3:])
+        elif ruledata.startswith('#s#'):
+            rule = 'rule string {strings: $a = "%s" ascii wide nocase condition: $a}' % ruledata[3:]
+        elif ruledata.startswith('#q#'):
+            rule = ruledata[3:].replace("'", '"')
+        else:
+            rule = ruledata[1:]
+        return yara.compile(source=rule)
     else:
-        for filename in ProcessAt(fileordirname):
-            dFilepaths[filename] = filename
-    return yara.compile(filepaths=dFilepaths)
+        dFilepaths = {}
+        if os.path.isdir(ruledata):
+            for root, dirs, files in os.walk(ruledata):
+                for file in files:
+                    filename = os.path.join(root, file)
+                    dFilepaths[filename] = filename
+        else:
+            for filename in ProcessAt(ruledata):
+                dFilepaths[filename] = filename
+        return yara.compile(filepaths=dFilepaths)
 
 def AddDecoder(cClass):
     global decoders

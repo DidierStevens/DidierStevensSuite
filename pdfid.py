@@ -2,8 +2,8 @@
 
 __description__ = 'Tool to test a PDF file'
 __author__ = 'Didier Stevens'
-__version__ = '0.2.1'
-__date__ = '2014/10/18'
+__version__ = '0.2.2'
+__date__ = '2017/10/29'
 
 """
 
@@ -45,6 +45,10 @@ History:
   2014/09/30: added CSV header
   2014/10/16: V0.2.1: added output when plugin & file not pdf
   2014/10/18: some fixes for Python 3
+  2015/08/12: V0.2.2: added option pluginoptions
+  2015/08/13: added plugin Instructions method
+  2016/04/12: added option literal
+  2017/10/29: added pdfid.ini support
 
 Todo:
   - update XML example (entropy, EOF)
@@ -64,6 +68,7 @@ import json
 import zipfile
 import collections
 import glob
+import ConfigParser
 try:
     import urllib2
     urllib23 = urllib2
@@ -346,6 +351,18 @@ def XMLAddAttribute(xmlDoc, name, value=None):
     xmlDoc.documentElement.setAttributeNode(att)
     if value != None:
         att.nodeValue = value
+    return att
+
+def ParseINIFile():
+    oConfigParser = ConfigParser.ConfigParser(allow_no_value=True)
+    oConfigParser.optionxform = str
+    oConfigParser.read(os.path.join(os.path.dirname(sys.argv[0]), 'pdfid.ini'))
+    keywords = []
+    if oConfigParser.has_section('keywords'):
+        for key, value in oConfigParser.items('keywords'):
+            if not key in keywords:
+                keywords.append(key)
+    return keywords
 
 def PDFiD(file, allNames=False, extraData=False, disarm=False, force=False):
     """Example of XML output:
@@ -377,7 +394,7 @@ def PDFiD(file, allNames=False, extraData=False, disarm=False, force=False):
     hexcode = False
     lastName = ''
     insideStream = False
-    keywords = ('obj',
+    keywords = ['obj',
                 'endobj',
                 'stream',
                 'endstream',
@@ -397,9 +414,12 @@ def PDFiD(file, allNames=False, extraData=False, disarm=False, force=False):
                 '/Launch',
                 '/EmbeddedFile',
                 '/XFA',
-               )
+               ]
     words = {}
     dates = []
+    for extrakeyword in ParseINIFile():
+        if not extrakeyword in keywords:
+            keywords.append(extrakeyword)
     for keyword in keywords:
         words[keyword] = [0, 0]
     slash = ''
@@ -726,7 +746,7 @@ def ProcessFile(filename, options, plugins):
         for cPlugin in plugins:
             if not cPlugin.onlyValidPDF or not oPDFiD.errorOccured and oPDFiD.isPDF:
                 try:
-                    oPlugin = cPlugin(oPDFiD)
+                    oPlugin = cPlugin(oPDFiD, options.pluginoptions)
                 except Exception as e:
                     Print('Error instantiating plugin: %s' % cPlugin.name, options)
                     if options.verbose:
@@ -747,7 +767,11 @@ def ProcessFile(filename, options, plugins):
                 else:
                     if score >= options.minimumscore:
                         Print(PDFiD2String(xmlDoc, options.force), options)
-                        Print('%s score: %.02f' % (cPlugin.name, score), options)
+                        Print('%s score:        %.02f' % (cPlugin.name, score), options)
+                        try:
+                            Print('%s instructions: %s' % (cPlugin.name, oPlugin.Instructions(score)), options)
+                        except AttributeError:
+                            pass
             else:
                 if options.csv:
                     if oPDFiD.errorOccured:
@@ -908,6 +932,8 @@ https://DidierStevens.com'''
     oParser.add_option('-v', '--verbose', action='store_true', default=False, help='verbose (will also raise catched exceptions)')
     oParser.add_option('-S', '--select', type=str, default='', help='selection expression')
     oParser.add_option('-o', '--output', type=str, default='', help='output to log file')
+    oParser.add_option('--pluginoptions', type=str, default='', help='options for the plugin')
+    oParser.add_option('-l', '--literal', action='store_true', default=False, help='take filenames literally, no wildcards')
     (options, args) = oParser.parse_args()
 
     if len(args) == 0:
@@ -918,6 +944,8 @@ https://DidierStevens.com'''
             print('Option scan not supported with stdin')
             options.scan = False
         filenames = ['']
+    elif options.literal:
+        filenames = args
     else:
         try:
             filenames = ExpandFilenameArguments(args)
