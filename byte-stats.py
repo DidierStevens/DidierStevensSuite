@@ -2,8 +2,8 @@
 
 __description__ = 'Calculate byte statistics'
 __author__ = 'Didier Stevens'
-__version__ = '0.0.6'
-__date__ = '2017/08/12'
+__version__ = '0.0.7'
+__date__ = '2017/11/01'
 
 """
 Source code put in public domain by Didier Stevens, no Copyright
@@ -22,6 +22,8 @@ History:
   2016/11/16: 0.0.4 added unique bytes
   2017/01/22: 0.0.5 added hex and base64 counts
   2017/08/12: 0.0.6 added option -r
+  2017/09/13: 0.0.7 added average consecutive byte difference, refactoring (cCalculateByteStatistics)
+  2017/11/01: added option -g
 
 Todo:
 """
@@ -35,6 +37,7 @@ import math
 import string
 import textwrap
 import binascii
+import Tkinter
 
 def PrintManual():
     manual = '''
@@ -64,6 +67,7 @@ Size: 256
 
                    File(s)
 Entropy:           8.000000
+ACBD:              1.000000
 Unique bytes:           256 100.00%
 NULL bytes:               1   0.39%
 Control bytes:           27  10.55%
@@ -81,6 +85,7 @@ After the histogram, the size of the file(s) is displayed.
 
 Finally, the following statistics for the files(s) are displayed:
 * Entropy (between 0.0 and 8.0).
+* Average Consecutive Byte Difference (between 0.0 and 256.0)
 * Number and percentage of Unique bytes.
 * Number and percentage of NULL bytes (0x00).
 * Number and percentage of Control bytes (0x01 through 0x1F, excluding whitespace bytes and including 0x7F).
@@ -113,7 +118,9 @@ Size: 74752  Bucket size: 10240  Bucket count: 7
 
                    File(s)           Minimum buckets   Maximum buckets
 Entropy:           7.997180          7.981543          7.984125
-                   Position:         0x0000f000        0x00005000
+                     Position:       0x0000f000        0x00005000
+ACBD:              85.437426         84.586483         86.378162
+                     Position:       0x00005000        0x0000a000
 Unique bytes:           256   0.34%       256   2.50%       256   2.50%
 NULL bytes:             303   0.41%        34   0.33%        44   0.43%
 Control bytes:         7888  10.55%      1046  10.21%      1117  10.91%
@@ -148,7 +155,9 @@ Size: 877456  Bucket size: 10240  Bucket count: 85
 
                    File(s)           Minimum buckets   Maximum buckets
 Entropy:           7.815519          5.156678          7.981628
-                   Position:         0x00019000        0x00005000
+                     Position:       0x00019000        0x00005000
+ACBD:              82.580532         52.685223         87.892568
+                     Position:       0x0000f000        0x0002f800
 Unique bytes:           256   0.03%       179   1.75%       256   2.50%
 NULL bytes:           23873   2.72%         8   0.08%      1643  16.04%
 Control bytes:        92243  10.51%        98   0.96%      1275  12.45%
@@ -185,6 +194,8 @@ The bucket starting at position 0x00019000 has the lowest entropy.
 
 A list for the other properties (NULL bytes, ...) can be produced by using option -l together with option -p (property). For example options "-l -p n" will produce a list of the number of NULL bytes for each bucket.
 
+A rudimentary chart of the entropy values can be produced with option -g. Option -p can be used to display the chart of another property (like with option -l).
+
 Option -s (sequence) instructs byte-stats to search for simple byte sequences. A simple byte sequence is a sequence of bytes where the difference (unsigned) between 2 consecutive bytes is a constant.
 Example:
 
@@ -207,7 +218,9 @@ Size: 877456  Bucket size: 10240  Bucket count: 85
 
                    File(s)           Minimum buckets   Maximum buckets
 Entropy:           7.815519          5.156678          7.981628
-                   Position:         0x00019000        0x00005000
+                     Position:       0x00019000        0x00005000
+ACBD:              82.580532         52.685223         87.892568
+                     Position:       0x0000f000        0x0002f800
 Unique bytes:           256   0.03%       179   1.75%       256   2.50%
 NULL bytes:           23873   2.72%         8   0.08%      1643  16.04%
 Control bytes:        92243  10.51%        98   0.96%      1275  12.45%
@@ -253,6 +266,7 @@ Size: 4096
 
                    File(s)
 Entropy:           8.000000
+ACBD:              1.000000
 Unique bytes:           256   6.25%
 NULL bytes:              16   0.39%
 Control bytes:          432  10.55%
@@ -270,7 +284,7 @@ Option -r (ranges) instructs byte-stats to produce a report of the byte ranges i
 
 A range report can help in indentifying the type of data, like base64 data:
 
-$byte-stats.py -s base64.bin
+$byte-stats.py -r base64.bin
 
 Byte ASCII Count     Pct
 0x00           0   0.00%
@@ -279,23 +293,24 @@ Byte ASCII Count     Pct
 0x03           0   0.00%
 0x04           0   0.00%
 ...
-0x63 c        28   2.05%
-0x6d m        28   2.05%
-0x54 T        29   2.12%
-0x51 Q        30   2.19%
-0x57 W        31   2.27%
+0x75 u        28   2.05%
+0x7a z        29   2.12%
+0x43 C        30   2.19%
+0x72 r        30   2.19%
+0x35 5        33   2.41%
 
 Size: 1368
 
                    File(s)
-Entropy:           5.978290
+Entropy:           5.979786
+ACBD:              27.286759
 Unique bytes:            65  25.39%
 NULL bytes:               0   0.00%
 Control bytes:            0   0.00%
 Whitespace bytes:         0   0.00%
 Printable bytes:       1368 100.00%
 High bytes:               0   0.00%
-Hexadecimal bytes:      462  33.77%
+Hexadecimal bytes:      476  34.80%
 BASE64 bytes:          1368 100.00%
 
 Number of ranges: 5
@@ -355,45 +370,67 @@ def ProcessAt(argument):
 def ExpandFilenameArguments(filenames):
     return list(collections.OrderedDict.fromkeys(sum(map(glob.glob, sum(map(ProcessAt, filenames), [])), [])))
 
-def CalculateByteStatistics(dPrevalence):
-    sumValues = sum(dPrevalence.values())
-    countNullByte = dPrevalence[0]
-    countControlBytes = 0
-    countWhitespaceBytes = 0
-    countUniqueBytes = 0
-    for iter in range(1, 0x21):
-        if chr(iter) in string.whitespace:
-            countWhitespaceBytes += dPrevalence[iter]
+class cCalculateByteStatistics():
+
+    def __init__(self):
+        self.dPrevalence = {iter: 0 for iter in range(0x100)}
+        self.previous = None
+        self.sumDifference = 0
+        self.count = 0
+        
+    def Process(self, byte):
+        self.dPrevalence[byte] += 1
+        if self.previous != None:
+            self.sumDifference += abs(byte - self.previous)
+            self.count += 1
+        self.previous = byte
+
+    def Prevalence(self):
+        return self.dPrevalence
+
+    def Stats(self):
+        sumValues = sum(self.dPrevalence.values())
+        countNullByte = self.dPrevalence[0]
+        countControlBytes = 0
+        countWhitespaceBytes = 0
+        countUniqueBytes = 0
+        for iter in range(1, 0x21):
+            if chr(iter) in string.whitespace:
+                countWhitespaceBytes += self.dPrevalence[iter]
+            else:
+                countControlBytes += self.dPrevalence[iter]
+        countControlBytes += self.dPrevalence[0x7F]
+        countPrintableBytes = 0
+        for iter in range(0x21, 0x7F):
+            countPrintableBytes += self.dPrevalence[iter]
+        countHighBytes = 0
+        for iter in range(0x80, 0x100):
+            countHighBytes += self.dPrevalence[iter]
+        countHexadecimalBytes = 0
+        countBASE64Bytes = 0
+        for iter in range(0x30, 0x3A):
+            countHexadecimalBytes += self.dPrevalence[iter]
+            countBASE64Bytes += self.dPrevalence[iter]
+        for iter in range(0x41, 0x47):
+            countHexadecimalBytes += self.dPrevalence[iter]
+        for iter in range(0x61, 0x67):
+            countHexadecimalBytes += self.dPrevalence[iter]
+        for iter in range(0x41, 0x5B):
+            countBASE64Bytes += self.dPrevalence[iter]
+        for iter in range(0x61, 0x7B):
+            countBASE64Bytes += self.dPrevalence[iter]
+        countBASE64Bytes += self.dPrevalence[ord('+')] + self.dPrevalence[ord('/')] + self.dPrevalence[ord('=')]
+        entropy = 0.0
+        for iter in range(0x100):
+            if self.dPrevalence[iter] > 0:
+                prevalence = float(self.dPrevalence[iter]) / float(sumValues)
+                entropy += - prevalence * math.log(prevalence, 2)
+                countUniqueBytes += 1
+        if self.count == 0:
+            averageConsecutiveByteDifference = None
         else:
-            countControlBytes += dPrevalence[iter]
-    countControlBytes += dPrevalence[0x7F]
-    countPrintableBytes = 0
-    for iter in range(0x21, 0x7F):
-        countPrintableBytes += dPrevalence[iter]
-    countHighBytes = 0
-    for iter in range(0x80, 0x100):
-        countHighBytes += dPrevalence[iter]
-    countHexadecimalBytes = 0
-    countBASE64Bytes = 0
-    for iter in range(0x30, 0x3A):
-        countHexadecimalBytes += dPrevalence[iter]
-        countBASE64Bytes += dPrevalence[iter]
-    for iter in range(0x41, 0x47):
-        countHexadecimalBytes += dPrevalence[iter]
-    for iter in range(0x61, 0x67):
-        countHexadecimalBytes += dPrevalence[iter]
-    for iter in range(0x41, 0x5B):
-        countBASE64Bytes += dPrevalence[iter]
-    for iter in range(0x61, 0x7B):
-        countBASE64Bytes += dPrevalence[iter]
-    countBASE64Bytes += dPrevalence[ord('+')] + dPrevalence[ord('/')] + dPrevalence[ord('=')]
-    entropy = 0.0
-    for iter in range(0x100):
-        if dPrevalence[iter] > 0:
-            prevalence = float(dPrevalence[iter]) / float(sumValues)
-            entropy += - prevalence * math.log(prevalence, 2)
-            countUniqueBytes += 1
-    return sumValues, entropy, countUniqueBytes, countNullByte, countControlBytes, countWhitespaceBytes, countPrintableBytes, countHighBytes, countHexadecimalBytes, countBASE64Bytes
+            averageConsecutiveByteDifference = float(self.sumDifference) / float(self.count)
+        return sumValues, entropy, countUniqueBytes, countNullByte, countControlBytes, countWhitespaceBytes, countPrintableBytes, countHighBytes, countHexadecimalBytes, countBASE64Bytes, averageConsecutiveByteDifference
 
 def GenerateLine(prefix, counter, sumValues, buckets, index, options):
     line = '%-18s%9d %6.2f%%' % (prefix + ':', counter, float(counter) / sumValues * 100.0)
@@ -442,16 +479,16 @@ def MaximumAndPosition(buckets, index):
     return (valueMaximum, positionMaximum)
 
 def ByteStats(args, options):
-    if options.bucket < 1:
-        print('Bucket size must be at least 1, not %d' % options.bucket)
+    if options.bucket < 2:
+        print('Bucket size must be at least 2, not %d' % options.bucket)
         return
     countBytes = 0
-    dPrevalence = {iter: 0 for iter in range(0x100)}
-    dPrevalenceBucket = {iter: 0 for iter in range(0x100)}
     buckets = []
     diffs = []
     values = []
     dDiffs = {}
+    oCalculateByteStatistics = cCalculateByteStatistics()
+    oCalculateByteStatisticsBucket = cCalculateByteStatistics()
     if args != ['']:
         args = ExpandFilenameArguments(args)
     for file in args:
@@ -464,9 +501,9 @@ def ByteStats(args, options):
             fIn = open(file, 'rb')
         for char in fIn.read():
             value = ord(char)
-            dPrevalence[value] += 1
-            dPrevalenceBucket[value] += 1
             countBytes += 1
+            oCalculateByteStatistics.Process(value)
+            oCalculateByteStatisticsBucket.Process(value)
             if options.sequence:
                 values.append(value)
                 if countBytes > 1:
@@ -483,8 +520,8 @@ def ByteStats(args, options):
                         values = values[-2:]
                         savPosition = countBytes
             if countBytes % options.bucket == 0:
-                buckets.append([countBytes - options.bucket, CalculateByteStatistics(dPrevalenceBucket)])
-                dPrevalenceBucket = {iter: 0 for iter in range(0x100)}
+                buckets.append([countBytes - options.bucket, oCalculateByteStatisticsBucket.Stats()])
+                oCalculateByteStatisticsBucket = cCalculateByteStatistics()
         if fIn != sys.stdin:
             fIn.close()
     if len(diffs) > 1:
@@ -494,21 +531,51 @@ def ByteStats(args, options):
         print('Empty file(s)! Statistics can not be calculated.')
         return
 
-    sumValues, entropy, countUniqueBytes, countNullByte, countControlBytes, countWhitespaceBytes, countPrintableBytes, countHighBytes, countHexadecimalBytes, countBASE64Bytes = CalculateByteStatistics(dPrevalence)
+    sumValues, entropy, countUniqueBytes, countNullByte, countControlBytes, countWhitespaceBytes, countPrintableBytes, countHighBytes, countHexadecimalBytes, countBASE64Bytes, averageConsecutiveByteDifference = oCalculateByteStatistics.Stats()
+    dProperties = {'e': 1, 'u': 2, 'n': 3, 'c': 4, 'w': 5, 'p': 6, 'h': 7, 'x': 8, 'b': 9, 'a': 10}
     if options.list:
-        dProperties = {'e': 1, 'u': 2, 'n': 3, 'c': 4, 'w': 5, 'p': 6, 'h': 7, 'x': 8, 'b': 9}
         if options.property not in dProperties:
             print('Unknown property: %s' % options.property)
             return
         index = dProperties[options.property]
-        if options.property == 'e':
+        if options.property in ['e', 'a']:
             format = '0x%08x %f'
         else:
             format = '0x%08x %9d'
         for position, properties in buckets:
             print(format % (position, properties[index]))
+    elif options.graph:
+        if options.property not in dProperties:
+            print('Unknown property: %s' % options.property)
+            return
+        index = dProperties[options.property]
+        oTk = Tkinter.Tk()
+        oTk.title('byte-stats: property %s' % options.property)
+        c_width = len(buckets)
+        multiplier = 1
+        if options.property == 'e':
+            c_height = 81
+            multiplier = 10
+        elif options.property == 'u':
+            c_height = 258
+        elif options.property == 'a':
+            c_height = 258
+        else:
+            maximum = max(properties[index] for position, properties in buckets)
+            c_height = 301
+            multiplier = float(c_height - 1) / float(maximum)
+        oCanvas = Tkinter.Canvas(oTk, width=c_width, height=c_height, bg= 'white')
+        oCanvas.pack()
+        list = []
+        counter = 0
+        for position, properties in buckets:
+            list.append(counter)
+            list.append(c_height - int(properties[index] * multiplier))
+            counter += 1
+        oCanvas.create_line(list)
+        oTk.mainloop()
     else:
-        listCount = dPrevalence.items()
+        listCount = oCalculateByteStatistics.Prevalence().items()
         if options.keys:
             index = 0
         else:
@@ -548,6 +615,18 @@ def ByteStats(args, options):
             if len(buckets) > 1:
                 line += '        0x%08x' % MaximumAndPosition(buckets, 1)[1]
             print(line)
+        if averageConsecutiveByteDifference != None:
+            line = 'ACBD:              %f' % averageConsecutiveByteDifference
+            if len(buckets) > 0:
+                line += '         %f' % MinimumAndPosition(buckets, 10)[0]
+                if len(buckets) > 1:
+                    line += '         %f' % MaximumAndPosition(buckets, 10)[0]
+            print(line)
+        if len(buckets) > 0:
+            line = '                     Position:       0x%08x' % MinimumAndPosition(buckets, 10)[1]
+            if len(buckets) > 1:
+                line += '        0x%08x' % MaximumAndPosition(buckets, 10)[1]
+            print(line)
         print(GenerateLine('Unique bytes', countUniqueBytes, 256, buckets, 2, options))
         print(GenerateLine('NULL bytes', countNullByte, sumValues, buckets, 3, options))
         print(GenerateLine('Control bytes', countControlBytes, sumValues, buckets, 4, options))
@@ -586,7 +665,7 @@ def ByteStats(args, options):
         result = []
         byterange = []
         for i in range(256):
-            if dPrevalence[i] != 0:
+            if oCalculateByteStatistics.Prevalence()[i] != 0:
                 byterange.append(i)
             else:
                 result.append(RangeToSTring(byterange))
@@ -616,6 +695,7 @@ https://DidierStevens.com'''
     oParser.add_option('-k', '--keys', action='store_true', default=False, help='Sort on keys in stead of counts')
     oParser.add_option('-b', '--bucket', type=int, default=10240, help='Size of bucket (default is 10240 bytes)')
     oParser.add_option('-l', '--list', action='store_true', default=False, help='Print list of bucket property')
+    oParser.add_option('-g', '--graph', action='store_true', default=False, help='Plot a graph of bucket property')
     oParser.add_option('-p', '--property', default='e', help='Property to list: euncwphxb')
     oParser.add_option('-a', '--all', action='store_true', default=False, help='Print all byte stats')
     oParser.add_option('-s', '--sequence', action='store_true', default=False, help='Detect simple sequences')
