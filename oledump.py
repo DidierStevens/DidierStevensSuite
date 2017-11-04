@@ -2,8 +2,8 @@
 
 __description__ = 'Analyze OLE files (Compound Binary Files)'
 __author__ = 'Didier Stevens'
-__version__ = '0.0.29'
-__date__ = '2017/10/14'
+__version__ = '0.0.30'
+__date__ = '2017/11/04'
 
 """
 
@@ -68,6 +68,8 @@ History:
   2017/03/04: 0.0.27 added externals for YARA rules
   2017/07/20: 0.0.28 added # to option -y
   2017/10/14: 0.0.29 added options -t, -S; and \x00Attribut bugfix provided by Charles Smutz
+  2017/11/01: 0.0.30 replaced hexdump and hexasciidump with cDump
+  2017/11/04: added return codes -1 and 1
 
 Todo:
 """
@@ -86,6 +88,10 @@ import textwrap
 import re
 import string
 import codecs
+if sys.version_info[0] >= 3:
+    from io import StringIO
+else:
+    from cStringIO import StringIO
 
 try:
     import dslsimulationdb
@@ -133,11 +139,11 @@ The first column is an index assigned to the stream by oledump. This index is us
 
 To select a stream for analysis, use option -s with the index (number of the stream, or a for all streams), like this:
 C:\Demo>oledump.py -s 1 Book1.xls
-00000000: FE FF 00 00 05 01 02 00 00 00 00 00 00 00 00 00  ................
-00000010: 00 00 00 00 00 00 00 00 01 00 00 00 02 D5 CD D5  .............i-i
-00000020: 9C 2E 1B 10 93 97 08 00 2B 2C F9 AE 30 00 00 00  ........+,..0...
-00000030: E4 00 00 00 09 00 00 00 01 00 00 00 50 00 00 00  ............P...
-00000040: 0F 00 00 00 58 00 00 00 17 00 00 00 70 00 00 00  ....X.......p...
+00000000: FE FF 00 00 05 01 02 00  00 00 00 00 00 00 00 00  ................
+00000010: 00 00 00 00 00 00 00 00  01 00 00 00 02 D5 CD D5  .............i-i
+00000020: 9C 2E 1B 10 93 97 08 00  2B 2C F9 AE 30 00 00 00  ........+,..0...
+00000030: E4 00 00 00 09 00 00 00  01 00 00 00 50 00 00 00  ............P...
+00000040: 0F 00 00 00 58 00 00 00  17 00 00 00 70 00 00 00  ....X.......p...
 ...
 
 When selecting a stream, its content is shown as an ASCII dump (this can also be done with option -a).
@@ -253,6 +259,25 @@ To view the VBA code up til the corruption, use option --vbadecompresscorrupt.
 C:\Demo>oledump.py -s 7 --vbadecompresscorrupt Book2-vba.xls
 
 Option -r can be used together with option -v to decompress a VBA macro stream that was extracted through some other mean than oledump. In such case, you provide the file that contains the compressed macro, instead of the OLE file.
+
+ole files can contain streams that are not connected to the root entry. This can happen when a maldoc is cleaned by anti-virus. oledump will mark such streams as orphaned:
+C:\Demo>oledump.py Book2-vba.xls
+  1:       114 '\\x01CompObj'
+  2:    107608 '\\x05DocumentSummaryInformation'
+  3:     52900 '\\x05SummaryInformation'
+  4:     11288 '1Table'
+  5:    131068 'Data'
+  6:      7726 'WordDocument'
+  7:       567 Orphan: 'dir'
+  8:      2282 Orphan: '__SRP_0'
+  9:        84 Orphan: '__SRP_1'
+ 10:      3100 Orphan: '__SRP_2'
+ 11:       188 Orphan: '__SRP_3'
+ 12: M    9443 Orphan: 'NewMacros'
+ 13: m     940 Orphan: 'ThisDocument'
+ 14:      3835 Orphan: 'XVBA_PROJECT'
+ 15:       484 Orphan: 'PROJECT'
+ 16:        71 Orphan: 'PROJECTwm'
 
 Microsoft Office files can contain embedded objects. They show up like this (notice stream 6 Ole10Native with indicator O):
 C:\Demo>oledump.py Book1-insert-object-calc-rol3.exe.xls
@@ -488,7 +513,11 @@ oledump also supports input/output redirection. This way, oledump can be used in
 Say for example that the sample OLE file is GZIP compressed. oledump can not handle GZIP files directly, but you can decompress and cat it with zcat and then pipe it into oledump for analysis, like this:
 zcat sample.gz | oledump.py
 
-The return code of oledump is 0, except when you use no options and the analyzed file contains macros. When macros are found, the return code is 2.
+The return codes of oledump are:
+ -1 when an error occured
+ 0 when the file is not an ole file (or does not contain an ole file)
+ 1 when an ole file without macros was analyzed
+ 2 when an ole file with macros was analyzed
 '''
     for line in manual.split('\n'):
         print(textwrap.fill(line))
@@ -526,47 +555,84 @@ def File2String(filename):
     finally:
         f.close()
 
-class cDumpStream():
-    def __init__(self):
-        self.text = ''
+class cDump():
+    def __init__(self, data, prefix='', offset=0, dumplinelength=16):
+        self.data = data
+        self.prefix = prefix
+        self.offset = offset
+        self.dumplinelength = dumplinelength
 
-    def Addline(self, line):
-        if line != '':
-            self.text += line + '\n'
+    def HexDump(self):
+        oDumpStream = self.cDumpStream(self.prefix)
+        hexDump = ''
+        for i, b in enumerate(self.data):
+            if i % self.dumplinelength == 0 and hexDump != '':
+                oDumpStream.Addline(hexDump)
+                hexDump = ''
+            hexDump += IFF(hexDump == '', '', ' ') + '%02X' % self.C2IIP2(b)
+        oDumpStream.Addline(hexDump)
+        return oDumpStream.Content()
 
-    def Content(self):
-        return self.text
+    def CombineHexAscii(self, hexDump, asciiDump):
+        if hexDump == '':
+            return ''
+        countSpaces = 3 * (self.dumplinelength - len(asciiDump))
+        if len(asciiDump) <= self.dumplinelength / 2:
+            countSpaces += 1
+        return hexDump + '  ' + (' ' * countSpaces) + asciiDump
+
+    def HexAsciiDump(self):
+        oDumpStream = self.cDumpStream(self.prefix)
+        hexDump = ''
+        asciiDump = ''
+        for i, b in enumerate(self.data):
+            b = self.C2IIP2(b)
+            if i % self.dumplinelength == 0:
+                if hexDump != '':
+                    oDumpStream.Addline(self.CombineHexAscii(hexDump, asciiDump))
+                hexDump = '%08X:' % (i + self.offset)
+                asciiDump = ''
+            if i % self.dumplinelength == self.dumplinelength / 2:
+                hexDump += ' '
+            hexDump += ' %02X' % b
+            asciiDump += IFF(b >= 32 and b <= 128, chr(b), '.')
+        oDumpStream.Addline(self.CombineHexAscii(hexDump, asciiDump))
+        return oDumpStream.Content()
+
+    def Base64Dump(self, nowhitespace=False):
+        encoded = binascii.b2a_base64(self.data)
+        if nowhitespace:
+            return encoded
+        oDumpStream = self.cDumpStream(self.prefix)
+        length = 64
+        for i in range(0, len(encoded), length):
+            oDumpStream.Addline(encoded[0+i:length+i])
+        return oDumpStream.Content()
+
+    class cDumpStream():
+        def __init__(self, prefix=''):
+            self.oStringIO = StringIO()
+            self.prefix = prefix
+
+        def Addline(self, line):
+            if line != '':
+                self.oStringIO.write(self.prefix + line + '\n')
+
+        def Content(self):
+            return self.oStringIO.getvalue()
+
+    @staticmethod
+    def C2IIP2(data):
+        if sys.version_info[0] > 2:
+            return data
+        else:
+            return ord(data)
 
 def HexDump(data):
-    oDumpStream = cDumpStream()
-    hexDump = ''
-    for i, b in enumerate(data):
-        if i % dumplinelength == 0 and hexDump != '':
-            oDumpStream.Addline(hexDump)
-            hexDump = ''
-        hexDump += IFF(hexDump == '', '', ' ') + '%02X' % ord(b)
-    oDumpStream.Addline(hexDump)
-    return oDumpStream.Content()
-
-def CombineHexAscii(hexDump, asciiDump):
-    if hexDump == '':
-        return ''
-    return hexDump + '  ' + (' ' * (3 * (dumplinelength - len(asciiDump)))) + asciiDump
+    return cDump(data, dumplinelength=dumplinelength).HexDump()
 
 def HexAsciiDump(data):
-    oDumpStream = cDumpStream()
-    hexDump = ''
-    asciiDump = ''
-    for i, b in enumerate(data):
-        if i % dumplinelength == 0:
-            if hexDump != '':
-                oDumpStream.Addline(CombineHexAscii(hexDump, asciiDump))
-            hexDump = '%08X:' % i
-            asciiDump = ''
-        hexDump+= ' %02X' % ord(b)
-        asciiDump += IFF(ord(b) >= 32, b, '.')
-    oDumpStream.Addline(CombineHexAscii(hexDump, asciiDump))
-    return oDumpStream.Content()
+    return cDump(data, dumplinelength=dumplinelength).HexAsciiDump()
 
 def Translate(expression):
     try:
@@ -600,8 +666,11 @@ def StdoutWriteChunked(data):
             return
         data = data[10000:]
 
-def PrintableName(fname):
-    return repr('/'.join(fname))
+def PrintableName(fname, orphan=0):
+    if orphan == 1:
+        return 'Orphan: ' + repr(fname)
+    else:
+        return repr('/'.join(fname))
 
 def ParseTokenSequence(data):
     flags = ord(data[0])
@@ -1321,11 +1390,23 @@ def OLE10HeaderPresent(data):
     version, data = ReadWORD(data)
     return version ==2
 
+def OLEGetStreams(ole):
+    olestreams = []
+    for fname in ole.listdir():
+        olestreams.append([0, fname, ole.get_type(fname), ole.openstream(fname).read()])
+    for sid in range(len(ole.direntries)):
+        entry = ole.direntries[sid]
+        if entry is None:
+            entry = ole._load_direntry(sid)
+            if entry.entry_type == 2:
+                olestreams.append([1, entry.name, entry.entry_type, ole._open(entry.isectStart, entry.size).read()])
+    return olestreams
+
 def OLESub(ole, prefix, rules, options):
     global plugins
     global decoders
 
-    returnCode = 0
+    returnCode = 1
 
     if options.metadata:
         metadata = ole.get_metadata()
@@ -1350,15 +1431,13 @@ def OLESub(ole, prefix, rules, options):
     if options.select == '':
         counter = 1
         vbaConcatenate = ''
-        for fname in ole.listdir():
-            stream = None
+        for orphan, fname, entry_type, stream in OLEGetStreams(ole):
             indicator = ' '
             macroPresent = False
             lengthString = '      '
-            if ole.get_type(fname) == 1:
+            if entry_type == 1:
                 indicator = '.'
-            elif ole.get_type(fname) == 2:
-                stream = ole.openstream(fname).read()
+            elif entry_type == 2:
                 lengthString = '%7d' % len(stream)
                 macroPresent = FindCompression(stream) != -1
                 if macroPresent:
@@ -1373,7 +1452,7 @@ def OLESub(ole, prefix, rules, options):
                     indicator = 'O'
             if not options.quiet:
                 index = '%s%d' % (prefix, counter)
-                line = '%3s: %s %s %s' % (index, indicator, lengthString, PrintableName(fname))
+                line = '%3s: %s %s %s' % (index, indicator, lengthString, PrintableName(fname, orphan))
                 if indicator.lower() == 'm' and options.vbadecompress:
                     streamForExtra = SearchAndDecompress(stream)
                 else:
@@ -1382,7 +1461,7 @@ def OLESub(ole, prefix, rules, options):
                     line += ' %s' % hashlib.md5(streamForExtra).hexdigest()
                 if options.extra.startswith('!'):
                     line = ''
-                line += GenerateExtraInfo(options.extra, index, indicator, PrintableName(fname), streamForExtra)
+                line += GenerateExtraInfo(options.extra, index, indicator, PrintableName(fname, orphan), streamForExtra)
                 print(line)
             for cPlugin in plugins:
                 try:
@@ -1471,9 +1550,9 @@ def OLESub(ole, prefix, rules, options):
         else:
             DumpFunction = HexAsciiDump
         counter = 1
-        for fname in ole.listdir():
+        for orphan, fname, entry_type, stream in OLEGetStreams(ole):
             if options.select == 'a' or ('%s%d' % (prefix, counter)) == options.select:
-                StdoutWriteChunked(DumpFunction(DecompressFunction(DecodeFunction(decoders, options, CutData(ole.openstream(fname).read(), options.cut)))))
+                StdoutWriteChunked(DumpFunction(DecompressFunction(DecodeFunction(decoders, options, CutData(stream, options.cut)))))
                 if options.select != 'a':
                     break
             counter += 1
@@ -1621,7 +1700,11 @@ def OLEDump(filename, options):
         data = oStringIO.read()
         oStringIO.seek(0)
         if '<?xml' in data:
-            oXML = xml.dom.minidom.parse(oStringIO)
+            try:
+                oXML = xml.dom.minidom.parse(oStringIO)
+            except:
+                print('Error: parsing %s as XML.' % filename)
+                return -1
             counter = 0
             for oElement in oXML.getElementsByTagName('*'):
                 if oElement.firstChild and oElement.firstChild.nodeValue:

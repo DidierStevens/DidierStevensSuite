@@ -2,8 +2,8 @@
 
 __description__ = 'Tool for displaying PE file info'
 __author__ = 'Didier Stevens'
-__version__ = '0.7.0'
-__date__ = '2017/07/02'
+__version__ = '0.7.1'
+__date__ = '2017/11/03'
 
 """
 
@@ -32,6 +32,8 @@ History:
   2016/12/01: added options -g -D -x -a -S
   2016/12/12: V0.6.0 added option -o
   2017/07/02: V0.7.0 added sections (s) to option -o; added # support for option -y
+  2017/11/01: V0.7.1 added -g support for -o s; added cDump
+  2017/11/03: continued
 
 Todo:
 """
@@ -47,6 +49,10 @@ import binascii
 import shlex
 import os
 import re
+if sys.version_info[0] >= 3:
+    from io import StringIO
+else:
+    from cStringIO import StringIO
 
 dumplinelength = 16
 REGEX_STANDARD = '[\x09\x20-\x7E]'
@@ -143,6 +149,10 @@ def YARACompile(ruledata):
             rule = binascii.a2b_hex(ruledata[3:])
         elif ruledata.startswith('#b#'):
             rule = binascii.a2b_base64(ruledata[3:])
+        elif ruledata.startswith('#s#'):
+            rule = 'rule string {strings: $a = "%s" ascii wide nocase condition: $a}' % ruledata[3:]
+        elif ruledata.startswith('#q#'):
+            rule = ruledata[3:].replace("'", '"')
         else:
             rule = ruledata[1:]
         return yara.compile(source=rule)
@@ -280,47 +290,84 @@ def SingleFileInfo(filename, signatures, options):
                     print('   %s' % binascii.hexlify(C2BIP3(stringdata[2])))
                     print('   %s' % repr(stringdata[2]))
 
-class cDumpStream():
-    def __init__(self):
-        self.text = ''
+class cDump():
+    def __init__(self, data, prefix='', offset=0, dumplinelength=16):
+        self.data = data
+        self.prefix = prefix
+        self.offset = offset
+        self.dumplinelength = dumplinelength
 
-    def Addline(self, line):
-        if line != '':
-            self.text += line + '\n'
+    def HexDump(self):
+        oDumpStream = self.cDumpStream(self.prefix)
+        hexDump = ''
+        for i, b in enumerate(self.data):
+            if i % self.dumplinelength == 0 and hexDump != '':
+                oDumpStream.Addline(hexDump)
+                hexDump = ''
+            hexDump += IFF(hexDump == '', '', ' ') + '%02X' % self.C2IIP2(b)
+        oDumpStream.Addline(hexDump)
+        return oDumpStream.Content()
 
-    def Content(self):
-        return self.text
+    def CombineHexAscii(self, hexDump, asciiDump):
+        if hexDump == '':
+            return ''
+        countSpaces = 3 * (self.dumplinelength - len(asciiDump))
+        if len(asciiDump) <= self.dumplinelength / 2:
+            countSpaces += 1
+        return hexDump + '  ' + (' ' * countSpaces) + asciiDump
+
+    def HexAsciiDump(self):
+        oDumpStream = self.cDumpStream(self.prefix)
+        hexDump = ''
+        asciiDump = ''
+        for i, b in enumerate(self.data):
+            b = self.C2IIP2(b)
+            if i % self.dumplinelength == 0:
+                if hexDump != '':
+                    oDumpStream.Addline(self.CombineHexAscii(hexDump, asciiDump))
+                hexDump = '%08X:' % (i + self.offset)
+                asciiDump = ''
+            if i % self.dumplinelength == self.dumplinelength / 2:
+                hexDump += ' '
+            hexDump += ' %02X' % b
+            asciiDump += IFF(b >= 32 and b <= 128, chr(b), '.')
+        oDumpStream.Addline(self.CombineHexAscii(hexDump, asciiDump))
+        return oDumpStream.Content()
+
+    def Base64Dump(self, nowhitespace=False):
+        encoded = binascii.b2a_base64(self.data)
+        if nowhitespace:
+            return encoded
+        oDumpStream = self.cDumpStream(self.prefix)
+        length = 64
+        for i in range(0, len(encoded), length):
+            oDumpStream.Addline(encoded[0+i:length+i])
+        return oDumpStream.Content()
+
+    class cDumpStream():
+        def __init__(self, prefix=''):
+            self.oStringIO = StringIO()
+            self.prefix = prefix
+
+        def Addline(self, line):
+            if line != '':
+                self.oStringIO.write(self.prefix + line + '\n')
+
+        def Content(self):
+            return self.oStringIO.getvalue()
+
+    @staticmethod
+    def C2IIP2(data):
+        if sys.version_info[0] > 2:
+            return data
+        else:
+            return ord(data)
 
 def HexDump(data):
-    oDumpStream = cDumpStream()
-    hexDump = ''
-    for i, b in enumerate(data):
-        if i % dumplinelength == 0 and hexDump != '':
-            oDumpStream.Addline(hexDump)
-            hexDump = ''
-        hexDump += IFF(hexDump == '', '', ' ') + '%02X' % ord(b)
-    oDumpStream.Addline(hexDump)
-    return oDumpStream.Content()
-
-def CombineHexAscii(hexDump, asciiDump):
-    if hexDump == '':
-        return ''
-    return hexDump + '  ' + (' ' * (3 * (dumplinelength - len(asciiDump)))) + asciiDump
+    return cDump(data, dumplinelength=dumplinelength).HexDump()
 
 def HexAsciiDump(data):
-    oDumpStream = cDumpStream()
-    hexDump = ''
-    asciiDump = ''
-    for i, b in enumerate(data):
-        if i % dumplinelength == 0:
-            if hexDump != '':
-                oDumpStream.Addline(CombineHexAscii(hexDump, asciiDump))
-            hexDump = '%08X:' % i
-            asciiDump = ''
-        hexDump+= ' %02X' % ord(b)
-        asciiDump += IFF(ord(b) >= 32, b, '.')
-    oDumpStream.Addline(CombineHexAscii(hexDump, asciiDump))
-    return oDumpStream.Content()
+    return cDump(data, dumplinelength=dumplinelength).HexAsciiDump()
 
 def ExtractStringsASCII(data):
     regex = REGEX_STANDARD + '{%d,}'
@@ -364,10 +411,7 @@ def ParseGetData(expression):
 def GenerateMAGIC(data):
     return binascii.b2a_hex(data) + ' ' + ''.join([IFF(ord(c) >= 32 and ord(c) <= 128, c, '.') for c in data])
 
-def Resources(filename, options):
-    counter = 1
-    pe = GetPEObject(filename)
-
+def GetDumpFunction(options):
     if options.dump:
         DumpFunction = lambda x:x
         IfWIN32SetBinary(sys.stdout)
@@ -379,6 +423,12 @@ def Resources(filename, options):
         DumpFunction = DumpFunctionStrings
     else:
         DumpFunction = HexAsciiDump
+    return DumpFunction
+
+def Resources(filename, options):
+    counter = 1
+    pe = GetPEObject(filename)
+    DumpFunction = GetDumpFunction(options)
 
     if hasattr(pe, 'DIRECTORY_ENTRY_RESOURCE'):
         for resource_type in pe.DIRECTORY_ENTRY_RESOURCE.entries:
@@ -414,6 +464,7 @@ def Resources(filename, options):
 def Sections(filename, options):
     counter = 1
     pe = GetPEObject(filename)
+    DumpFunction = GetDumpFunction(options)
 
     #http://www.hexacorn.com/blog/2016/12/15/pe-section-names-re-visited/
     dSections = {
@@ -580,15 +631,27 @@ def Sections(filename, options):
         'text': 'Alternative Code Section',
     }
 
+    if options.yara != None:
+        if not 'yara' in sys.modules:
+            print('Error: option yara requires the YARA Python module.')
+            return
+        rules = YARACompile(options.yara)
+
     for section in pe.sections:
         sectionname = ''.join(filter(lambda c:c != '\0', str(section.Name)))
-        description = ''
-        if sectionname in dSections:
-            description = dSections[sectionname]
-        print('%d: %-10s %8d %f %s' % (counter, sectionname, section.SizeOfRawData, section.get_entropy(), description))
+        if options.getdata == '':
+            print('%d: %-10s %8d %f %s' % (counter, sectionname, section.SizeOfRawData, section.get_entropy(), dSections.get(sectionname, '')))
+            if options.yara != None:
+                for result in rules.match(data=section.get_data()):
+                    print(' YARA rule: %s' % result.rule)
+                    if options.yarastrings:
+                        for stringdata in result.strings:
+                            print('  %06x %s:' % (stringdata[0], stringdata[1]))
+                            print('   %s' % binascii.hexlify(C2BIP3(stringdata[2])))
+                            print('   %s' % repr(stringdata[2]))
+        elif int(options.getdata) == counter:
+            StdoutWriteChunked(DumpFunction(section.get_data()))
         counter += 1
-
-#        print(dir(section))
 
 def SingleFile(filename, signatures, options):
     if options.overview == 'r':
@@ -597,17 +660,7 @@ def SingleFile(filename, signatures, options):
         Sections(filename, options)
     elif options.getdata != '':
         pe = GetPEObject(filename)
-        if options.dump:
-            DumpFunction = lambda x:x
-            IfWIN32SetBinary(sys.stdout)
-        elif options.hexdump:
-            DumpFunction = HexDump
-        elif options.asciidump:
-            DumpFunction = HexAsciiDump
-        elif options.strings:
-            DumpFunction = DumpFunctionStrings
-        else:
-            DumpFunction = HexAsciiDump
+        DumpFunction = GetDumpFunction(options)
         parsed = ParseGetData(options.getdata)
         if parsed == None:
             print('Error getdata syntax error: %s' % options.getdata)
