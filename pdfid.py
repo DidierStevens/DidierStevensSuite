@@ -2,8 +2,8 @@
 
 __description__ = 'Tool to test a PDF file'
 __author__ = 'Didier Stevens'
-__version__ = '0.2.2'
-__date__ = '2017/10/29'
+__version__ = '0.2.3'
+__date__ = '2017/11/05'
 
 """
 
@@ -49,6 +49,7 @@ History:
   2015/08/13: added plugin Instructions method
   2016/04/12: added option literal
   2017/10/29: added pdfid.ini support
+  2017/11/05= V0.2.3: added option -n
 
 Todo:
   - update XML example (entropy, EOF)
@@ -628,7 +629,7 @@ def PDFiD(file, allNames=False, extraData=False, disarm=False, force=False):
         eleDate.setAttributeNode(att)
     return xmlDoc
 
-def PDFiD2String(xmlDoc, force):
+def PDFiD2String(xmlDoc, nozero, force):
     result = 'PDFiD %s %s\n' % (xmlDoc.documentElement.getAttribute('Version'), xmlDoc.documentElement.getAttribute('Filename'))
     if xmlDoc.documentElement.getAttribute('ErrorOccured') == 'True':
         return result + '***Error occured***\n%s\n' % xmlDoc.documentElement.getAttribute('ErrorMessage')
@@ -636,10 +637,11 @@ def PDFiD2String(xmlDoc, force):
         return result + ' Not a PDF document\n'
     result += ' PDF Header: %s\n' % xmlDoc.documentElement.getAttribute('Header')
     for node in xmlDoc.documentElement.getElementsByTagName('Keywords')[0].childNodes:
-        result += ' %-16s %7d' % (node.getAttribute('Name'), int(node.getAttribute('Count')))
-        if int(node.getAttribute('HexcodeCount')) > 0:
-            result += '(%d)' % int(node.getAttribute('HexcodeCount'))
-        result += '\n'
+        if not nozero or nozero and int(node.getAttribute('Count')) > 0:
+            result += ' %-16s %7d' % (node.getAttribute('Name'), int(node.getAttribute('Count')))
+            if int(node.getAttribute('HexcodeCount')) > 0:
+                result += '(%d)' % int(node.getAttribute('HexcodeCount'))
+            result += '\n'
     if xmlDoc.documentElement.getAttribute('CountEOF') != '':
         result += ' %-16s %7d\n' % ('%%EOF', int(xmlDoc.documentElement.getAttribute('CountEOF')))
     if xmlDoc.documentElement.getAttribute('CountCharsAfterLastEOF') != '':
@@ -723,7 +725,7 @@ def MakeCSVLine(fields, separator=';', quote='"'):
 def ProcessFile(filename, options, plugins):
     xmlDoc = PDFiD(filename, options.all, options.extra, options.disarm, options.force)
     if plugins == [] and options.select == '':
-        Print(PDFiD2String(xmlDoc, options.force), options)
+        Print(PDFiD2String(xmlDoc, options.nozero, options.force), options)
         return
 
     oPDFiD = cPDFiD(xmlDoc, options.force)
@@ -741,7 +743,7 @@ def ProcessFile(filename, options, plugins):
                 if options.csv:
                     Print(filename, options)
                 else:
-                    Print(PDFiD2String(xmlDoc, options.force), options)
+                    Print(PDFiD2String(xmlDoc, options.nozero, options.force), options)
     else:
         for cPlugin in plugins:
             if not cPlugin.onlyValidPDF or not oPDFiD.errorOccured and oPDFiD.isPDF:
@@ -766,7 +768,7 @@ def ProcessFile(filename, options, plugins):
                         Print(MakeCSVLine((('%s', filename), ('%s', cPlugin.name), ('%.02f', score))), options)
                 else:
                     if score >= options.minimumscore:
-                        Print(PDFiD2String(xmlDoc, options.force), options)
+                        Print(PDFiD2String(xmlDoc, options.nozero, options.force), options)
                         Print('%s score:        %.02f' % (cPlugin.name, score), options)
                         try:
                             Print('%s instructions: %s' % (cPlugin.name, oPlugin.Instructions(score)), options)
@@ -779,7 +781,7 @@ def ProcessFile(filename, options, plugins):
                     if not oPDFiD.isPDF:
                         Print(MakeCSVLine((('%s', filename), ('%s', cPlugin.name), ('%s', 'Not a PDF document'))), options)
                 else:
-                    Print(PDFiD2String(xmlDoc, options.force), options)
+                    Print(PDFiD2String(xmlDoc, options.nozero, options.force), options)
 
 
 def Scan(directory, options, plugins):
@@ -931,6 +933,7 @@ https://DidierStevens.com'''
     oParser.add_option('-m', '--minimumscore', type=float, default=0.0, help='minimum score for plugin results output')
     oParser.add_option('-v', '--verbose', action='store_true', default=False, help='verbose (will also raise catched exceptions)')
     oParser.add_option('-S', '--select', type=str, default='', help='selection expression')
+    oParser.add_option('-n', '--nozero', action='store_true', default=False, help='supress output for counts equal to zero')
     oParser.add_option('-o', '--output', type=str, default='', help='output to log file')
     oParser.add_option('--pluginoptions', type=str, default='', help='options for the plugin')
     oParser.add_option('-l', '--literal', action='store_true', default=False, help='take filenames literally, no wildcards')

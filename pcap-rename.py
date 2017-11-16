@@ -2,8 +2,8 @@
 
 __description__ = 'Rename pcap files with timestamp of the first packet'
 __author__ = 'Didier Stevens'
-__version__ = '0.0.1'
-__date__ = '2014/10/03'
+__version__ = '0.0.2'
+__date__ = '2017/11/16'
 
 """
 
@@ -13,6 +13,7 @@ Use at your own risk
 
 History:
   2014/10/03: start
+  2017/11/16: added support for big-endian files
 
 Todo:
 """
@@ -118,13 +119,19 @@ def PcapRename(templateFilename, filenames, options):
         if len(data) < 32:
             print('File too small: %s' % filename)
             continue
-        if S(data, 0, 4) != '\xD4\xC3\xB2\xA1':
+        if S(data, 0, 4) == '\xD4\xC3\xB2\xA1':
+            if S(data, 4, 4) != '\x02\x00\x04\x00':
+                print('Unexpected version number: %s' % filename)
+                continue
+            newFilename = os.path.join(os.path.dirname(filename), templateFilename.replace('%%', '%s-%06d' % (Timestamp(StringToUnsignedIntegerLittleEndian(S(data, 24, 4))), StringToUnsignedIntegerLittleEndian(S(data, 28, 4)))))
+        elif S(data, 0, 4) == '\xA1\xB2\xC3\xD4':
+            if S(data, 4, 4) != '\x00\x02\x00\x04':
+                print('Unexpected version number: %s' % filename)
+                continue
+            newFilename = os.path.join(os.path.dirname(filename), templateFilename.replace('%%', '%s-%06d' % (Timestamp(StringToUnsignedIntegerBigEndian(S(data, 24, 4))), StringToUnsignedIntegerBigEndian(S(data, 28, 4)))))
+        else:
             print('Unexpected magic number: %s' % filename)
             continue
-        if S(data, 4, 4) != '\x02\x00\x04\x00':
-            print('Unexpected version number: %s' % filename)
-            continue
-        newFilename = os.path.join(os.path.dirname(filename), templateFilename.replace('%%', '%s-%06d' % (Timestamp(StringToUnsignedIntegerLittleEndian(S(data, 24, 4))), StringToUnsignedIntegerLittleEndian(S(data, 28, 4)))))
         try:
             if filename != newFilename:
                 if os.path.exists(newFilename):
