@@ -2,8 +2,8 @@
 
 __description__ = 'Analyze RTF files'
 __author__ = 'Didier Stevens'
-__version__ = '0.0.5'
-__date__ = '2017/02/11'
+__version__ = '0.0.6'
+__date__ = '2017/12/10'
 
 """
 
@@ -29,7 +29,9 @@ History:
   2016/07/30: 0.0.3 added option recursionlimit
   2016/08/09: 0.0.4 refactoring
   2016/08/12: continue
-  2017/02/11: added \dde000... handling; added option -E
+  2017/02/11: 0.0.5 added \dde000... handling; added option -E
+  2017/12/09: 0.0.6 added longestContiguousHexstring; extra info -f O
+  2017/12/10: cDump & YARACompile
 
 Todo:
 """
@@ -44,7 +46,10 @@ import textwrap
 import re
 import string
 import hashlib
-import cStringIO
+if sys.version_info[0] >= 3:
+    from io import StringIO
+else:
+    from cStringIO import StringIO
 
 try:
     import yara
@@ -95,47 +100,93 @@ def File2String(filename):
     finally:
         f.close()
 
-class cDumpStream():
-    def __init__(self):
-        self.text = ''
+#-BEGINCODE cDump------------------------------------------------------------------------------------
+#import binascii
+#import sys
+#if sys.version_info[0] >= 3:
+#    from io import StringIO
+#else:
+#    from cStringIO import StringIO
 
-    def Addline(self, line):
-        if line != '':
-            self.text += line + '\n'
+class cDump():
+    def __init__(self, data, prefix='', offset=0, dumplinelength=16):
+        self.data = data
+        self.prefix = prefix
+        self.offset = offset
+        self.dumplinelength = dumplinelength
 
-    def Content(self):
-        return self.text
+    def HexDump(self):
+        oDumpStream = self.cDumpStream(self.prefix)
+        hexDump = ''
+        for i, b in enumerate(self.data):
+            if i % self.dumplinelength == 0 and hexDump != '':
+                oDumpStream.Addline(hexDump)
+                hexDump = ''
+            hexDump += IFF(hexDump == '', '', ' ') + '%02X' % self.C2IIP2(b)
+        oDumpStream.Addline(hexDump)
+        return oDumpStream.Content()
+
+    def CombineHexAscii(self, hexDump, asciiDump):
+        if hexDump == '':
+            return ''
+        countSpaces = 3 * (self.dumplinelength - len(asciiDump))
+        if len(asciiDump) <= self.dumplinelength / 2:
+            countSpaces += 1
+        return hexDump + '  ' + (' ' * countSpaces) + asciiDump
+
+    def HexAsciiDump(self):
+        oDumpStream = self.cDumpStream(self.prefix)
+        hexDump = ''
+        asciiDump = ''
+        for i, b in enumerate(self.data):
+            b = self.C2IIP2(b)
+            if i % self.dumplinelength == 0:
+                if hexDump != '':
+                    oDumpStream.Addline(self.CombineHexAscii(hexDump, asciiDump))
+                hexDump = '%08X:' % (i + self.offset)
+                asciiDump = ''
+            if i % self.dumplinelength == self.dumplinelength / 2:
+                hexDump += ' '
+            hexDump += ' %02X' % b
+            asciiDump += IFF(b >= 32 and b < 128, chr(b), '.')
+        oDumpStream.Addline(self.CombineHexAscii(hexDump, asciiDump))
+        return oDumpStream.Content()
+
+    def Base64Dump(self, nowhitespace=False):
+        encoded = binascii.b2a_base64(self.data)
+        if nowhitespace:
+            return encoded
+        oDumpStream = self.cDumpStream(self.prefix)
+        length = 64
+        for i in range(0, len(encoded), length):
+            oDumpStream.Addline(encoded[0+i:length+i])
+        return oDumpStream.Content()
+
+    class cDumpStream():
+        def __init__(self, prefix=''):
+            self.oStringIO = StringIO()
+            self.prefix = prefix
+
+        def Addline(self, line):
+            if line != '':
+                self.oStringIO.write(self.prefix + line + '\n')
+
+        def Content(self):
+            return self.oStringIO.getvalue()
+
+    @staticmethod
+    def C2IIP2(data):
+        if sys.version_info[0] > 2:
+            return data
+        else:
+            return ord(data)
+#-ENDCODE cDump--------------------------------------------------------------------------------------
 
 def HexDump(data):
-    oDumpStream = cDumpStream()
-    hexDump = ''
-    for i, b in enumerate(data):
-        if i % dumplinelength == 0 and hexDump != '':
-            oDumpStream.Addline(hexDump)
-            hexDump = ''
-        hexDump += IFF(hexDump == '', '', ' ') + '%02X' % ord(b)
-    oDumpStream.Addline(hexDump)
-    return oDumpStream.Content()
-
-def CombineHexAscii(hexDump, asciiDump):
-    if hexDump == '':
-        return ''
-    return hexDump + '  ' + (' ' * (3 * (dumplinelength - len(asciiDump)))) + asciiDump
+    return cDump(data, dumplinelength=dumplinelength).HexDump()
 
 def HexAsciiDump(data):
-    oDumpStream = cDumpStream()
-    hexDump = ''
-    asciiDump = ''
-    for i, b in enumerate(data):
-        if i % dumplinelength == 0:
-            if hexDump != '':
-                oDumpStream.Addline(CombineHexAscii(hexDump, asciiDump))
-            hexDump = '%08X:' % i
-            asciiDump = ''
-        hexDump+= ' %02X' % ord(b)
-        asciiDump += IFF(ord(b) >= 32, b, '.')
-    oDumpStream.Addline(CombineHexAscii(hexDump, asciiDump))
-    return oDumpStream.Content()
+    return cDump(data, dumplinelength=dumplinelength).HexAsciiDump()
 
 #Fix for http://bugs.python.org/issue11395
 def StdoutWriteChunked(data):
@@ -317,18 +368,17 @@ def ExtractHex(data):
             if binstatus == 1:
                 if char in string.digits:
                     binnumber += char
-                elif char in string.whitespace:
-                    pass
                 else:
                     binstatus = 2
                     if binnumber == '':
                         binint = 0
                     else:
-                        binint = int(binnumber)
+                        binint = int(binnumber) & 0xFFFFFFFF
                     bintext = ''
                     if binint == 0:
                         binstatus = 0
-                    i -= 1
+                    if not char in string.whitespace:
+                        i -= 1
             elif binstatus == 2:
                     bintext += char
                     binint -= 1
@@ -371,7 +421,7 @@ def ExtractHex(data):
 #            if not char in ['\0']:
 #                raise('xxx')
         i += 1
-    return [IFF(isinstance(x, list), x, lambda: x.getvalue()) for x in hexstring], countUnexpectedCharacters
+    return [IFF(isinstance(x, list), x, lambda: x.getvalue()) for x in hexstring], max([''] + re.findall('[0-9a-f]+', data, re.I), key=len), countUnexpectedCharacters
 
 def ReadDWORD(data):
     if len(data) < 4:
@@ -379,6 +429,7 @@ def ReadDWORD(data):
     return ord(data[0]) + ord(data[1]) *0x100 + ord(data[2]) *0x10000 + ord(data[3]) *0x1000000, data[4:]
 
 def ExtractOleInfo(data):
+    dataSave = data
     word1, data = ReadDWORD(data)
     if word1 == None or word1 != 0x00000501:
         return []
@@ -403,13 +454,14 @@ def ExtractOleInfo(data):
     if sizeEmbedded == None:
         return []
 
-    return [name, 6*4 + word3, sizeEmbedded]
+    position = 6*4 + word3
+    return [name, position, sizeEmbedded, hashlib.md5(dataSave[position:position + sizeEmbedded]).hexdigest(), binascii.b2a_hex(dataSave[position:position + 4])]
 
 def Info(data):
     result = ExtractOleInfo(data)
     if result == []:
         return 'Error: extraction failed'
-    return 'Name: %s\nPosition embedded: %08x\nSize embedded: %08x\nmd5: %s\nmagic: %s\n' % (repr(result[0]), result[1], result[2], hashlib.md5(data[result[1]:result[1] + result[2]]).hexdigest(), binascii.b2a_hex(data[result[1]:result[1] + 4]))
+    return 'Name: %s\nPosition embedded: %08x\nSize embedded: %08x\nmd5: %s\nmagic: %s\n' % (repr(result[0]), result[1], result[2], result[3], result[4])
 
 CUTTERM_NOTHING = 0
 CUTTERM_POSITION = 1
@@ -578,7 +630,7 @@ def HexBinCount(hexstream):
     return hexcount, bincount
 
 class cAnalysis():
-    def __init__(self, index, leader, level, beginPosition, endPosition, countChildren, countUnexpectedCharacters, controlWord, content, hexstring, oleInfo):
+    def __init__(self, index, leader, level, beginPosition, endPosition, countChildren, countUnexpectedCharacters, controlWord, content, hexstring, longestContiguousHexstring, oleInfo):
         self.index = index
         self.leader = leader
         self.level = level
@@ -589,6 +641,7 @@ class cAnalysis():
         self.controlWord = controlWord
         self.content = content
         self.hexstring = hexstring
+        self.longestContiguousHexstring = longestContiguousHexstring
         self.oleInfo = oleInfo
 
 def GenerateMAGIC(data):
@@ -629,21 +682,23 @@ def RTFSub(oStringIO, prefix, rules, options):
             content = rtfdata[beginContent:endContent + 1]
         else:
             content = ''
-        hexstring, countUnexpectedCharacters = ExtractHex(content)
+        hexstring, longestContiguousHexstring, countUnexpectedCharacters = ExtractHex(content)
         leader = '%sLevel %2d                      ' % (' ' * (oIteminfo.level - 1), oIteminfo.level)
-        dAnalysis[counter] = cAnalysis(counter, leader, oIteminfo.level, oIteminfo.beginPosition, oIteminfo.endPosition, oIteminfo.countChildren, countUnexpectedCharacters, controlWord, content, hexstring, ExtractOleInfo(HexDecode(hexstring, options)))
+        dAnalysis[counter] = cAnalysis(counter, leader, oIteminfo.level, oIteminfo.beginPosition, oIteminfo.endPosition, oIteminfo.countChildren, countUnexpectedCharacters, controlWord, content, hexstring, longestContiguousHexstring, ExtractOleInfo(HexDecode(hexstring, options)))
         counter += 1
 
     if options.select == '':
         for counter in range(1, len(dAnalysis) + 1):
             hexcount, bincount = HexBinCount(dAnalysis[counter].hexstring)
             if options.filter == '' or options.filter == 'O' and dAnalysis[counter].oleInfo != [] or options.filter == 'h' and hexcount > 0:
-                line = '%5d %s c=%5d p=%08x l=%8d h=%8s b=%8s %s u=%8d %s' % (counter, dAnalysis[counter].leader[0:15], dAnalysis[counter].countChildren, dAnalysis[counter].beginPosition, dAnalysis[counter].endPosition - dAnalysis[counter].beginPosition, hexcount, bincount, IFF(dAnalysis[counter].oleInfo != [], 'O', ' '), dAnalysis[counter].countUnexpectedCharacters, dAnalysis[counter].controlWord.strip())
+                line = '%5d %s c=%5d p=%08x l=%8d h=%8d;%8d b=%8d %s u=%8d %s' % (counter, dAnalysis[counter].leader[0:15], dAnalysis[counter].countChildren, dAnalysis[counter].beginPosition, dAnalysis[counter].endPosition - dAnalysis[counter].beginPosition, hexcount, len(dAnalysis[counter].longestContiguousHexstring), bincount, IFF(dAnalysis[counter].oleInfo != [], 'O', ' '), dAnalysis[counter].countUnexpectedCharacters, dAnalysis[counter].controlWord.strip())
                 if dAnalysis[counter].controlWord.strip() == '\\*\\objclass':
                     line += ' ' + dAnalysis[counter].content
                 linePrinted = False
                 if options.yara == None:
                     print(line)
+                    if dAnalysis[counter].oleInfo != []:
+                        print('      Name: %s Size: %d md5: %s magic: %s' % (repr(dAnalysis[counter].oleInfo[0]), dAnalysis[counter].oleInfo[2], dAnalysis[counter].oleInfo[3], dAnalysis[counter].oleInfo[4]))
                     linePrinted = True
                 elif dAnalysis[counter].content != None:
                     stream = HexDecodeIfRequested(dAnalysis[counter], options)
@@ -690,17 +745,30 @@ def RTFSub(oStringIO, prefix, rules, options):
 
     return returnCode
 
-def YARACompile(fileordirname):
-    dFilepaths = {}
-    if os.path.isdir(fileordirname):
-        for root, dirs, files in os.walk(fileordirname):
-            for file in files:
-                filename = os.path.join(root, file)
-                dFilepaths[filename] = filename
+def YARACompile(ruledata):
+    if ruledata.startswith('#'):
+        if ruledata.startswith('#h#'):
+            rule = binascii.a2b_hex(ruledata[3:])
+        elif ruledata.startswith('#b#'):
+            rule = binascii.a2b_base64(ruledata[3:])
+        elif ruledata.startswith('#s#'):
+            rule = 'rule string {strings: $a = "%s" ascii wide nocase condition: $a}' % ruledata[3:]
+        elif ruledata.startswith('#q#'):
+            rule = ruledata[3:].replace("'", '"')
+        else:
+            rule = ruledata[1:]
+        return yara.compile(source=rule, externals={'streamname': '', 'VBA': False})
     else:
-        for filename in ProcessAt(fileordirname):
-            dFilepaths[filename] = filename
-    return yara.compile(filepaths=dFilepaths)
+        dFilepaths = {}
+        if os.path.isdir(ruledata):
+            for root, dirs, files in os.walk(ruledata):
+                for file in files:
+                    filename = os.path.join(root, file)
+                    dFilepaths[filename] = filename
+        else:
+            for filename in ProcessAt(ruledata):
+                dFilepaths[filename] = filename
+        return yara.compile(filepaths=dFilepaths, externals={'streamname': '', 'VBA': False})
 
 def RTFDump(filename, options):
     global plugins
