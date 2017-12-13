@@ -2,8 +2,8 @@
 
 __description__ = 'Analyze OLE files (Compound Binary Files)'
 __author__ = 'Didier Stevens'
-__version__ = '0.0.30'
-__date__ = '2017/11/04'
+__version__ = '0.0.31'
+__date__ = '2017/12/13'
 
 """
 
@@ -70,6 +70,7 @@ History:
   2017/10/14: 0.0.29 added options -t, -S; and \x00Attribut bugfix provided by Charles Smutz
   2017/11/01: 0.0.30 replaced hexdump and hexasciidump with cDump
   2017/11/04: added return codes -1 and 1
+  2017/12/13: 0.0.31 corrected man
 
 Todo:
 """
@@ -150,11 +151,11 @@ When selecting a stream, its content is shown as an ASCII dump (this can also be
 Option -x produces a hexadecimal dump instead of an ASCII dump.
 
 C:\Demo>oledump.py -s 1 -x Book1.xls
-00000000: FE FF 00 00 05 01 02 00 00 00 00 00 00 00 00 00
-00000010: 00 00 00 00 00 00 00 00 01 00 00 00 02 D5 CD D5
-00000020: 9C 2E 1B 10 93 97 08 00 2B 2C F9 AE 30 00 00 00
-00000030: E4 00 00 00 09 00 00 00 01 00 00 00 50 00 00 00
-00000040: 0F 00 00 00 58 00 00 00 17 00 00 00 70 00 00 00
+FE FF 00 00 05 01 02 00 00 00 00 00 00 00 00 00
+00 00 00 00 00 00 00 00 01 00 00 00 02 D5 CD D5
+9C 2E 1B 10 93 97 08 00 2B 2C F9 AE 30 00 00 00
+E4 00 00 00 09 00 00 00 01 00 00 00 50 00 00 00
+0F 00 00 00 58 00 00 00 17 00 00 00 70 00 00 00
 ...
 
 Option -S dumps the strings.

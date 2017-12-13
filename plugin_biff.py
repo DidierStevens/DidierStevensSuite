@@ -2,8 +2,8 @@
 
 __description__ = 'BIFF plugin for oledump.py'
 __author__ = 'Didier Stevens'
-__version__ = '0.0.1'
-__date__ = '2014/11/21'
+__version__ = '0.0.2'
+__date__ = '2017/12/12'
 
 """
 
@@ -14,12 +14,16 @@ Use at your own risk
 History:
   2014/11/15: start
   2014/11/21: changed interface: added options; added options -a (asciidump) and -s (strings)
+  2017/12/10: 0.0.2 added optparse & option -o
+  2017/12/12: added option -f
+  2017/12/13: added 0x support for option -f
 
 Todo:
 """
 
 import struct
 import re
+import optparse
 
 def CombineHexASCII(hexDump, asciiDump, length):
     if hexDump == '':
@@ -331,6 +335,17 @@ class cBIFF(cPluginParent):
         if self.streamname == ['Workbook']:
             self.ran = True
             stream = self.stream
+
+            oParser = optparse.OptionParser()
+            oParser.add_option('-s', '--strings', action='store_true', default=False, help='Dump strings')
+            oParser.add_option('-a', '--hexascii', action='store_true', default=False, help='Dump hex ascii')
+            oParser.add_option('-o', '--opcode', type=str, default='', help='Opcode to filter for')
+            oParser.add_option('-f', '--find', type=str, default='', help='Content to search for')
+            (options, args) = oParser.parse_args(self.options.split(' '))
+
+            if options.find.startswith('0x'):
+                options.find = binascii.a2b_hex(options.find[2:])
+
             while stream != '':
                 formatcodes = 'HH'
                 formatsize = struct.calcsize(formatcodes)
@@ -343,16 +358,19 @@ class cBIFF(cPluginParent):
                     opcodename = dOpcodes[opcode]
                 else:
                     opcodename = ''
-                result.append('%04x %6d %s ' % (opcode, length, opcodename))
+                line = '%04x %6d %s ' % (opcode, length, opcodename)
 
-                if self.options == '-a':
-                    result.extend(' ' + foundstring for foundstring in HexASCII(data, 8))
-                elif self.options == '-s':
-                    dEncodings = {'s': 'ASCII', 'L': 'UNICODE'}
-                    for encoding, strings in Strings(data).items():
-                        if len(strings) > 0:
-                            result.append(' ' + dEncodings[encoding] + ':')
-                            result.extend('  ' + foundstring for foundstring in strings)
+                if options.find == '' and options.opcode == '' or options.opcode != '' and options.opcode.lower() in line.lower() or options.find != '' and options.find in data:
+                    result.append(line)
+
+                    if options.hexascii:
+                        result.extend(' ' + foundstring for foundstring in HexASCII(data, 8))
+                    elif options.strings:
+                        dEncodings = {'s': 'ASCII', 'L': 'UNICODE'}
+                        for encoding, strings in Strings(data).items():
+                            if len(strings) > 0:
+                                result.append(' ' + dEncodings[encoding] + ':')
+                                result.extend('  ' + foundstring for foundstring in strings)
 
         return result
 
