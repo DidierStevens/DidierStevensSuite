@@ -2,8 +2,8 @@
 
 __description__ = 'This is essentialy a wrapper for the struct module'
 __author__ = 'Didier Stevens'
-__version__ = '0.0.2'
-__date__ = '2017/12/10'
+__version__ = '0.0.3'
+__date__ = '2017/12/16'
 
 """
 Source code put in public domain by Didier Stevens, no Copyright
@@ -18,6 +18,7 @@ History:
   2017/11/18: added option -f
   2017/12/01: updated FilenameCheckHash to handle empty file: #
   2017/12/10: added manual
+  2017/12/16: 0.0.3 added epoch to option -f
 
 Todo:
 """
@@ -84,9 +85,9 @@ Example:
 
 format-bytes.py -f hib random.bin
 File: random.bin
- 0:    <type 'int'>      26043       65bb
- 1:    <type 'int'> -823256990  -3111e79e
- 2:    <type 'int'>         58         3a
+ 0:    <type 'int'>      26043       65bb  1970/01/01 07:14:03
+ 1:    <type 'int'> -823256990  -3111e79e  
+ 2:    <type 'int'>         58         3a  1970/01/01 00:00:58
 
 FYI, Python struct module format characters are:
 
@@ -906,7 +907,7 @@ def FormatBytesSingle(filename, cutexpression, options):
         size = struct.calcsize(options.format)
         for index, element in enumerate(struct.unpack(options.format, data[0:size])):
             if isinstance(element, int):
-                print('%2d: %15s %10d %10x' % (index, type(element), element, element))
+                print('%2d: %15s %10d %10x  %s' % (index, type(element), element, element, IFF(element < 0, '', lambda: TimestampUTC(element))))
             else:
                 print('%2d: %15s %s' % (index, type(element), str(element)))
     elif options.count == 1:
