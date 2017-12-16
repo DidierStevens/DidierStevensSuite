@@ -2,8 +2,8 @@
 
 __description__ = 'Analyze OLE files (Compound Binary Files)'
 __author__ = 'Didier Stevens'
-__version__ = '0.0.31'
-__date__ = '2017/12/13'
+__version__ = '0.0.32'
+__date__ = '2017/12/16'
 
 """
 
@@ -71,6 +71,7 @@ History:
   2017/11/01: 0.0.30 replaced hexdump and hexasciidump with cDump
   2017/11/04: added return codes -1 and 1
   2017/12/13: 0.0.31 corrected man
+  2017/12/16: 0.0.32 added indexQuiet to cPlugin
 
 Todo:
 """
@@ -868,6 +869,7 @@ def ExpandFilenameArguments(filenames):
 
 class cPluginParent():
     macroOnly = False
+    indexQuiet = False
 
 def LoadPlugins(plugins, plugindir, verbose):
     if plugins == '':
@@ -1451,8 +1453,8 @@ def OLESub(ole, prefix, rules, options):
                             indicator = 'm'
                 elif OLE10HeaderPresent(stream):
                     indicator = 'O'
+            index = '%s%d' % (prefix, counter)
             if not options.quiet:
-                index = '%s%d' % (prefix, counter)
                 line = '%3s: %s %s %s' % (index, indicator, lengthString, PrintableName(fname, orphan))
                 if indicator.lower() == 'm' and options.vbadecompress:
                     streamForExtra = SearchAndDecompress(stream)
@@ -1481,8 +1483,12 @@ def OLESub(ole, prefix, rules, options):
                     result = oPlugin.Analyze()
                     if oPlugin.ran:
                         if options.quiet:
-                            for line in result:
-                                print(MyRepr(line))
+                            if oPlugin.indexQuiet:
+                                if result != []:
+                                    print('%3s: %s' % (index, MyRepr(result[0])))
+                            else:
+                                for line in result:
+                                    print(MyRepr(line))
                         else:
                             print('               Plugin: %s ' % oPlugin.name)
                             for line in result:
