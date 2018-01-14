@@ -2,8 +2,8 @@
 
 __description__ = 'This is essentially a wrapper for xml.etree.ElementTree'
 __author__ = 'Didier Stevens'
-__version__ = '0.0.1'
-__date__ = '2017/12/16'
+__version__ = '0.0.2'
+__date__ = '2017/12/31'
 
 """
 
@@ -14,6 +14,8 @@ Use at your own risk
 History:
   2017/11/03: start
   2017/12/16: refactoring
+  2017/12/16: 0.0.2 added elementtext and attributes command
+  2017/12/31: added option -u
 
 Todo:
 """
@@ -25,6 +27,7 @@ import time
 import sys
 import textwrap
 import xml.etree.ElementTree
+import re
 
 def PrintManual():
     manual = r'''
@@ -39,7 +42,9 @@ It reads one or more files or stdin to parse XML files. If no file arguments are
 The first argument to the tool is a command, which can be:
  text
  wordtext
- 
+ elementtext
+ attributes
+
 Command text will extract all text from the elements in the XML file.
 Example:
 zipdump.py -s 4 -d test.docx | xmldump.py text
@@ -55,6 +60,133 @@ Second line.
 Third line
 https://DidierStevens.com
 Last line
+
+Command elementtext will extract all elements with their text from the XML file.
+Example:
+zipdump.py -s 4 -d test.docx | xmldump.py elementtext
+
+w:document: This is a test document.Second line.Third linehttps://DidierStevens.comLast line
+w:body: This is a test document.Second line.Third linehttps://DidierStevens.comLast line
+w:p: This is a test document.
+w:r: This is a test document.
+w:t: This is a test document.
+w:p: Second line.
+w:r: Second line.
+w:t: Second line.
+w:p: Third line
+w:r: Third line
+w:t: Third line
+w:bookmarkStart: 
+w:bookmarkEnd: 
+w:p: https://DidierStevens.com
+w:hyperlink: https://DidierStevens.com
+w:r: https://DidierStevens.com
+w:rPr: 
+w:rStyle: 
+w:t: https://DidierStevens.com
+w:p: Last line
+w:r: Last line
+w:t: Last line
+w:sectPr: 
+w:pgSz: 
+w:pgMar: 
+w:cols: 
+w:docGrid: 
+
+By default, the namespace URI (xmlns) is suppressed. Use option -u to include it.
+Example:
+zipdump.py -s 4 -d test.docx | xmldump.py -u elementtext
+
+{http://schemas.openxmlformats.org/wordprocessingml/2006/main}document: This is a test document.Second line.Third linehttps://DidierStevens.comLast line
+{http://schemas.openxmlformats.org/wordprocessingml/2006/main}body: This is a test document.Second line.Third linehttps://DidierStevens.comLast line
+{http://schemas.openxmlformats.org/wordprocessingml/2006/main}p: This is a test document.
+{http://schemas.openxmlformats.org/wordprocessingml/2006/main}r: This is a test document.
+{http://schemas.openxmlformats.org/wordprocessingml/2006/main}t: This is a test document.
+{http://schemas.openxmlformats.org/wordprocessingml/2006/main}p: Second line.
+{http://schemas.openxmlformats.org/wordprocessingml/2006/main}r: Second line.
+{http://schemas.openxmlformats.org/wordprocessingml/2006/main}t: Second line.
+{http://schemas.openxmlformats.org/wordprocessingml/2006/main}p: Third line
+{http://schemas.openxmlformats.org/wordprocessingml/2006/main}r: Third line
+{http://schemas.openxmlformats.org/wordprocessingml/2006/main}t: Third line
+{http://schemas.openxmlformats.org/wordprocessingml/2006/main}bookmarkStart: 
+{http://schemas.openxmlformats.org/wordprocessingml/2006/main}bookmarkEnd: 
+{http://schemas.openxmlformats.org/wordprocessingml/2006/main}p: https://DidierStevens.com
+{http://schemas.openxmlformats.org/wordprocessingml/2006/main}hyperlink: https://DidierStevens.com
+{http://schemas.openxmlformats.org/wordprocessingml/2006/main}r: https://DidierStevens.com
+{http://schemas.openxmlformats.org/wordprocessingml/2006/main}rPr: 
+{http://schemas.openxmlformats.org/wordprocessingml/2006/main}rStyle: 
+{http://schemas.openxmlformats.org/wordprocessingml/2006/main}t: https://DidierStevens.com
+{http://schemas.openxmlformats.org/wordprocessingml/2006/main}p: Last line
+{http://schemas.openxmlformats.org/wordprocessingml/2006/main}r: Last line
+{http://schemas.openxmlformats.org/wordprocessingml/2006/main}t: Last line
+{http://schemas.openxmlformats.org/wordprocessingml/2006/main}sectPr: 
+{http://schemas.openxmlformats.org/wordprocessingml/2006/main}pgSz: 
+{http://schemas.openxmlformats.org/wordprocessingml/2006/main}pgMar: 
+{http://schemas.openxmlformats.org/wordprocessingml/2006/main}cols: 
+{http://schemas.openxmlformats.org/wordprocessingml/2006/main}docGrid: 
+
+Command attributes will extract all attributes from the elements in the XML file.
+Example:
+zipdump.py -s 4 -d test.docx | xmldump.py attributes
+
+w:document
+  mc:Ignorable: w14 w15 w16se w16cid wp14
+w:body
+w:p
+  w:rsidRDefault: 006E3AD4
+  w:rsidR: 00F41D2A
+w:r
+w:t
+w:p
+  w:rsidRDefault: 006E3AD4
+  w:rsidR: 006E3AD4
+w:r
+w:t
+w:p
+  w:rsidRDefault: 006E3AD4
+  w:rsidR: 006E3AD4
+w:r
+w:t
+w:bookmarkStart
+  w:id: 0
+  w:name: _GoBack
+w:bookmarkEnd
+  w:id: 0
+w:p
+  w:rsidRDefault: 006D313B
+  w:rsidR: 006E3AD4
+w:hyperlink
+  w:history: 1
+  r:id: rId4
+w:r
+  w:rsidRPr: 0074025F
+  w:rsidR: 006E3AD4
+w:rPr
+w:rStyle
+  w:val: Hyperlink
+w:t
+w:p
+  w:rsidRDefault: 006E3AD4
+  w:rsidR: 006E3AD4
+w:r
+w:t
+w:sectPr
+  w:rsidR: 006E3AD4
+w:pgSz
+  w:h: 15840
+  w:w: 12240
+w:pgMar
+  w:left: 1440
+  w:header: 720
+  w:top: 1440
+  w:right: 1440
+  w:bottom: 1440
+  w:footer: 720
+  w:gutter: 0
+w:cols
+  w:space: 720
+w:docGrid
+  w:linePitch: 360
 
 By default, output is printed to the consolde (stdout). It can be directed to a file using option -o.
 '''
@@ -152,14 +284,39 @@ def XMLGetText(element):
         encoding = 'utf8'
     return xml.etree.ElementTree.tostring(element, encoding=encoding, method='text')
 
-def ExtractText(root, oOutput, options):
+def TransformTag(tag, dXMLNS, includeURI):
+    if includeURI:
+        return tag
+    elif tag.startswith('{'):
+        uri, separator, remainder = tag[1:].partition('}')
+        if uri in dXMLNS:
+            if dXMLNS[uri] == '':
+                return remainder
+            else:
+                return dXMLNS[uri] + ':' + remainder
+        else:
+            return tag
+    else:
+        return tag
+    
+def ExtractText(root, dXMLNS, oOutput, options):
     oOutput.Line(XMLGetText(root))
 
-def ExtractWordText(root, oOutput, options):
+def ExtractWordText(root, dXMLNS, oOutput, options):
     for element in root.iter('{http://schemas.openxmlformats.org/wordprocessingml/2006/main}p'):
         oOutput.Line(XMLGetText(element))
 
-dCommands = {'text': ExtractText, 'wordtext': ExtractWordText}
+def ExtractElementText(root, dXMLNS, oOutput, options):
+    for element in root.iter():
+        oOutput.Line('%s: %s' % (TransformTag(element.tag, dXMLNS, options.includeuri), XMLGetText(element)))
+
+def ExtractElementAttributes(root, dXMLNS, oOutput, options):
+    for element in root.iter():
+        oOutput.Line('%s' % (TransformTag(element.tag, dXMLNS, options.includeuri)))
+        for key, value in element.items():
+            oOutput.Line('  %s: %s' % (TransformTag(key, dXMLNS, options.includeuri), value))
+
+dCommands = {'text': ExtractText, 'wordtext': ExtractWordText, 'elementtext': ExtractElementText, 'attributes': ExtractElementAttributes}
 
 def ProcessTextFileSingle(command, filenames, oOutput, options):
     for filename in filenames:
@@ -167,11 +324,17 @@ def ProcessTextFileSingle(command, filenames, oOutput, options):
             fIn = sys.stdin
         else:
             fIn = open(filename, 'r')
-        root = xml.etree.ElementTree.parse(fIn).getroot()
+        data = fIn.read()
         if fIn != sys.stdin:
             fIn.close()
-        dCommands[command](root, oOutput, options)
-1
+        
+        dXMLNS = {}
+        for match in re.findall('xmlns(:([^=]+))?="([^"]+)"', data):
+            dXMLNS[match[2]] = match[1]
+        root = xml.etree.ElementTree.fromstring(data)
+
+        dCommands[command](root, dXMLNS, oOutput, options)
+
 def ProcessTextFile(command, filenames, options):
     oOutput = cOutputResult(options)
     ProcessTextFileSingle(command, filenames, oOutput, options)
@@ -190,6 +353,7 @@ https://DidierStevens.com'''
 
     oParser = optparse.OptionParser(usage='usage: %prog [options] command [[@]file ...]\n' + __description__ + moredesc, version='%prog ' + __version__)
     oParser.add_option('-m', '--man', action='store_true', default=False, help='Print manual')
+    oParser.add_option('-u', '--includeuri', action='store_true', default=False, help='Include URI for the tags')
     oParser.add_option('-o', '--output', type=str, default='', help='Output to file')
     (options, args) = oParser.parse_args()
 
