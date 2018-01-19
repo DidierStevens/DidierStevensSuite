@@ -2,8 +2,8 @@
 
 __description__ = 'This is essentialy a wrapper for the struct module'
 __author__ = 'Didier Stevens'
-__version__ = '0.0.3'
-__date__ = '2017/12/16'
+__version__ = '0.0.4'
+__date__ = '2018/01/19'
 
 """
 Source code put in public domain by Didier Stevens, no Copyright
@@ -19,6 +19,11 @@ History:
   2017/12/01: updated FilenameCheckHash to handle empty file: #
   2017/12/10: added manual
   2017/12/16: 0.0.3 added epoch to option -f
+  2017/12/16: 0.0.4 added representation to option -f
+  2017/12/17: continue
+  2018/01/02: added extra info for strings when option -f is used
+  2018/01/15: tweaking string output when option -f is used
+  2018/01/19: updated man
 
 Todo:
 """
@@ -38,6 +43,7 @@ import struct
 import string
 import math
 import time
+import hashlib
 if sys.version_info[0] >= 3:
     from io import BytesIO as DataIO
 else:
@@ -86,8 +92,25 @@ Example:
 format-bytes.py -f hib random.bin
 File: random.bin
  0:    <type 'int'>      26043       65bb  1970/01/01 07:14:03
- 1:    <type 'int'> -823256990  -3111e79e  
+ 1:    <type 'int'> -823256990  -3111e79e
  2:    <type 'int'>         58         3a  1970/01/01 00:00:58
+
+You can also specify how the parsed bytes should be represented. To achieve this, append a double colon character (:) to the format string followed by a representation character for each member.
+Valid representation characters are X (for hexadecimal), I (for integer) and E (for epoch).
+Example:
+
+C:\Demo>format-bytes.py -f hib:XIE random.bin
+File: random.bin
+ 0:    <type 'int'>       65bb
+ 1:    <type 'int'> -823256990
+ 2:    <type 'int'> 1970/01/01 00:00:58
+
+For strings, the output will include string length, ASCII representation of the string (first 10 bytes), hexadecimal representation (first 10 bytes), entropy and MD5 hash.
+
+C:\Demo>format-bytes.py -f h14s random.bin
+File: random.bin
+ 0:    <type 'int'>      26043       65bb  1970/01/01 07:14:03
+ 1:    <type 'str'>         14 .4b...:... 89346218eece3ac3179f 3.807355 e1647bd9711cdfee7959dee4ff956590
 
 FYI, Python struct module format characters are:
 
@@ -101,8 +124,8 @@ Character Byte order
 
 Format  C Type              Standard size
 -----------------------------------------
-x       pad byte   
-c       char                1  
+x       pad byte
+c       char                1
 b       signed              1
 B       unsigned char       1
 ?       _Bool               1
@@ -861,7 +884,7 @@ def FormatBytesData(data, position, options):
     if len(data) == 0:
         return
     bytes = [C2IIP2(d) for d in data]
-    
+
     if position < 0:
         prefix = ''
     else:
@@ -889,11 +912,145 @@ def FormatBytesData(data, position, options):
         return
     print(prefix + '16G: b %02X%02X%02X%02X-%02X%02X-%02X%02X-%02X%02X-%02X%02X%02X%02X%02X%02X m {%02X%02X%02X%02X-%02X%02X-%02X%02X-%02X%02X-%02X%02X%02X%02X%02X%02X}' % tuple(bytes[0:16] + bytes[3::-1] + bytes[5:3:-1] + bytes[7:5:-1] + bytes[8:16]))
 
+def CalculateByteStatistics(dPrevalence):
+    sumValues = sum(dPrevalence.values())
+    countNullByte = dPrevalence[0]
+    countControlBytes = 0
+    countWhitespaceBytes = 0
+    countUniqueBytes = 0
+    for iter in range(1, 0x21):
+        if chr(iter) in string.whitespace:
+            countWhitespaceBytes += dPrevalence[iter]
+        else:
+            countControlBytes += dPrevalence[iter]
+    countControlBytes += dPrevalence[0x7F]
+    countPrintableBytes = 0
+    for iter in range(0x21, 0x7F):
+        countPrintableBytes += dPrevalence[iter]
+    countHighBytes = 0
+    for iter in range(0x80, 0x100):
+        countHighBytes += dPrevalence[iter]
+    entropy = 0.0
+    for iter in range(0x100):
+        if dPrevalence[iter] > 0:
+            prevalence = float(dPrevalence[iter]) / float(sumValues)
+            entropy += - prevalence * math.log(prevalence, 2)
+            countUniqueBytes += 1
+    return sumValues, entropy, countUniqueBytes, countNullByte, countControlBytes, countWhitespaceBytes, countPrintableBytes, countHighBytes
+
+def ExtraInfoMD5(data):
+    if data == None:
+        return ''
+    return hashlib.md5(data).hexdigest()
+
+def ExtraInfoSHA1(data):
+    if data == None:
+        return ''
+    return hashlib.sha1(data).hexdigest()
+
+def ExtraInfoSHA256(data):
+    if data == None:
+        return ''
+    return hashlib.sha256(data).hexdigest()
+
+def ExtraInfoENTROPY(data):
+    if data == None:
+        return ''
+    dPrevalence = {iter: 0 for iter in range(0x100)}
+    for char in data:
+        dPrevalence[ord(char)] += 1
+    sumValues, entropy, countUniqueBytes, countNullByte, countControlBytes, countWhitespaceBytes, countPrintableBytes, countHighBytes = CalculateByteStatistics(dPrevalence)
+    return '%f' % entropy
+
+def ExtraInfoHEADHEX(data):
+    if data == None:
+        return ''
+    return binascii.hexlify(data[:16])
+
+def ExtraInfoHEADASCII(data):
+    if data == None:
+        return ''
+    return ''.join([IFF(ord(b) >= 32 and ord(b) < 128, b, '.') for b in data[:16]])
+
+def ExtraInfoTAILHEX(data):
+    if data == None:
+        return ''
+    return binascii.hexlify(data[-16:])
+
+def ExtraInfoTAILASCII(data):
+    if data == None:
+        return ''
+    return ''.join([IFF(ord(b) >= 32 and ord(b) < 128, b, '.') for b in data[-16:]])
+
+def ExtraInfoHISTOGRAM(data):
+    if data == None:
+        return ''
+    dPrevalence = {iter: 0 for iter in range(0x100)}
+    for char in data:
+        dPrevalence[ord(char)] += 1
+    result = []
+    count = 0
+    minimum = None
+    maximum = None
+    for iter in range(0x100):
+        if dPrevalence[iter] > 0:
+            result.append('0x%02x:%d' % (iter, dPrevalence[iter]))
+            count += 1
+            if minimum == None:
+                minimum = iter
+            else:
+                minimum = min(minimum, iter)
+            if maximum == None:
+                maximum = iter
+            else:
+                maximum = max(maximum, iter)
+    result.insert(0, '%d' % count)
+    result.insert(1, IFF(minimum == None, '', '0x%02x' % minimum))
+    result.insert(2, IFF(maximum == None, '', '0x%02x' % maximum))
+    return ','.join(result)
+
+def ExtraInfoBYTESTATS(data):
+    if data == None:
+        return ''
+    dPrevalence = {iter: 0 for iter in range(0x100)}
+    for char in data:
+        dPrevalence[ord(char)] += 1
+    sumValues, entropy, countUniqueBytes, countNullByte, countControlBytes, countWhitespaceBytes, countPrintableBytes, countHighBytes = CalculateByteStatistics(dPrevalence)
+    return '%d,%d,%d,%d,%d' % (countNullByte, countControlBytes, countWhitespaceBytes, countPrintableBytes, countHighBytes)
+
+def GenerateExtraInfo(extra, data):
+    if extra == '':
+        return ''
+    if extra.startswith('!') or extra.startswith('#'):
+        extra = extra[1:]
+    dExtras = {'%LENGTH%': lambda x: IFF(data == None, '', lambda: '%d' % len(data)),
+               '%MD5%': ExtraInfoMD5,
+               '%SHA1%': ExtraInfoSHA1,
+               '%SHA256%': ExtraInfoSHA256,
+               '%ENTROPY%': ExtraInfoENTROPY,
+               '%HEADHEX%': ExtraInfoHEADHEX,
+               '%HEADASCII%': ExtraInfoHEADASCII,
+               '%TAILHEX%': ExtraInfoTAILHEX,
+               '%TAILASCII%': ExtraInfoTAILASCII,
+               '%HISTOGRAM%': ExtraInfoHISTOGRAM,
+               '%BYTESTATS%': ExtraInfoBYTESTATS,
+              }
+    for variable in dExtras:
+        if variable in extra:
+            extra = extra.replace(variable, dExtras[variable](data))
+    return extra.replace(r'\t', '\t').replace(r'\n', '\n')
+
 def FormatBytesSingle(filename, cutexpression, options):
     oBinaryFile = cBinaryFile(filename, C2BIP3(options.password), options.noextraction, options.literalfilenames)
+    formats = options.format.split(':')
+    if len(formats) == 2:
+        format, representation = formats
+    else:
+        format = formats[0]
+        representation = ''
     if cutexpression == '':
-        if options.format != '':
-            data = oBinaryFile.read(struct.calcsize(options.format))
+        if format != '':
+            data = oBinaryFile.read(struct.calcsize(format))
         else:
             data = oBinaryFile.read(options.count * options.step + 16)
     else:
@@ -901,13 +1058,24 @@ def FormatBytesSingle(filename, cutexpression, options):
     oBinaryFile.close()
     if filename != '':
         print('File: %s' % filename)
-    if options.format == '':
+    if format == '':
         print('s:signed u:unsigned l:little-endian b:big-endian m:mixed-endian')
-    if options.format != '':
-        size = struct.calcsize(options.format)
-        for index, element in enumerate(struct.unpack(options.format, data[0:size])):
+    if format != '':
+        size = struct.calcsize(format)
+        for index, element in enumerate(struct.unpack(format, data[0:size])):
             if isinstance(element, int):
-                print('%2d: %15s %10d %10x  %s' % (index, type(element), element, element, IFF(element < 0, '', lambda: TimestampUTC(element))))
+                if representation == '':
+                    print('%2d: %15s %10d %10x  %s' % (index, type(element), element, element, IFF(element < 0, '', lambda: TimestampUTC(element))))
+                elif representation[index] == 'X':
+                    print('%2d: %15s %10x' % (index, type(element), element))
+                elif representation[index] == 'I':
+                    print('%2d: %15s %10d' % (index, type(element), element))
+                elif representation[index] == 'E':
+                    print('%2d: %15s %s' % (index, type(element), IFF(element < 0, '', lambda: TimestampUTC(element))))
+            elif isinstance(element, str):
+                print('%2d: %15s %10d %s %s %s %s' % (index, type(element), len(element), ExtraInfoHEADASCII(element[:10]), ExtraInfoHEADHEX(element[:10]), ExtraInfoENTROPY(element), ExtraInfoMD5(element)))
+            elif isinstance(element, bytes):
+                print('%2d: %15s %10d %s %s %s %s' % (index, type(element), len(element), ExtraInfoHEADASCII3(element[:10]), ExtraInfoHEADHEX(element[:10]), ExtraInfoENTROPY(element), ExtraInfoMD5(element)))
             else:
                 print('%2d: %15s %s' % (index, type(element), str(element)))
     elif options.count == 1:
