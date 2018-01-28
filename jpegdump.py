@@ -3,7 +3,7 @@
 __description__ = 'JPEG file analysis tool'
 __author__ = 'Didier Stevens'
 __version__ = '0.0.3'
-__date__ = '2017/12/18'
+__date__ = '2018/01/28'
 
 """
 Source code put in public domain by Didier Stevens, no Copyright
@@ -18,6 +18,7 @@ History:
   2017/11/01: updated cDump
   2017/12/01: updated FilenameCheckHash to handle empty file: #
   2017/12/18: refactoring; man page
+  2018/01/28: added option -c
 
 Todo:
 """
@@ -76,7 +77,7 @@ The second field (p=) is the position field: it gives the position of the marker
 The third field (d=) is the difference field: it gives the number of bytes between this sequence and the previous sequence, expressed as a decimal number. This value should be 0 for well-formed jpeg files.
 The fourth field (m=) is the marker field: 2 hexadecimal bytes (0xFF??) indicating the type of the sequence followed by an acronym of the sequency type. This acronym can be:
 
-SOI:  Start Of Image	
+SOI:  Start Of Image
 SOF0: Start Of Frame (baseline DCT)
 SOF2: Start Of Frame (progressive DCT)
 DHT:  Define Huffman Table
@@ -149,7 +150,39 @@ Use option -d for a binary dump, and option -u for a binary dump with byte unstu
 
 By default, jpegdump will start to analyze the first marker it finds, regardless of its type.
 To force jpegdump to search for and start with SOI markers, use option -f. With option -f, analysis will stop when an unknown marker is detected, and the next SOI marker will be searched.
-This option can be handy to "carve" memory dumps or documents like PDF files.
+Example:
+
+jpegdump.py -f chrome.dmp
+File: chrome.dmp
+Found SOI:
+  1 p=0x000d4ebf    : m=ffd8 SOI
+  2 p=0x000d4ec6 d=5: m=ffff       l=53252 e=3.280114 a=40.576499
+Found SOI:
+  1 p=0x0018594b    : m=ffd8 SOI
+  2 p=0x001859d4 d=135: m=ff03       l=    0 e=0.000000 a=0.000000
+...
+
+Option f can output a lot of markers who are actually not part of a JPEG image. To use jpegdump to "carve" memory dumps or documents like PDF files, combine option -f with option -c (compliant). Used together with option -c, jpegdump will only report sequences of markers that are "compliant".
+In this context, a compliant image is a sequence of markers that starts with SOI and ends with EOI, and where the difference (d=) between markers is 0.
+Example:
+
+jpegdump.py -f -c chrome.dmp
+File: chrome.dmp
+Found SOI:
+  1 p=0x01854e2f    : m=ffd8 SOI
+  2 p=0x01854e31 d=0: m=ffd9 EOI
+Found SOI:
+  1 p=0x02144d5b    : m=ffd8 SOI
+  2 p=0x02144d5d d=0: m=ffe1 APP1  l=   24 e=1.945660 a=15.857143
+  3 p=0x02144d77 d=0: m=ffec APP12 l=   17 e=2.596792 a=23.857143
+  4 p=0x02144d8a d=0: m=ffee APP14 l=   14 e=2.751629 a=49.818182
+  5 p=0x02144d9a d=0: m=ffdb DQT   l=  132 e=3.272901 a=1.573643 remark: 130/65 = 2.000000
+  6 p=0x02144e20 d=0: m=ffc0 SOF0  l=   17 e=2.872906 a=47.785714 remark: p=8 h=222 w=574 c=3
+  7 p=0x02144e33 d=0: m=ffc4 DHT   l=  160 e=4.721659 a=27.662420
+  8 p=0x02144ed5 d=0: m=ffda SOS   l=   12 e=2.446439 a=21.222222 remark: c=3
+                                  entropy-coded data: l=8481 e=7.528572 a=77.173467 #ff00=22
+  9 p=0x02147004 d=0: m=ffd9 EOI
+...
 
 
 As stated at the beginning of this manual, this tool is very versatile when it comes to handling files. This will be explained now.
@@ -923,6 +956,22 @@ def StdoutWriteChunked(data):
                 return
             data = data[10000:]
 
+class cOutput():
+    def __init__(self, options=None):
+        self.options = options
+        self.lines = []
+
+    def PrintC(self, line):
+        if self.options == None or self.options.select == '':
+            self.Print(line)
+
+    def Print(self, line):
+        self.lines.append(line)
+
+    def Output(self):
+        for line in self.lines:
+            print(line)
+
 def Print(line, options=None):
     if options == None or options.select == '':
         print(line)
@@ -1003,6 +1052,7 @@ def GetDelta(found, endOfPrevious, noPrevious):
         return 'd=%d' % (found - endOfPrevious)
 
 def ProcessJPEGFileSub(data, options, startposition=0):
+    oOutput = cOutput(options)
     counter = 1
     position = startposition
     ff00Counter = 0
@@ -1021,12 +1071,12 @@ def ProcessJPEGFileSub(data, options, startposition=0):
                 ff00Counter += 1
             position = found + 1
         elif ffdaFlag and markerType >= 0xD0 and markerType <= 0xD7:
-            Print('    p=0x%08x    : m=%02x%02x %s' % (found, struct.unpack('Bx', marker[0:2])[0], markerType, markerName), options)
+            oOutput.PrintC('    p=0x%08x    : m=%02x%02x %s' % (found, struct.unpack('Bx', marker[0:2])[0], markerType, markerName))
             position = found + 1
         else:
             if ffdaFlag:
                 stats = CalculateByteStatistics(data=data[endOfPrevious:found])
-                Print('                                  entropy-coded data: l=%d e=%f a=%f #ff00=%d' % ((found - endOfPrevious), stats[1], ConvertNone(stats[10], 0.0), ff00Counter), options)
+                oOutput.PrintC('                                  entropy-coded data: l=%d e=%f a=%f #ff00=%d' % ((found - endOfPrevious), stats[1], ConvertNone(stats[10], 0.0), ff00Counter))
                 ff00Counter = 0
                 if options.select == '%di' % (counter - 1):
                     if options.dump:
@@ -1036,17 +1086,21 @@ def ProcessJPEGFileSub(data, options, startposition=0):
                         IfWIN32SetBinary(sys.stdout)
                         StdoutWriteChunked(data[endOfPrevious:found].replace(C2BIP3('\xFF\x00'), C2BIP3('\xFF')))
                     elif options.hexdump:
-                        Print(cDump(data[endOfPrevious:found], '      ', endOfPrevious).HexDump()[:-1])
+                        oOutput.Print(cDump(data[endOfPrevious:found], '      ', endOfPrevious).HexDump()[:-1])
                     else:
-                        Print(cDump(data[endOfPrevious:found], '      ', endOfPrevious).HexAsciiDump()[:-1])
+                        oOutput.Print(cDump(data[endOfPrevious:found], '      ', endOfPrevious).HexAsciiDump()[:-1])
                 endOfPrevious = found
                 noPrevious = False
             if markerType == 0xda:
                 ffdaFlag = True
             else:
                 ffdaFlag = False
+            if options.findsoi and options.compliant and noPrevious == False and endOfPrevious != found:
+                return None
             if markerType >= 0xD0 and markerType <= 0xD9:
-                Print('%3d p=0x%08x %s: m=%02x%02x %s' % (counter, found, GetDelta(found, endOfPrevious, noPrevious), struct.unpack('Bx', marker[0:2])[0], markerType, markerName), options)
+                oOutput.PrintC('%3d p=0x%08x %s: m=%02x%02x %s' % (counter, found, GetDelta(found, endOfPrevious, noPrevious), struct.unpack('Bx', marker[0:2])[0], markerType, markerName))
+                if options.findsoi and options.compliant and markerType == 0xD9:
+                    return oOutput
                 position = found + 2
                 endOfPrevious = position
                 noPrevious = False
@@ -1064,35 +1118,40 @@ def ProcessJPEGFileSub(data, options, startposition=0):
                 if markerType == 0xDA and len(data[found+4:found+2+size]) >= 1:
                     info = struct.unpack('>B', data[found+4:found+2+size][:1])
                     line += ' remark: c=%d' % info
-                Print(line, options)
+                oOutput.PrintC(line)
                 if options.select == str(counter):
                     if options.dump:
                         IfWIN32SetBinary(sys.stdout)
                         StdoutWriteChunked(data[found+4:found+2+size])
                     elif options.hexdump:
-                        Print(cDump(data[found+4:found+2+size], '', found + 4).HexDump()[:-1])
+                        oOutput.Print(cDump(data[found+4:found+2+size], '', found + 4).HexDump()[:-1])
                     else:
-                        Print(cDump(data[found+4:found+2+size], '', found + 4).HexAsciiDump()[:-1])
+                        oOutput.Print(cDump(data[found+4:found+2+size], '', found + 4).HexAsciiDump()[:-1])
                 position = found + 2 + size
                 endOfPrevious = position
                 noPrevious = False
                 counter += 1
         if options.findsoi and markerName == '' and markerType != 0x00:
-            return
+            if options.compliant:
+                return None
+            else:
+                return oOutput
+        markerTypePrevious = markerType
     trailing = len(data) - position
     if trailing > 0:
         stats = CalculateByteStatistics(data=data[position:])
-        Print('%3d p=0x%08x    : *trailing*  l=%5d e=%f' % (counter, position, len(data) - position, stats[1]), options)
+        oOutput.PrintC('%3d p=0x%08x    : *trailing*  l=%5d e=%f' % (counter, position, len(data) - position, stats[1]))
         if options.select == str(counter):
             if options.dump:
                 IfWIN32SetBinary(sys.stdout)
                 StdoutWriteChunked(data[position:])
             elif options.hexdump:
-                Print(cDump(data[position:], '', position).HexDump()[:-1])
+                oOutput.Print(cDump(data[position:], '', position).HexDump()[:-1])
             else:
-                Print(cDump(data[position:], '', position).HexAsciiDump()[:-1])
+                oOutput.Print(cDump(data[position:], '', position).HexAsciiDump()[:-1])
     elif trailing < 0:
-        Print('                                   *warning* %d byte(s) missing' % -trailing, options)
+        oOutput.PrintC('                                   *warning* %d byte(s) missing' % -trailing)
+    return oOutput
 
 def ProcessJPEGFile(filename, cutexpression, options):
     data = CutData(cBinaryFile(filename, C2BIP3(options.password), options.noextraction, options.literalfilenames).Data(), cutexpression)
@@ -1103,11 +1162,13 @@ def ProcessJPEGFile(filename, cutexpression, options):
             found = data.find(C2BIP3('\xFF\xD8'), position)
             if found == -1:
                 break
-            Print('Found SOI:', options)
-            ProcessJPEGFileSub(data, options, found)
+            oOutput = ProcessJPEGFileSub(data, options, found)
+            if oOutput != None:
+                Print('Found SOI:', options)
+                oOutput.Output()
             position = found + 1
     else:
-        ProcessJPEGFileSub(data, options)
+        ProcessJPEGFileSub(data, options).Output()
 
 def ProcessJPEGFiles(filenames, options):
     for filename, cutexpression in filenames:
@@ -1131,6 +1192,7 @@ https://DidierStevens.com'''
     oParser.add_option('-a', '--asciidump', action='store_true', default=False, help='Perform HEX/ASCII dump')
     oParser.add_option('-x', '--hexdump', action='store_true', default=False, help='Perform HEX dump')
     oParser.add_option('-f', '--findsoi', action='store_true', default=False, help='Find SOI markers')
+    oParser.add_option('-c', '--compliant', action='store_true', default=False, help='Combined with --findsoi, report compliant images only')
     (options, args) = oParser.parse_args()
 
     if options.man:
