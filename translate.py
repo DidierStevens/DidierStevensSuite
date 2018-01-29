@@ -2,8 +2,8 @@
 
 __description__ = 'Translate bytes according to a Python expression'
 __author__ = 'Didier Stevens'
-__version__ = '2.5.1'
-__date__ = '2017/09/09'
+__version__ = '2.5.2'
+__date__ = '2018/01/29'
 
 """
 
@@ -33,6 +33,7 @@ History:
   2017/07/29: added -2 option
   2017/08/09: 2.5.1 #e# chr can take a second argument
   2017/09/09: added functions Sani1 and Sani2 to help with input/output sanitization
+  2018/01/29: 2.5.2 added functions GzipD and ZlibD; and fixed stdin/stdout for Python 3
 
 Todo:
 """
@@ -45,6 +46,8 @@ import re
 import math
 import binascii
 import random
+import zlib
+import gzip
 try:
     from StringIO import StringIO
 except ImportError:
@@ -104,6 +107,7 @@ Output: ABCD
 Option -e (execute) is used to execute Python commands before the command is executed. This can, for example, be used to import modules.
 Here is an example to decompress a Flash file (.swf):
  translate.py -f -e "import zlib" sample.swf "lambda b: zlib.decompress(b[8:])"
+You can use build in function ZlibD too, and GzipD for gzip decompression.
 
 A second file can be used as input with option -2. The value of the current byte of the second input file is stored in variable byte2 (this too advances byte per byte together with the primary input file).
 
@@ -147,6 +151,12 @@ def Sani2(byte):
     if byte >= 0x80:
         return 0x20
     return byte
+
+def GzipD(data):
+    return gzip.GzipFile('', 'r', fileobj=StringIO(data)).read()
+
+def ZlibD(data):
+    return zlib.decompress(data)
 
 # CIC: Call If Callable
 def CIC(expression):
@@ -463,20 +473,26 @@ def Transform(fIn, fIn2, fOut, commandPython):
 
 #Fix for http://bugs.python.org/issue11395
 def StdoutWriteChunked(data):
-    while data != '':
-        sys.stdout.write(data[0:10000])
-        try:
-            sys.stdout.flush()
-        except IOError:
-            return
-        data = data[10000:]
+    if sys.version_info[0] > 2:
+        sys.stdout.buffer.write(data)
+    else:
+        while data != '':
+            sys.stdout.write(data[0:10000])
+            try:
+                sys.stdout.flush()
+            except IOError:
+                return
+            data = data[10000:]
 
 def Translate(filenameInput, commandPython, options):
     if filenameInput == '':
         if sys.platform == 'win32':
             import msvcrt
             msvcrt.setmode(sys.stdin.fileno(), os.O_BINARY)
-        fIn = sys.stdin
+        try:
+            fIn = sys.stdin.buffer
+        except:
+            fIn = sys.stdin
     else:
         decoded = FilenameCheckHash(filenameInput)
         if decoded == '':
@@ -542,6 +558,8 @@ Extra functions:
   IFF(expression, valueTrue, valueFalse)
   Sani1(byte)
   Sani2(byte)
+  ZlibD(bytes)
+  GzipD(bytes)
 Variable "position" is an index into the input file, starting at 0
 
 Source code put in the public domain by Didier Stevens, no Copyright
