@@ -2,8 +2,8 @@
 
 __description__ = 'Analyze RTF files'
 __author__ = 'Didier Stevens'
-__version__ = '0.0.6'
-__date__ = '2017/12/10'
+__version__ = '0.0.7'
+__date__ = '2017/12/24'
 
 """
 
@@ -32,6 +32,7 @@ History:
   2017/02/11: 0.0.5 added \dde000... handling; added option -E
   2017/12/09: 0.0.6 added longestContiguousHexstring; extra info -f O
   2017/12/10: cDump & YARACompile
+  2017/12/24: 0.0.7 made changes level 0 -> remainder
 
 Todo:
 """
@@ -672,19 +673,25 @@ def RTFSub(oStringIO, prefix, rules, options):
         sequence.append(cIteminfo(0, sequence[0].endPosition + 1, len(rtfdata) - 1, 0))
     dAnalysis = {}
     for oIteminfo in sequence:
-        oMatch = re.match(r'(\\\*)?\\[a-z]+(-?[0-9]+)? ?', rtfdata[oIteminfo.beginPosition + 1:])
         controlWord = ''
-        if oMatch != None:
-            controlWord = oMatch.group(0)
-        beginContent = oIteminfo.beginPosition + 1 + len(controlWord)
-        endContent = oIteminfo.endPosition - 1
-        if beginContent < endContent:
-            content = rtfdata[beginContent:endContent + 1]
+        if oIteminfo.level != 0:
+            oMatch = re.match(r'(\\\*)?\\[a-z]+(-?[0-9]+)? ?', rtfdata[oIteminfo.beginPosition + 1:])
+            if oMatch != None:
+                controlWord = oMatch.group(0)
+            beginContent = oIteminfo.beginPosition + 1 + len(controlWord)
+            endContent = oIteminfo.endPosition - 1
+            if beginContent < endContent:
+                content = rtfdata[beginContent:endContent + 1]
+            else:
+                content = ''
         else:
-            content = ''
+            content = rtfdata[oIteminfo.beginPosition:]
         hexstring, longestContiguousHexstring, countUnexpectedCharacters = ExtractHex(content)
-        leader = '%sLevel %2d                      ' % (' ' * (oIteminfo.level - 1), oIteminfo.level)
-        dAnalysis[counter] = cAnalysis(counter, leader, oIteminfo.level, oIteminfo.beginPosition, oIteminfo.endPosition, oIteminfo.countChildren, countUnexpectedCharacters, controlWord, content, hexstring, longestContiguousHexstring, ExtractOleInfo(HexDecode(hexstring, options)))
+        if oIteminfo.level == 0:
+            leader = 'Remainder      '
+        else:
+            leader = '%sLevel %2d                      ' % (' ' * (oIteminfo.level - 1), oIteminfo.level)
+        dAnalysis[counter] = cAnalysis(counter, leader, oIteminfo.level, oIteminfo.beginPosition, oIteminfo.endPosition + IFF(oIteminfo.level == 0, 1, 0), oIteminfo.countChildren, countUnexpectedCharacters, controlWord, content, hexstring, longestContiguousHexstring, ExtractOleInfo(HexDecode(hexstring, options)))
         counter += 1
 
     if options.select == '':
@@ -699,6 +706,8 @@ def RTFSub(oStringIO, prefix, rules, options):
                     print(line)
                     if dAnalysis[counter].oleInfo != []:
                         print('      Name: %s Size: %d md5: %s magic: %s' % (repr(dAnalysis[counter].oleInfo[0]), dAnalysis[counter].oleInfo[2], dAnalysis[counter].oleInfo[3], dAnalysis[counter].oleInfo[4]))
+                    if dAnalysis[counter].level == 0:
+                        print('      Left curly braces = %d  Right curly braces = %d ' % (dAnalysis[counter].content.count('{'), dAnalysis[counter].content.count('}')))
                     linePrinted = True
                 elif dAnalysis[counter].content != None:
                     stream = HexDecodeIfRequested(dAnalysis[counter], options)
