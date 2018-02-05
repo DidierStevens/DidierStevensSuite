@@ -2,8 +2,8 @@
 
 __description__ = "Program to evaluate a Python expression for each line in the provided text file(s)"
 __author__ = 'Didier Stevens'
-__version__ = '0.0.2'
-__date__ = '2017/07/23'
+__version__ = '0.0.3'
+__date__ = '2018/02/05'
 
 """
 
@@ -19,6 +19,7 @@ History:
   2017/06/05: Added SBC
   2017/06/11: added option -e
   2017/07/23: updated man
+  2018/02/05: 0.0.3 added option -i
 
 Todo:
 """
@@ -101,6 +102,8 @@ The lines are written to standard output, except when option -o is used. When op
 An extra Python script (for example with custom definitions) can be loaded using option -s.
 
 Option -e (execute) is used to execute Python commands before the command is executed. This can, for example, be used to import modules.
+
+If an error occurs when the Python expression is evaluated, the program will report the error and stop. This behavior can be changed with option -i (ignore): using this option, no errors will be reported when evaluating the Python expression and the program will continue to run.
 '''
     for line in manual.split('\n'):
         print(textwrap.fill(line))
@@ -248,7 +251,13 @@ def PythonPerLineSingle(expression, filename, oOutput, options):
     else:
         fIn = open(filename, 'r')
     for line in ProcessFile(fIn, False):
-        result = eval(expression.replace('{}', repr(line)))
+        expressionToEvaluate = expression.replace('{}', repr(line))
+        try:
+            result = eval(expressionToEvaluate)
+        except:
+            result = []
+            if not options.ignore:
+                raise
         if not isinstance(result, list):
             result = [result]
         for item in result:
@@ -296,6 +305,7 @@ https://DidierStevens.com'''
     oParser.add_option('-s', '--script', type=str, default='', help='Script with definitions to include')
     oParser.add_option('-e', '--execute', default='', help='Commands to execute')
     oParser.add_option('-r', '--range', type=str, default='', help='Parameters to generate input with xrange')
+    oParser.add_option('-i', '--ignore', action='store_true', default=False, help='Ignore errors when evaluating the expression')
     (options, args) = oParser.parse_args()
 
     if options.man:
