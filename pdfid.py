@@ -2,8 +2,8 @@
 
 __description__ = 'Tool to test a PDF file'
 __author__ = 'Didier Stevens'
-__version__ = '0.2.3'
-__date__ = '2017/11/05'
+__version__ = '0.2.4'
+__date__ = '2018/01/29'
 
 """
 
@@ -49,7 +49,10 @@ History:
   2015/08/13: added plugin Instructions method
   2016/04/12: added option literal
   2017/10/29: added pdfid.ini support
-  2017/11/05= V0.2.3: added option -n
+  2017/11/05: V0.2.3: added option -n
+  2018/01/03: V0.2.4: bugfix entropy calculation for PDFs without streams; sample 28cb208d976466b295ee879d2d233c8a https://twitter.com/DubinRan/status/947783629123416069
+  2018/01/15: bugfix ConfigParser privately reported
+  2018/01/29: bugfix oPDFEOF.cntCharsAfterLastEOF when no %%EOF
 
 Todo:
   - update XML example (entropy, EOF)
@@ -69,13 +72,14 @@ import json
 import zipfile
 import collections
 import glob
-import ConfigParser
-try:
-    import urllib2
-    urllib23 = urllib2
-except:
-    import urllib.request
-    urllib23 = urllib.request
+if sys.version_info[0] >= 3:
+    import urllib.request as urllib23
+else:
+    import urllib2 as urllib23
+if sys.version_info[0] >= 3:
+    import configparser as ConfigParser
+else:
+    import ConfigParser
 
 #Convert 2 Bytes If Python 3
 def C2BIP3(string):
@@ -240,7 +244,10 @@ class cEntropy:
         allCount = sum(self.allBucket)
         streamCount = sum(self.streamBucket)
         nonStreamCount = sum(self.nonStreamBucket)
-        return (allCount, sum(map(lambda x: fEntropy(x, allCount), self.allBucket)), streamCount, sum(map(lambda x: fEntropy(x, streamCount), self.streamBucket)), nonStreamCount, sum(map(lambda x: fEntropy(x, nonStreamCount), self.nonStreamBucket)))
+        if streamCount == 0:
+            return (allCount, sum(map(lambda x: fEntropy(x, allCount), self.allBucket)), streamCount, None, nonStreamCount, sum(map(lambda x: fEntropy(x, nonStreamCount), self.nonStreamBucket)))
+        else:
+            return (allCount, sum(map(lambda x: fEntropy(x, allCount), self.allBucket)), streamCount, sum(map(lambda x: fEntropy(x, streamCount), self.streamBucket)), nonStreamCount, sum(map(lambda x: fEntropy(x, nonStreamCount), self.nonStreamBucket)))
 
 class cPDFEOF:
     def __init__(self):
@@ -553,7 +560,10 @@ def PDFiD(file, allNames=False, extraData=False, disarm=False, force=False):
         (countAll, entropyAll , countStream, entropyStream, countNonStream, entropyNonStream) = oEntropy.calc()
         attEntropyAll.nodeValue = '%f' % entropyAll
         attCountAll.nodeValue = '%d' % countAll
-        attEntropyStream.nodeValue = '%f' % entropyStream
+        if entropyStream == None:
+            attEntropyStream.nodeValue = 'N/A     '
+        else:
+            attEntropyStream.nodeValue = '%f' % entropyStream
         attCountStream.nodeValue = '%d' % countStream
         attEntropyNonStream.nodeValue = '%f' % entropyNonStream
         attCountNonStream.nodeValue = '%d' % countNonStream
@@ -570,7 +580,10 @@ def PDFiD(file, allNames=False, extraData=False, disarm=False, force=False):
     xmlDoc.documentElement.setAttributeNode(attCountCharsAfterLastEOF)
     if oPDFEOF != None:
         attCountEOF.nodeValue = '%d' % oPDFEOF.cntEOFs
-        attCountCharsAfterLastEOF.nodeValue = '%d' % oPDFEOF.cntCharsAfterLastEOF
+        if oPDFEOF.cntEOFs > 0:
+            attCountCharsAfterLastEOF.nodeValue = '%d' % oPDFEOF.cntCharsAfterLastEOF
+        else:
+            attCountCharsAfterLastEOF.nodeValue = ''
     else:
         attCountEOF.nodeValue = ''
         attCountCharsAfterLastEOF.nodeValue = ''

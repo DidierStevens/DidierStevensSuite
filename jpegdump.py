@@ -2,8 +2,8 @@
 
 __description__ = 'JPEG file analysis tool'
 __author__ = 'Didier Stevens'
-__version__ = '0.0.3'
-__date__ = '2018/01/28'
+__version__ = '0.0.4'
+__date__ = '2018/01/30'
 
 """
 Source code put in public domain by Didier Stevens, no Copyright
@@ -19,6 +19,7 @@ History:
   2017/12/01: updated FilenameCheckHash to handle empty file: #
   2017/12/18: refactoring; man page
   2018/01/28: added option -c
+  2018/01/30: 0.0.4 added option -e
 
 Todo:
 """
@@ -183,6 +184,8 @@ Found SOI:
                                   entropy-coded data: l=8481 e=7.528572 a=77.173467 #ff00=22
   9 p=0x02147004 d=0: m=ffd9 EOI
 ...
+
+Option -e can be used with option -f to extract all found images to disk. Images are written to the current directory with name AAA.jpeg, where AAA is the hexadecimal address of the position of the image in the file.
 
 
 As stated at the beginning of this manual, this tool is very versatile when it comes to handling files. This will be explained now.
@@ -1059,6 +1062,7 @@ def ProcessJPEGFileSub(data, options, startposition=0):
     ffdaFlag = False
     endOfPrevious = startposition
     noPrevious = True
+    positionSOI = None
     while True:
         found = data.find(C2BIP3('\xFF'), position)
         if found == -1:
@@ -1098,9 +1102,11 @@ def ProcessJPEGFileSub(data, options, startposition=0):
             if options.findsoi and options.compliant and noPrevious == False and endOfPrevious != found:
                 return None
             if markerType >= 0xD0 and markerType <= 0xD9:
+                if positionSOI == None and markerType == 0xD8:
+                    positionSOI = found
                 oOutput.PrintC('%3d p=0x%08x %s: m=%02x%02x %s' % (counter, found, GetDelta(found, endOfPrevious, noPrevious), struct.unpack('Bx', marker[0:2])[0], markerType, markerName))
                 if options.findsoi and options.compliant and markerType == 0xD9:
-                    return oOutput
+                    return oOutput, positionSOI, found
                 position = found + 2
                 endOfPrevious = position
                 noPrevious = False
@@ -1135,7 +1141,7 @@ def ProcessJPEGFileSub(data, options, startposition=0):
             if options.compliant:
                 return None
             else:
-                return oOutput
+                return oOutput, positionSOI, None
         markerTypePrevious = markerType
     trailing = len(data) - position
     if trailing > 0:
@@ -1151,7 +1157,7 @@ def ProcessJPEGFileSub(data, options, startposition=0):
                 oOutput.Print(cDump(data[position:], '', position).HexAsciiDump()[:-1])
     elif trailing < 0:
         oOutput.PrintC('                                   *warning* %d byte(s) missing' % -trailing)
-    return oOutput
+    return oOutput, None, None
 
 def ProcessJPEGFile(filename, cutexpression, options):
     data = CutData(cBinaryFile(filename, C2BIP3(options.password), options.noextraction, options.literalfilenames).Data(), cutexpression)
@@ -1162,13 +1168,17 @@ def ProcessJPEGFile(filename, cutexpression, options):
             found = data.find(C2BIP3('\xFF\xD8'), position)
             if found == -1:
                 break
-            oOutput = ProcessJPEGFileSub(data, options, found)
-            if oOutput != None:
+            result = ProcessJPEGFileSub(data, options, found)
+            if result != None:
                 Print('Found SOI:', options)
-                oOutput.Output()
+                result[0].Output()
+                if options.extract and result[1] != None and result[2] != None and result[2] - result[1] > 2:
+                    open('%08x.jpeg' % result[1], 'wb').write(data[result[1]:result[2]+2])
             position = found + 1
     else:
-        ProcessJPEGFileSub(data, options).Output()
+        result = ProcessJPEGFileSub(data, options)
+        if result != None:
+            result[0].Output()
 
 def ProcessJPEGFiles(filenames, options):
     for filename, cutexpression in filenames:
@@ -1193,6 +1203,7 @@ https://DidierStevens.com'''
     oParser.add_option('-x', '--hexdump', action='store_true', default=False, help='Perform HEX dump')
     oParser.add_option('-f', '--findsoi', action='store_true', default=False, help='Find SOI markers')
     oParser.add_option('-c', '--compliant', action='store_true', default=False, help='Combined with --findsoi, report compliant images only')
+    oParser.add_option('-e', '--extract', action='store_true', default=False, help='Combined with --findsoi, extract images to disk')
     (options, args) = oParser.parse_args()
 
     if options.man:

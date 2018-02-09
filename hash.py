@@ -2,8 +2,8 @@
 
 __description__ = 'This is essentialy a wrapper for the hashlib module'
 __author__ = 'Didier Stevens'
-__version__ = '0.0.1'
-__date__ = '2017/12/02'
+__version__ = '0.0.2'
+__date__ = '2018/02/09'
 
 """
 Source code put in public domain by Didier Stevens, no Copyright
@@ -14,6 +14,7 @@ History:
   2017/11/29: start
   2017/12/01: started man
   2017/12/02: finished man
+  2018/02/09: added option --recursedir
 
 Todo:
 """
@@ -33,6 +34,7 @@ import struct
 import string
 import math
 import hashlib
+import fnmatch
 if sys.version_info[0] >= 3:
     from io import BytesIO as DataIO
 else:
@@ -248,7 +250,9 @@ Wildcards are supported too. The classic *, ? and [] wildcard characters are sup
 
 tool.py C:\Windows\*.exe C:\Windows\*.dll
 
-To prevent the tool from processing file arguments with wildcard characters or special initial characters (@ and #) differently, but to process them as normal files, use option --literalfilenames.
+This will process all .exe and .dll files inside the directory C:\Windows, but it will not process files inside subdirectories of directory C:\Windows. To process files inside subdirectories too, use option --recursedir (recurse directories).
+
+To prevent the tool from processing file arguments with wildcard characters or special initial characters (@ and #) differently, but to process them as normal files, use option --literalfilenames. This option can not be used together with option --recursedir.
 
 File arguments that start with character # have special meaning. These are not processed as actual files on disk (except when option --literalfilenames is used), but as file arguments that specify how to "generate" the file content.
 
@@ -763,7 +767,7 @@ def Glob(filename):
     else:
         return filenames
 
-def ExpandFilenameArguments(filenames, literalfilenames=False):
+def ExpandFilenameArguments(filenames, literalfilenames=False, recursedir=False):
     if len(filenames) == 0:
         return [['', '']]
     elif literalfilenames:
@@ -771,12 +775,34 @@ def ExpandFilenameArguments(filenames, literalfilenames=False):
     else:
         cutexpression = ''
         result = []
-        for filename in list(collections.OrderedDict.fromkeys(sum(map(Glob, sum(map(ProcessAt, filenames), [])), []))):
-            if filename.startswith('#c#'):
-                cutexpression = filename[3:]
-            else:
-                result.append([filename, cutexpression])
-        if result == []:
+        if recursedir:
+            for dirwildcard in filenames:
+                if dirwildcard.startswith('#c#'):
+                    cutexpression = dirwildcard[3:]
+                else:
+                    if dirwildcard.startswith('@'):
+                        for filename in ProcessAt(dirwildcard):
+                            result.append([filename, cutexpression])
+                    elif os.path.isfile(dirwildcard):
+                        result.append([dirwildcard, cutexpression])
+                    else:
+                        if os.path.isdir(dirwildcard):
+                            dirname = dirwildcard
+                            basename = '*'
+                        else:
+                            dirname, basename = os.path.split(dirwildcard)
+                            if dirname == '':
+                                dirname = '.'
+                        for path, dirs, files in os.walk(dirname):
+                            for filename in fnmatch.filter(files, basename):
+                                result.append([os.path.join(path, filename), cutexpression])
+        else:
+            for filename in list(collections.OrderedDict.fromkeys(sum(map(Glob, sum(map(ProcessAt, filenames), [])), []))):
+                if filename.startswith('#c#'):
+                    cutexpression = filename[3:]
+                else:
+                    result.append([filename, cutexpression])
+        if result == [] and cutexpression != '':
             return [['', cutexpression]]
         return result
 
@@ -980,24 +1006,27 @@ def HashFiles(filenames, options):
         HashSingle(filename, cutexpression, prefix, dFileHashes, options)
     if options.compare:
         print('\nFile hash summary:')
-        hashes, _ = GetHashObjects(options.algorithms)
-        for name in hashes:
-            dHashes = dFileHashes[name]
-            if len(dHashes) == len(filenames):
-                print(' All files have different %s hashes' % name)
-            else:
-                uniques = []
-                for hashvalue, filenamesvalue in dHashes.items():
-                    if len(filenamesvalue) > 1:
-                        print(' Files with identical %s hash value %s:' % (name, hashvalue))
-                        for filename in filenamesvalue:
+        if len(dFileHashes) == 0:
+            print(' No files were hashed')
+        else:
+            hashes, _ = GetHashObjects(options.algorithms)
+            for name in hashes:
+                dHashes = dFileHashes[name]
+                if len(dHashes) == len(filenames):
+                    print(' All files have different %s hashes' % name)
+                else:
+                    uniques = []
+                    for hashvalue, filenamesvalue in dHashes.items():
+                        if len(filenamesvalue) > 1:
+                            print(' Files with identical %s hash value %s:' % (name, hashvalue))
+                            for filename in filenamesvalue:
+                                print('  %s' % filename)
+                        else:
+                            uniques.append(filenamesvalue[0])
+                    if len(uniques) > 0:
+                        print(' Files with unique %s hash value:' % (name))
+                        for filename in uniques:
                             print('  %s' % filename)
-                    else:
-                        uniques.append(filenamesvalue[0])
-                if len(uniques) > 0:
-                    print(' Files with unique %s hash value:' % (name))
-                    for filename in uniques:
-                        print('  %s' % filename)
 
 def Main():
     moredesc = '''
@@ -1016,6 +1045,8 @@ https://DidierStevens.com'''
     oParser.add_option('--password', default='infected', help='The ZIP password to be used (default infected)')
     oParser.add_option('--noextraction', action='store_true', default=False, help='Do not extract from archive file')
     oParser.add_option('--literalfilenames', action='store_true', default=False, help='Do not interpret filenames')
+    oParser.add_option('--recursedir', action='store_true', default=False, help='Recurse directories (wildcards allowed, here files (@...) not)')
+
     (options, args) = oParser.parse_args()
 
     if options.man:
@@ -1040,7 +1071,7 @@ https://DidierStevens.com'''
         print('Error: options compare and block are mutually exclusive')
         return
 
-    HashFiles(ExpandFilenameArguments(args, options.literalfilenames), options)
+    HashFiles(ExpandFilenameArguments(args, options.literalfilenames, options.recursedir), options)
 
 if __name__ == '__main__':
     Main()
