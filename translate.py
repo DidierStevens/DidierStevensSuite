@@ -2,8 +2,8 @@
 
 __description__ = 'Translate bytes according to a Python expression'
 __author__ = 'Didier Stevens'
-__version__ = '2.5.2'
-__date__ = '2018/01/29'
+__version__ = '2.5.3'
+__date__ = '2018/02/12'
 
 """
 
@@ -34,6 +34,7 @@ History:
   2017/08/09: 2.5.1 #e# chr can take a second argument
   2017/09/09: added functions Sani1 and Sani2 to help with input/output sanitization
   2018/01/29: 2.5.2 added functions GzipD and ZlibD; and fixed stdin/stdout for Python 3
+  2018/02/12: 2.5.3 when the Python expression returns None (in stead of a byte value), no byte is written to output.
 
 Todo:
 """
@@ -62,7 +63,9 @@ Translate.py is a Python script to perform bitwise operations on files (like XOR
 translate.py malware -o malware.decoded "byte ^ 0x10"
 This will read file malware, perform XOR 0x10 on each byte (this is, expressed in Python: byte ^ 0x10), and write the result to file malware.decoded.
 
-byte is a variable containing the current byte from the input file. Your expression has to evaluate to the modified byte. For complex manipulation, you can define your own functions in a script file and load this with translate.py, like this:
+byte is a variable containing the current byte from the input file. Your expression has to evaluate to the modified byte. When your expression evaluates to None, no byte will be written to output. This can be used to delete bytes from the input.
+
+For complex manipulation, you can define your own functions in a script file and load this with translate.py, like this:
 
 translate.py malware -o malware.decoded "Process(byte)" process.py
 process.py must contain the definition of function Process. Function Process must return the modified byte.
@@ -468,7 +471,8 @@ def Transform(fIn, fIn2, fOut, commandPython):
             inbyte2 = fIn2.read(1)
             byte2 = ord(inbyte2)
         outbyte = eval(commandPython)
-        fOut.write(chr(outbyte))
+        if outbyte != None:
+            fOut.write(chr(outbyte))
         position += 1
 
 #Fix for http://bugs.python.org/issue11395
