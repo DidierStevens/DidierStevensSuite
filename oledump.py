@@ -2,8 +2,8 @@
 
 __description__ = 'Analyze OLE files (Compound Binary Files)'
 __author__ = 'Didier Stevens'
-__version__ = '0.0.32'
-__date__ = '2017/12/16'
+__version__ = '0.0.33'
+__date__ = '2018/02/18'
 
 """
 
@@ -72,6 +72,7 @@ History:
   2017/11/04: added return codes -1 and 1
   2017/12/13: 0.0.31 corrected man
   2017/12/16: 0.0.32 added indexQuiet to cPlugin
+  2018/02/18: 0.0.33 added option -j
 
 Todo:
 """
@@ -90,6 +91,7 @@ import textwrap
 import re
 import string
 import codecs
+import json
 if sys.version_info[0] >= 3:
     from io import StringIO
 else:
@@ -514,6 +516,8 @@ oledump supports the analysis of samples stored in password protected ZIP files 
 oledump also supports input/output redirection. This way, oledump can be used in a pipe.
 Say for example that the sample OLE file is GZIP compressed. oledump can not handle GZIP files directly, but you can decompress and cat it with zcat and then pipe it into oledump for analysis, like this:
 zcat sample.gz | oledump.py
+
+With option -j, oledump will output the content of the ole file as a JSON object that can be piped into other tools that support this JSON format.
 
 The return codes of oledump are:
  -1 when an error occured
@@ -1431,6 +1435,15 @@ def OLESub(ole, prefix, rules, options):
                     print(' %s: %s' % (attribute, value))
         return returnCode
 
+    if options.json:
+        object = []
+        counter = 1
+        for orphan, fname, entry_type, stream in OLEGetStreams(ole):
+            object.append({'id': counter, 'name': PrintableName(fname), 'content': binascii.b2a_base64(stream)})
+            counter += 1
+        print(json.dumps({'version': 1, 'fields': ['id', 'name', 'content'], 'items': object}))
+        return
+
     if options.select == '':
         counter = 1
         vbaConcatenate = ''
@@ -1782,6 +1795,7 @@ def Main():
     oParser.add_option('-V', '--verbose', action='store_true', default=False, help='verbose output with decoder errors')
     oParser.add_option('-C', '--cut', type=str, default='', help='cut data')
     oParser.add_option('-E', '--extra', type=str, default='', help='add extra info (environment variable: OLEDUMP_EXTRA)')
+    oParser.add_option('-j', '--json', action='store_true', default=False, help='produce json output')
     (options, args) = oParser.parse_args()
 
     if options.man:
