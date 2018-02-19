@@ -2,8 +2,8 @@
 
 __description__ = 'Tool for displaying PE file info'
 __author__ = 'Didier Stevens'
-__version__ = '0.7.1'
-__date__ = '2017/11/03'
+__version__ = '0.7.2'
+__date__ = '2018/02/12'
 
 """
 
@@ -34,6 +34,7 @@ History:
   2017/07/02: V0.7.0 added sections (s) to option -o; added # support for option -y
   2017/11/01: V0.7.1 added -g support for -o s; added cDump
   2017/11/03: continued
+  2018/02/12: V0.7.2 bug fix Signature()
 
 Todo:
 """
@@ -179,8 +180,14 @@ def NumberOfBytesHumanRepresentation(value):
         return '%.1f GB' % (float(value) / 1024.0 / 1024.0 / 1024.0)
 
 def Signature(pe):
-    address = pe.OPTIONAL_HEADER.DATA_DIRECTORY[pefile.DIRECTORY_ENTRY['IMAGE_DIRECTORY_ENTRY_SECURITY']].VirtualAddress
-    size = pe.OPTIONAL_HEADER.DATA_DIRECTORY[pefile.DIRECTORY_ENTRY['IMAGE_DIRECTORY_ENTRY_SECURITY']].Size
+    try:
+        security = pe.OPTIONAL_HEADER.DATA_DIRECTORY[pefile.DIRECTORY_ENTRY['IMAGE_DIRECTORY_ENTRY_SECURITY']]
+    except IndexError:
+        print(' No signature')
+        return
+
+    address = security.VirtualAddress
+    size = security.Size
 
     if address == 0:
         print(' No signature')
