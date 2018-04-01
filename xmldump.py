@@ -2,8 +2,8 @@
 
 __description__ = 'This is essentially a wrapper for xml.etree.ElementTree'
 __author__ = 'Didier Stevens'
-__version__ = '0.0.2'
-__date__ = '2017/12/31'
+__version__ = '0.0.3'
+__date__ = '2018/04/01'
 
 """
 
@@ -16,6 +16,7 @@ History:
   2017/12/16: refactoring
   2017/12/16: 0.0.2 added elementtext and attributes command
   2017/12/31: added option -u
+  2018/04/01: 0.0.3 added support for xmlns with single quote
 
 Todo:
 """
@@ -331,6 +332,8 @@ def ProcessTextFileSingle(command, filenames, oOutput, options):
         dXMLNS = {}
         for match in re.findall('xmlns(:([^=]+))?="([^"]+)"', data):
             dXMLNS[match[2]] = match[1]
+        for match in re.findall("xmlns(:([^=]+))?='([^']+)'", data):
+            dXMLNS[match[2]] = match[1]
         root = xml.etree.ElementTree.fromstring(data)
 
         dCommands[command](root, dXMLNS, oOutput, options)
@@ -341,7 +344,7 @@ def ProcessTextFile(command, filenames, options):
     oOutput.Close()
 
 def Main():
-    moredesc = '''
+    moredesc =  '\nCommands:\n%s' % ' '.join(dCommands.keys()) + '''
 
 Arguments:
 @file: process each file listed in the text file specified

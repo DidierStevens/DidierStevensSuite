@@ -2,8 +2,8 @@
 
 __description__ = 'JPEG file analysis tool'
 __author__ = 'Didier Stevens'
-__version__ = '0.0.4'
-__date__ = '2018/01/30'
+__version__ = '0.0.5'
+__date__ = '2018/03/05'
 
 """
 Source code put in public domain by Didier Stevens, no Copyright
@@ -20,6 +20,7 @@ History:
   2017/12/18: refactoring; man page
   2018/01/28: added option -c
   2018/01/30: 0.0.4 added option -e
+  2018/03/05: updated #e# expressions
 
 Todo:
 """
@@ -251,7 +252,8 @@ Since this notation can not be used to specify all possible byte values, hexadec
 For example, #h#4142434445 is an hexadecimal notation that generates data ABCDE. Hexadecimal notation allows the generation of non-printable characters for example, like NULL bytes: #h#00
 File argument #b#QUJDREU= is another example, this time BASE64 notation, that generates data ABCDE.
 
-File arguments that start with #e# are a notational convention to use expressions to generate data. An expression is a single function or the concatenation of several functions (using character + as concatenation operator).
+File arguments that start with #e# are a notational convention to use expressions to generate data. An expression is a single function/string or the concatenation of several functions/strings (using character + as concatenation operator).
+Strings can be characters enclosed by single quotes ('example') or hexadecimal strings prefixed by 0x (0xBEEF).
 4 functions are available: random, loremipsum, repeat and chr.
 
 Function random takes exactly one argument: an integer (with value 1 or more). Integers can be specified using decimal notation or hexadecimal notation (prefix 0x).
@@ -371,6 +373,11 @@ STATE_STRING = 2
 STATE_SPECIAL_CHAR = 3
 STATE_ERROR = 4
 
+FUNCTIONNAME_REPEAT = 'repeat'
+FUNCTIONNAME_RANDOM = 'random'
+FUNCTIONNAME_CHR = 'chr'
+FUNCTIONNAME_LOREMIPSUM = 'loremipsum'
+
 def Tokenize(expression):
     result = []
     token = ''
@@ -423,6 +430,8 @@ def ParseFunction(tokens):
     if len(tokens) == 0:
         print('Parsing error')
         return None, tokens
+    if tokens[0][0] == STATE_STRING or tokens[0][0] == STATE_IDENTIFIER and tokens[0][1].startswith('0x'):
+        return [[FUNCTIONNAME_REPEAT, [[STATE_IDENTIFIER, '1'], tokens[0]]], tokens[1:]]
     if tokens[0][0] != STATE_IDENTIFIER:
         print('Parsing error')
         return None, tokens
@@ -557,11 +566,6 @@ def CheckNumber(argument, minimum=None, maximum=None):
         print('Error: argument should be maximum %d: %d' % (maximum, number))
         return None
     return number
-
-FUNCTIONNAME_REPEAT = 'repeat'
-FUNCTIONNAME_RANDOM = 'random'
-FUNCTIONNAME_CHR = 'chr'
-FUNCTIONNAME_LOREMIPSUM = 'loremipsum'
 
 def Interpret(expression):
     functioncalls = Parse(expression)

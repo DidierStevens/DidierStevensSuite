@@ -2,8 +2,8 @@
 
 __description__ = 'This is essentialy a wrapper for the struct module'
 __author__ = 'Didier Stevens'
-__version__ = '0.0.4'
-__date__ = '2018/01/19'
+__version__ = '0.0.5'
+__date__ = '2018/03/05'
 
 """
 Source code put in public domain by Didier Stevens, no Copyright
@@ -24,6 +24,13 @@ History:
   2018/01/02: added extra info for strings when option -f is used
   2018/01/15: tweaking string output when option -f is used
   2018/01/19: updated man
+  2018/02/15: 0.0.5 added remainder for option -f
+  2018/02/18: added option -j
+  2018/02/19: changed option -j to --jsoninput
+  2018/02/23: added * remainder to option -f
+  2018/02/24: updated man
+  2018/02/26: changed options -c and -s to -C and -S, added options -s -a -x -d, updated man
+  2018/03/05: updated #e# expressions
 
 Todo:
 """
@@ -44,10 +51,15 @@ import string
 import math
 import time
 import hashlib
+import json
 if sys.version_info[0] >= 3:
     from io import BytesIO as DataIO
 else:
     from cStringIO import StringIO as DataIO
+if sys.version_info[0] >= 3:
+    from io import StringIO
+else:
+    from cStringIO import StringIO
 
 def PrintManual():
     manual = r'''
@@ -89,28 +101,61 @@ Integers can be signed (s) or unsigned (u).
 Use option -f to specify how bytes should be parsed: this option takes a Python struct format string.
 Example:
 
-format-bytes.py -f hib random.bin
+format-bytes.py -f "<hib" random.bin
 File: random.bin
- 0:    <type 'int'>      26043       65bb  1970/01/01 07:14:03
- 1:    <type 'int'> -823256990  -3111e79e
- 2:    <type 'int'>         58         3a  1970/01/01 00:00:58
+ 1:    <type 'int'>      26043       65bb  1970/01/01 07:14:03
+ 2:    <type 'int'>  409089161   18623489  1982/12/18 19:52:41
+ 3:    <type 'int'>        -18        -12
+
+End the format string with character * to display which bytes remain.
+Example:
+
+format-bytes.py -f "<hib*" random.bin
+File: random.bin
+ 1:    <type 'int'>      26043       65bb  1970/01/01 07:14:03
+ 2:    <type 'int'>  409089161   18623489  1982/12/18 19:52:41
+ 3:    <type 'int'>        -18        -12
+Remainder: 9
+00000000: CE 3A C3 17 9F 6B 74 28  FB                       .:...kt(.
+
+1I: s -50 u 206
+2I: sl 15054 ul 15054 sb -12742 ub 52794
+4I: sl 398670542 ul 398670542 sb -835009769 ub 3459957527
+4F: l 0.000000 b -783336896.000000
+4N: b 206.58.195.23 l 23.195.58.206
+4E: l 1982/08/20 05:49:02 b 2079/08/22 19:18:47
+8I: sl 2915073189858196174 ul 2915073189858196174 sb -3586339647020895192 ub 14860404426688656424
+8F: l 0.000000 b -721504228050136948830706706079286975060186906491372824967789492043776.000000
 
 You can also specify how the parsed bytes should be represented. To achieve this, append a double colon character (:) to the format string followed by a representation character for each member.
 Valid representation characters are X (for hexadecimal), I (for integer) and E (for epoch).
 Example:
 
-C:\Demo>format-bytes.py -f hib:XIE random.bin
+C:\Demo>format-bytes.py -f "<hib*:XEI" random.bin
 File: random.bin
- 0:    <type 'int'>       65bb
- 1:    <type 'int'> -823256990
- 2:    <type 'int'> 1970/01/01 00:00:58
+ 1:    <type 'int'>       65bb
+ 2:    <type 'int'> 1982/12/18 19:52:41
+ 3:    <type 'int'>        -18
+Remainder: 9
+00000000: CE 3A C3 17 9F 6B 74 28  FB                       .:...kt(.
+
+1I: s -50 u 206
+2I: sl 15054 ul 15054 sb -12742 ub 52794
+4I: sl 398670542 ul 398670542 sb -835009769 ub 3459957527
+4F: l 0.000000 b -783336896.000000
+4N: b 206.58.195.23 l 23.195.58.206
+4E: l 1982/08/20 05:49:02 b 2079/08/22 19:18:47
+8I: sl 2915073189858196174 ul 2915073189858196174 sb -3586339647020895192 ub 14860404426688656424
+8F: l 0.000000 b -721504228050136948830706706079286975060186906491372824967789492043776.000000
 
 For strings, the output will include string length, ASCII representation of the string (first 10 bytes), hexadecimal representation (first 10 bytes), entropy and MD5 hash.
 
-C:\Demo>format-bytes.py -f h14s random.bin
+C:\Demo>format-bytes.py -f "<h14s" random.bin
 File: random.bin
- 0:    <type 'int'>      26043       65bb  1970/01/01 07:14:03
- 1:    <type 'str'>         14 .4b...:... 89346218eece3ac3179f 3.807355 e1647bd9711cdfee7959dee4ff956590
+ 1:    <type 'int'>      26043       65bb  1970/01/01 07:14:03
+ 2:    <type 'str'>         14 .4b...:... 89346218eece3ac3179f 3.807355 e1647bd9711cdfee7959dee4ff956590
+
+Strings can be selected with option -s for dumping. Default is ASCII dump (-a), but hexadecimal (-x) and binary (-d) dump is available too.
 
 FYI, Python struct module format characters are:
 
@@ -146,7 +191,7 @@ P       void *
 To parse a repeating sequence of bytes, use options --count (to specify the number of repetitions) and --step (to specify the number bytes between repeats).
 Example:
 
-format-bytes.py -c 2 -s 4 random.bin
+format-bytes.py -C 2 -S 4 random.bin
 File: random.bin
 s:signed u:unsigned l:little-endian b:big-endian m:mixed-endian
 00 1I: s -69 u 187
@@ -177,6 +222,10 @@ It can also partially read files (this is done with the cut operator).
 If no file arguments are provided to this tool, it will read data from standard input (stdin). This way, this tool can be used in a piped chain of commands, like this:
 
 oledump.py -s 4 -d sample.doc.vir | tool.py
+
+This tool can process JSON output from other tools using option --jsoninput:
+
+oledump.py --json sample.doc.vir | tool.py --jsoninput
 
 When one or more file arguments are provided to this tool, it will read the files and process the content.
 How the files are read, depends on the type of file arguments that are provided. File arguments that start with character @ or # have special meaning, and will be explained later.
@@ -232,7 +281,8 @@ Since this notation can not be used to specify all possible byte values, hexadec
 For example, #h#4142434445 is an hexadecimal notation that generates data ABCDE. Hexadecimal notation allows the generation of non-printable characters for example, like NULL bytes: #h#00
 File argument #b#QUJDREU= is another example, this time BASE64 notation, that generates data ABCDE.
 
-File arguments that start with #e# are a notational convention to use expressions to generate data. An expression is a single function or the concatenation of several functions (using character + as concatenation operator).
+File arguments that start with #e# are a notational convention to use expressions to generate data. An expression is a single function/string or the concatenation of several functions/strings (using character + as concatenation operator).
+Strings can be characters enclosed by single quotes ('example') or hexadecimal strings prefixed by 0x (0xBEEF).
 4 functions are available: random, loremipsum, repeat and chr.
 
 Function random takes exactly one argument: an integer (with value 1 or more). Integers can be specified using decimal notation or hexadecimal notation (prefix 0x).
@@ -363,6 +413,11 @@ STATE_STRING = 2
 STATE_SPECIAL_CHAR = 3
 STATE_ERROR = 4
 
+FUNCTIONNAME_REPEAT = 'repeat'
+FUNCTIONNAME_RANDOM = 'random'
+FUNCTIONNAME_CHR = 'chr'
+FUNCTIONNAME_LOREMIPSUM = 'loremipsum'
+
 def Tokenize(expression):
     result = []
     token = ''
@@ -415,6 +470,8 @@ def ParseFunction(tokens):
     if len(tokens) == 0:
         print('Parsing error')
         return None, tokens
+    if tokens[0][0] == STATE_STRING or tokens[0][0] == STATE_IDENTIFIER and tokens[0][1].startswith('0x'):
+        return [[FUNCTIONNAME_REPEAT, [[STATE_IDENTIFIER, '1'], tokens[0]]], tokens[1:]]
     if tokens[0][0] != STATE_IDENTIFIER:
         print('Parsing error')
         return None, tokens
@@ -550,11 +607,6 @@ def CheckNumber(argument, minimum=None, maximum=None):
         return None
     return number
 
-FUNCTIONNAME_REPEAT = 'repeat'
-FUNCTIONNAME_RANDOM = 'random'
-FUNCTIONNAME_CHR = 'chr'
-FUNCTIONNAME_LOREMIPSUM = 'loremipsum'
-
 def Interpret(expression):
     functioncalls = Parse(expression)
     if functioncalls == None:
@@ -635,12 +687,16 @@ def FilenameCheckHash(filename, literalfilename):
         return FCH_FILENAME, filename
 
 class cBinaryFile:
-    def __init__(self, filename, zippassword='infected', noextraction=False, literalfilename=False):
+    def __init__(self, filename, zippassword='infected', noextraction=False, literalfilename=False, content=None):
         self.filename = filename
         self.zippassword = zippassword
         self.noextraction = noextraction
         self.literalfilename = literalfilename
         self.oZipfile = None
+
+        if content != None:
+            self.fIn = DataIO(content)
+            return
 
         fch, data = FilenameCheckHash(self.filename, self.literalfilename)
         if fch == FCH_ERROR:
@@ -738,6 +794,54 @@ def ExpandFilenameArguments(filenames, literalfilenames=False):
         if result == []:
             return [['', cutexpression]]
         return result
+
+def CheckJSON(stringJSON):
+    try:
+        object = json.loads(stringJSON)
+    except:
+        print('Error parsing JSON')
+        return None
+    if not isinstance(object, dict):
+        print('Error JSON is not a dictionary')
+        return None
+    if not 'version' in object:
+        print('Error JSON dictionary has no version')
+        return None
+    if object['version'] != 1:
+        print('Error JSON dictionary has wrong version')
+        return None
+    if not 'fields' in object:
+        print('Error JSON dictionary has no fields')
+        return None
+    if not 'name' in object['fields']:
+        print('Error JSON dictionary has no name field')
+        return None
+    if not 'content' in object['fields']:
+        print('Error JSON dictionary has no content field')
+        return None
+    if not 'items' in object:
+        print('Error JSON dictionary has no items')
+        return None
+    for item in object['items']:
+        item['content'] = binascii.a2b_base64(item['content'])
+    return object['items']
+
+def GenerateFileList(args, options):
+    if len(args) > 0 and options.jsoninput:
+        print('Error: option -j can not be used with files')
+        return None
+
+    result = []
+    if options.jsoninput:
+        items = CheckJSON(sys.stdin.read())
+        if items == None:
+            return None
+        for item in items:
+            result.append((item['name'], '', item['content']))
+    else:
+        for filename, cutexpression in ExpandFilenameArguments(args, options.literalfilenames):
+            result.append((filename, cutexpression, None))
+    return result
 
 CUTTERM_NOTHING = 0
 CUTTERM_POSITION = 1
@@ -1040,44 +1144,180 @@ def GenerateExtraInfo(extra, data):
             extra = extra.replace(variable, dExtras[variable](data))
     return extra.replace(r'\t', '\t').replace(r'\n', '\n')
 
-def FormatBytesSingle(filename, cutexpression, options):
-    oBinaryFile = cBinaryFile(filename, C2BIP3(options.password), options.noextraction, options.literalfilenames)
+#-BEGINCODE cDump------------------------------------------------------------------------------------
+#import binascii
+#import sys
+#if sys.version_info[0] >= 3:
+#    from io import StringIO
+#else:
+#    from cStringIO import StringIO
+
+class cDump():
+    def __init__(self, data, prefix='', offset=0, dumplinelength=16):
+        self.data = data
+        self.prefix = prefix
+        self.offset = offset
+        self.dumplinelength = dumplinelength
+
+    def HexDump(self):
+        oDumpStream = self.cDumpStream(self.prefix)
+        hexDump = ''
+        for i, b in enumerate(self.data):
+            if i % self.dumplinelength == 0 and hexDump != '':
+                oDumpStream.Addline(hexDump)
+                hexDump = ''
+            hexDump += IFF(hexDump == '', '', ' ') + '%02X' % self.C2IIP2(b)
+        oDumpStream.Addline(hexDump)
+        return oDumpStream.Content()
+
+    def CombineHexAscii(self, hexDump, asciiDump):
+        if hexDump == '':
+            return ''
+        countSpaces = 3 * (self.dumplinelength - len(asciiDump))
+        if len(asciiDump) <= self.dumplinelength / 2:
+            countSpaces += 1
+        return hexDump + '  ' + (' ' * countSpaces) + asciiDump
+
+    def HexAsciiDump(self):
+        oDumpStream = self.cDumpStream(self.prefix)
+        hexDump = ''
+        asciiDump = ''
+        for i, b in enumerate(self.data):
+            b = self.C2IIP2(b)
+            if i % self.dumplinelength == 0:
+                if hexDump != '':
+                    oDumpStream.Addline(self.CombineHexAscii(hexDump, asciiDump))
+                hexDump = '%08X:' % (i + self.offset)
+                asciiDump = ''
+            if i % self.dumplinelength == self.dumplinelength / 2:
+                hexDump += ' '
+            hexDump += ' %02X' % b
+            asciiDump += IFF(b >= 32 and b < 128, chr(b), '.')
+        oDumpStream.Addline(self.CombineHexAscii(hexDump, asciiDump))
+        return oDumpStream.Content()
+
+    def Base64Dump(self, nowhitespace=False):
+        encoded = binascii.b2a_base64(self.data)
+        if nowhitespace:
+            return encoded
+        oDumpStream = self.cDumpStream(self.prefix)
+        length = 64
+        for i in range(0, len(encoded), length):
+            oDumpStream.Addline(encoded[0+i:length+i])
+        return oDumpStream.Content()
+
+    class cDumpStream():
+        def __init__(self, prefix=''):
+            self.oStringIO = StringIO()
+            self.prefix = prefix
+
+        def Addline(self, line):
+            if line != '':
+                self.oStringIO.write(self.prefix + line + '\n')
+
+        def Content(self):
+            return self.oStringIO.getvalue()
+
+    @staticmethod
+    def C2IIP2(data):
+        if sys.version_info[0] > 2:
+            return data
+        else:
+            return ord(data)
+#-ENDCODE cDump--------------------------------------------------------------------------------------
+
+def HexDump(data):
+    return cDump(data).HexDump()
+
+def HexAsciiDump(data):
+    return cDump(data).HexAsciiDump()
+
+def IfWIN32SetBinary(io):
+    if sys.platform == 'win32':
+        import msvcrt
+        msvcrt.setmode(io.fileno(), os.O_BINARY)
+
+#Fix for http://bugs.python.org/issue11395
+def StdoutWriteChunked(data):
+    if sys.version_info[0] > 2:
+        sys.stdout.buffer.write(data)
+    else:
+        while data != '':
+            sys.stdout.write(data[0:10000])
+            try:
+                sys.stdout.flush()
+            except IOError:
+                return
+            data = data[10000:]
+
+def FormatBytesSingle(filename, cutexpression, content, options):
     formats = options.format.split(':')
     if len(formats) == 2:
         format, representation = formats
     else:
         format = formats[0]
         representation = ''
+    if format.endswith('*'):
+        format = format[:-1]
+        remainder = True
+    else:
+        remainder = False
+    oBinaryFile = cBinaryFile(filename, C2BIP3(options.password), options.noextraction, options.literalfilenames, content)
     if cutexpression == '':
         if format != '':
-            data = oBinaryFile.read(struct.calcsize(format))
+            if remainder:
+                data = oBinaryFile.read()
+            else:
+                data = oBinaryFile.read(struct.calcsize(format))
         else:
             data = oBinaryFile.read(options.count * options.step + 16)
     else:
         data = CutData(oBinaryFile.read(), cutexpression)
     oBinaryFile.close()
-    if filename != '':
+
+    if filename != '' and options.select == '':
         print('File: %s' % filename)
     if format == '':
         print('s:signed u:unsigned l:little-endian b:big-endian m:mixed-endian')
     if format != '':
+        if options.select != '':
+            if options.dump:
+                DumpFunction = lambda x:x
+                IfWIN32SetBinary(sys.stdout)
+            elif options.hexdump:
+                DumpFunction = HexDump
+            else:
+                DumpFunction = HexAsciiDump
+
         size = struct.calcsize(format)
         for index, element in enumerate(struct.unpack(format, data[0:size])):
-            if isinstance(element, int):
-                if representation == '':
-                    print('%2d: %15s %10d %10x  %s' % (index, type(element), element, element, IFF(element < 0, '', lambda: TimestampUTC(element))))
-                elif representation[index] == 'X':
-                    print('%2d: %15s %10x' % (index, type(element), element))
-                elif representation[index] == 'I':
-                    print('%2d: %15s %10d' % (index, type(element), element))
-                elif representation[index] == 'E':
-                    print('%2d: %15s %s' % (index, type(element), IFF(element < 0, '', lambda: TimestampUTC(element))))
-            elif isinstance(element, str):
-                print('%2d: %15s %10d %s %s %s %s' % (index, type(element), len(element), ExtraInfoHEADASCII(element[:10]), ExtraInfoHEADHEX(element[:10]), ExtraInfoENTROPY(element), ExtraInfoMD5(element)))
-            elif isinstance(element, bytes):
-                print('%2d: %15s %10d %s %s %s %s' % (index, type(element), len(element), ExtraInfoHEADASCII3(element[:10]), ExtraInfoHEADHEX(element[:10]), ExtraInfoENTROPY(element), ExtraInfoMD5(element)))
+            index += 1
+            if options.select != '':
+                if int(options.select) == index and (isinstance(element, str) or isinstance(element, bytes)):
+                    StdoutWriteChunked(DumpFunction(element))
             else:
-                print('%2d: %15s %s' % (index, type(element), str(element)))
+		            if isinstance(element, int):
+		                if representation == '':
+		                    print('%2d: %15s %10d %10x  %s' % (index, type(element), element, element, IFF(element < 0, '', lambda: TimestampUTC(element))))
+		                elif representation[index] == 'X':
+		                    print('%2d: %15s %10x' % (index, type(element), element))
+		                elif representation[index] == 'I':
+		                    print('%2d: %15s %10d' % (index, type(element), element))
+		                elif representation[index] == 'E':
+		                    print('%2d: %15s %s' % (index, type(element), IFF(element < 0, '', lambda: TimestampUTC(element))))
+		            elif isinstance(element, str):
+		                print('%2d: %15s %10d %s %s %s %s' % (index, type(element), len(element), ExtraInfoHEADASCII(element[:10]), ExtraInfoHEADHEX(element[:10]), ExtraInfoENTROPY(element), ExtraInfoMD5(element)))
+		            elif isinstance(element, bytes):
+		                print('%2d: %15s %10d %s %s %s %s' % (index, type(element), len(element), ExtraInfoHEADASCII3(element[:10]), ExtraInfoHEADHEX(element[:10]), ExtraInfoENTROPY(element), ExtraInfoMD5(element)))
+		            else:
+		                print('%2d: %15s %s' % (index, type(element), str(element)))
+        if options.select == '' and remainder:
+            print('Remainder: %d' % (len(data) - size))
+            remainderx100 = data[size:size + 0x100]
+            if len(remainderx100) > 0:
+                oDump = cDump(remainderx100)
+                print(oDump.HexAsciiDump())
+                FormatBytesData(remainderx100, -1, options)
     elif options.count == 1:
         FormatBytesData(data, -1, options)
     else:
@@ -1086,9 +1326,9 @@ def FormatBytesSingle(filename, cutexpression, options):
             FormatBytesData(data[position:], position, options)
             position += options.step
 
-def FormatBytesFiles(filenames, options):
-    for filename, cutexpression in filenames:
-        FormatBytesSingle(filename, cutexpression, options)
+def FormatBytesFiles(fileList, options):
+    for filename, cutexpression, content in fileList:
+        FormatBytesSingle(filename, cutexpression, content, options)
 
 def Main():
     moredesc = '''
@@ -1100,11 +1340,16 @@ https://DidierStevens.com'''
     oParser = optparse.OptionParser(usage='usage: %prog [options] [[@]file|cut-expression ...]\n' + __description__ + moredesc, version='%prog ' + __version__)
     oParser.add_option('-m', '--man', action='store_true', default=False, help='Print manual')
     oParser.add_option('-f', '--format', default='', help='Struct format string to use')
-    oParser.add_option('-c', '--count', type=int, default=1, help='The number of repeating bytes (default 1)')
-    oParser.add_option('-s', '--step', type=int, default=1, help='The step to use when option --count is not 1 (default 1)')
+    oParser.add_option('-s', '--select', default='', help='Select item nr for dumping')
+    oParser.add_option('-d', '--dump', action='store_true', default=False, help='perform dump')
+    oParser.add_option('-x', '--hexdump', action='store_true', default=False, help='perform hex dump')
+    oParser.add_option('-a', '--asciidump', action='store_true', default=False, help='perform ascii dump')
+    oParser.add_option('-C', '--count', type=int, default=1, help='The number of repeating bytes (default 1)')
+    oParser.add_option('-S', '--step', type=int, default=1, help='The step to use when option --count is not 1 (default 1)')
     oParser.add_option('--password', default='infected', help='The ZIP password to be used (default infected)')
     oParser.add_option('--noextraction', action='store_true', default=False, help='Do not extract from archive file')
     oParser.add_option('--literalfilenames', action='store_true', default=False, help='Do not interpret filenames')
+    oParser.add_option('--jsoninput', action='store_true', default=False, help='Consume JSON from stdin')
     (options, args) = oParser.parse_args()
 
     if options.man:
@@ -1112,7 +1357,9 @@ https://DidierStevens.com'''
         PrintManual()
         return
 
-    FormatBytesFiles(ExpandFilenameArguments(args, options.literalfilenames), options)
+    fileList = GenerateFileList(args, options)
+    if fileList != None:
+        FormatBytesFiles(fileList, options)
 
 if __name__ == '__main__':
     Main()

@@ -2,8 +2,8 @@
 
 __description__ = 'Translate bytes according to a Python expression'
 __author__ = 'Didier Stevens'
-__version__ = '2.5.3'
-__date__ = '2018/02/12'
+__version__ = '2.5.4'
+__date__ = '2018/03/05'
 
 """
 
@@ -35,6 +35,7 @@ History:
   2017/09/09: added functions Sani1 and Sani2 to help with input/output sanitization
   2018/01/29: 2.5.2 added functions GzipD and ZlibD; and fixed stdin/stdout for Python 3
   2018/02/12: 2.5.3 when the Python expression returns None (in stead of a byte value), no byte is written to output.
+  2018/03/05: 2.5.4 updated #e# expressions
 
 Todo:
 """
@@ -203,6 +204,11 @@ STATE_STRING = 2
 STATE_SPECIAL_CHAR = 3
 STATE_ERROR = 4
 
+FUNCTIONNAME_REPEAT = 'repeat'
+FUNCTIONNAME_RANDOM = 'random'
+FUNCTIONNAME_CHR = 'chr'
+FUNCTIONNAME_LOREMIPSUM = 'loremipsum'
+
 def Tokenize(expression):
     result = []
     token = ''
@@ -255,6 +261,8 @@ def ParseFunction(tokens):
     if len(tokens) == 0:
         print('Parsing error')
         return None, tokens
+    if tokens[0][0] == STATE_STRING or tokens[0][0] == STATE_IDENTIFIER and tokens[0][1].startswith('0x'):
+        return [[FUNCTIONNAME_REPEAT, [[STATE_IDENTIFIER, '1'], tokens[0]]], tokens[1:]]
     if tokens[0][0] != STATE_IDENTIFIER:
         print('Parsing error')
         return None, tokens
@@ -389,11 +397,6 @@ def CheckNumber(argument, minimum=None, maximum=None):
         print('Error: argument should be maximum %d: %d' % (maximum, number))
         return None
     return number
-
-FUNCTIONNAME_REPEAT = 'repeat'
-FUNCTIONNAME_RANDOM = 'random'
-FUNCTIONNAME_CHR = 'chr'
-FUNCTIONNAME_LOREMIPSUM = 'loremipsum'
 
 def Interpret(expression):
     functioncalls = Parse(expression)
