@@ -1,16 +1,24 @@
-/*
-  XORSelection.1sc: 010 Editor Script to XOR the current selection with a set of bytes
-  Version 3.0 2014/12/11
-  Source code put in public domain by Didier Stevens, no Copyright
-  https://DidierStevens.com
-  Use at your own risk
-
-  Shortcomings, or todo's ;-)
-
-  History:
-    2009/05/26: v1.0 start
-    2014/12/11: v3.0 Added hex processing; refactoring
-*/
+//------------------------------------------------
+//--- 010 Editor Script File
+//
+//      File: XORSelection.1sc
+//   Authors: Didier Stevens
+//   Version: 4.0
+//   Purpose: Xors the current selection with a set of bytes, 
+//            which causes the bytes to be encoded so they 
+//            cannot be read by a human. Run the Xor again on 
+//            the encoded selection to decode the data.
+//  Category: Binary
+//   History: 
+//   4.0   2018-03-25 D Stevens: refactoring to handle keys with null bytes and hex keys with whitespace
+//   3.1   2016-02-10 SweetScape Software: Updated header for repository submission.
+//   3.0   2014-12-11 D Stevens: Added hex processing; refactoring
+//   1.0   2009-05-26 D Stevens: start
+//
+// Source code put in public domain by Didier Stevens, no Copyright
+// https://DidierStevens.com
+// Use at your own risk
+//------------------------------------------------
 
 #define TITLE "XORSelection"
 
@@ -25,28 +33,14 @@ int HexDigitToInt(int digit)
     return -1;
 }
 
-string HexToString(string sHex)
+string RemoveWhitespace(string sInput)
 {
     int iIter;
-    int iHexDigit1;
-    int iHexDigit2;
-    string sResult;
-    uchar uacCharacter[2];
+    string sResult = "";
 
-    if (Strlen(sHex) % 2 != 0)
-        return "";
-    for (iIter = 0; iIter < Strlen(sHex); iIter += 2)
-    {
-        iHexDigit1 = HexDigitToInt(sHex[iIter]);
-        if (iHexDigit1 == -1)
-            return "";
-        iHexDigit2 = HexDigitToInt(sHex[iIter + 1]);
-        if (iHexDigit2 == -1)
-            return "";
-        uacCharacter[0] = iHexDigit1 * 0x10 + iHexDigit2;
-        uacCharacter[1] = 0;
-        sResult += uacCharacter;
-    }
+    for (iIter = 0; iIter < Strlen(sInput); iIter++)
+        if (sInput[iIter] != ' ' && sInput[iIter] != '\n' && sInput[iIter] != '\r' && sInput[iIter] != '\t')
+            sResult = sResult + sInput[iIter];
     return sResult;
 }
 
@@ -81,19 +75,50 @@ void Main(void)
     }
     else if (SubStr(sKey, 0, 2) == "0x")
     {
-        sKey = HexToString(SubStr(sKey, 2));
-        if (sKey == "")
+        string sHex = RemoveWhitespace(SubStr(sKey, 2));
+        int iIter2;
+        int iHexDigit1;
+        int iHexDigit2;
+    
+        if (Strlen(sHex) % 2 != 0)
         {
-            MessageBox(idOk, TITLE, "Please enter a valid hex value.");
+            MessageBox(idOk, TITLE, "Please enter a valid hex value (uneven digits).");
             return;
         }
+        iKeyLength = Strlen(sHex) / 2;
+        if (iKeyLength == 0)
+        {
+            MessageBox(idOk, TITLE, "Please enter a valid hex value (no digits).");
+            return;
+        }
+        uchar aucKey[iKeyLength];
+        for (iIter2 = 0; iIter2 < Strlen(sHex); iIter2 += 2)
+        {
+            iHexDigit1 = HexDigitToInt(sHex[iIter2]);
+            if (iHexDigit1 == -1)
+            {
+                MessageBox(idOk, TITLE, "Please enter a valid hex value: digit %c is not hexadecimal.", sHex[iIter2]);
+                return;
+            }
+            iHexDigit2 = HexDigitToInt(sHex[iIter2 + 1]);
+            if (iHexDigit2 == -1)
+            {
+                MessageBox(idOk, TITLE, "Please enter a valid hex value: digit %c is not hexadecimal.", sHex[iIter2 + 1]);
+                return;
+            }
+            aucKey[iIter2 / 2] = iHexDigit1 * 0x10 + iHexDigit2;
+        }
     }
-    iKeyLength = Strlen(sKey);
-
+    else
+    {
+        string aucKey = sKey;
+        iKeyLength = Strlen(sKey);
+    }
+    
     // Modify the selection
     for (iIter = 0; iIter < iSize; iIter++)
         // Modify the current byte
-        WriteUByte(iStart + iIter, ReadUByte(iStart + iIter) ^ sKey[iIter % iKeyLength]);
+        WriteUByte(iStart + iIter, ReadUByte(iStart + iIter) ^ aucKey[iIter % iKeyLength]);
 }
 
 Main();
