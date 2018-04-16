@@ -3,7 +3,7 @@
 __description__ = 'This is essentialy a wrapper for the hashlib module'
 __author__ = 'Didier Stevens'
 __version__ = '0.0.3'
-__date__ = '2018/03/05'
+__date__ = '2018/04/16'
 
 """
 Source code put in public domain by Didier Stevens, no Copyright
@@ -16,6 +16,7 @@ History:
   2017/12/02: finished man
   2018/02/09: added option --recursedir
   2018/03/05: 0.0.3 updated #e# expressions
+  2018/04/16: added option -s
 
 Todo:
 """
@@ -129,8 +130,11 @@ File: c:\Windows\write.exe
 
 File hash summary:
  All files have different md5 hashes
+ There are 2 different md5 hashes
  All files have different sha1 hashes
+ There are 2 different sha1 hashes
  All files have different sha256 hashes
+ There are 2 different sha256 hashes
 
 As this command can produce a long report, it can be useful to combine option -c with options -q and -a to restrict comparison to one hash algorithm, like this:
 
@@ -140,20 +144,24 @@ e559c2673d312a0089d8dcdfaecd7fe261f74aaaf02a110722b34a0c85574012
 
 File hash summary:
  All files have different sha256 hashes
+ There are 2 different sha256 hashes
 
 To illustrate a report when identical files are compared (based on the hash value), this example uses a copy of the file notepad.exe:
 
 hash.py -c -a sha256 -q C:\Windows\notepad.exe C:\Windows\write.exe notepad_copy.exe
-0f8a84968fac3cadc04471c1ee5c4644414491c89a4a7149845c170258b6a6d1
-e559c2673d312a0089d8dcdfaecd7fe261f74aaaf02a110722b34a0c85574012
-0f8a84968fac3cadc04471c1ee5c4644414491c89a4a7149845c170258b6a6d1
+e9f2fbe8e1bc49d107df36ef09f6d0aeb8901516980d3fe08ee73ab7b4a2325f
+97cea2bf66a715bd470f4c94adbb3a4caf8b740763651a91cf8c9bc0528d4e62
+e9f2fbe8e1bc49d107df36ef09f6d0aeb8901516980d3fe08ee73ab7b4a2325f
 
 File hash summary:
- Files with identical sha256 hash value 0f8a84968fac3cadc04471c1ee5c4644414491c89a4a7149845c170258b6a6d1:
+ Files (2) with identical sha256 hash value e9f2fbe8e1bc49d107df36ef09f6d0aeb8901516980d3fe08ee73ab7b4a2325f:
   C:\Windows\notepad.exe
   notepad_copy.exe
  Files with unique sha256 hash value:
   C:\Windows\write.exe
+ There are 2 different sha256 hashes
+
+Option -s can take a list of hashes to skip, separated by character ; or ,. This option is useful in combination with option -c, to skip specified hash values when comparing.
 
 This tool can also split each processed file in blocks and calculate hash values for each block. This "block mode" is initiated with option -b.
 Option -c (compare) and option -b (block) are mutually exclusive.
@@ -954,6 +962,10 @@ def HashSingle(filename, cutexpression, prefix, dFileHashes, options):
     hashes, dHashes = GetHashObjects(options.algorithms)
     if hashes == []:
         return
+    if ',' in options.skip:
+        skipHashes = options.skip.lower().split(',')
+    else:
+        skipHashes = options.skip.lower().split(';')
     if options.block == 0:
         for name in hashes:
             if not name in dFileHashes:
@@ -962,11 +974,15 @@ def HashSingle(filename, cutexpression, prefix, dFileHashes, options):
             hashdigest = dHashes[name].hexdigest()
             if options.uppercase:
                 hashdigest = hashdigest.upper()
-            dFileHashes[name][hashdigest] = dFileHashes[name].get(hashdigest, []) + [filename]
-            if options.quiet:
-                print(hashdigest)
+            if hashdigest.lower() in skipHashes:
+                if not options.quiet:
+                    print('%sskipped' % (prefix))
             else:
-                print('%s%-6s: %s' % (prefix, name, hashdigest))
+                dFileHashes[name][hashdigest] = dFileHashes[name].get(hashdigest, []) + [filename]
+                if options.quiet:
+                    print(hashdigest)
+                else:
+                    print('%s%-6s: %s' % (prefix, name, hashdigest))
     else:
         dBlockHashes = {name: {} for name in hashes}
         countBlocks = 0
@@ -1020,9 +1036,10 @@ def HashFiles(filenames, options):
                     print(' All files have different %s hashes' % name)
                 else:
                     uniques = []
-                    for hashvalue, filenamesvalue in dHashes.items():
+                    items = sorted(dHashes.items(), key=lambda item: len(item[1]), reverse=True)
+                    for hashvalue, filenamesvalue in items:
                         if len(filenamesvalue) > 1:
-                            print(' Files with identical %s hash value %s:' % (name, hashvalue))
+                            print(' Files (%d) with identical %s hash value %s:' % (len(filenamesvalue), name, hashvalue))
                             for filename in filenamesvalue:
                                 print('  %s' % filename)
                         else:
@@ -1031,6 +1048,7 @@ def HashFiles(filenames, options):
                         print(' Files with unique %s hash value:' % (name))
                         for filename in uniques:
                             print('  %s' % filename)
+                print(' There are %d different %s hashes' % (len(dHashes), name))                
 
 def Main():
     moredesc = '''
@@ -1045,6 +1063,7 @@ https://DidierStevens.com'''
     oParser.add_option('-u', '--uppercase', action='store_true', default=False, help='Display hash values in uppercase')
     oParser.add_option('-c', '--compare', action='store_true', default=False, help='Compare file hash values (except in block mode)')
     oParser.add_option('-b', '--block', default='', help='Block size for hashing')
+    oParser.add_option('-s', '--skip', default='', help='Hashes to skip (except in block mode)')
     oParser.add_option('-q', '--quiet', action='store_true', default=False, help='Just print hash values (except in block mode)')
     oParser.add_option('--password', default='infected', help='The ZIP password to be used (default infected)')
     oParser.add_option('--noextraction', action='store_true', default=False, help='Do not extract from archive file')
