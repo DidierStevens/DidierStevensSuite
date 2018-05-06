@@ -2,8 +2,8 @@
 
 __description__ = 'Analyze OLE files (Compound Binary Files)'
 __author__ = 'Didier Stevens'
-__version__ = '0.0.33'
-__date__ = '2018/02/18'
+__version__ = '0.0.34'
+__date__ = '2018/05/06'
 
 """
 
@@ -73,6 +73,7 @@ History:
   2017/12/13: 0.0.31 corrected man
   2017/12/16: 0.0.32 added indexQuiet to cPlugin
   2018/02/18: 0.0.33 added option -j
+  2018/05/06: 0.0.34 -s is more userfriendly
 
 Todo:
 """
@@ -1571,7 +1572,7 @@ def OLESub(ole, prefix, rules, options):
             DumpFunction = HexAsciiDump
         counter = 1
         for orphan, fname, entry_type, stream in OLEGetStreams(ole):
-            if options.select == 'a' or ('%s%d' % (prefix, counter)) == options.select:
+            if options.select == 'a' or ('%s%d' % (prefix, counter)) == options.select or prefix == 'A' and str(counter) == options.select:
                 StdoutWriteChunked(DumpFunction(DecompressFunction(DecodeFunction(decoders, options, CutData(stream, options.cut)))))
                 if options.select != 'a':
                     break

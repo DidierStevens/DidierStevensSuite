@@ -3,7 +3,7 @@
 __description__ = "Program to evaluate a Python expression for each line in the provided text file(s)"
 __author__ = 'Didier Stevens'
 __version__ = '0.0.4'
-__date__ = '2018/04/17'
+__date__ = '2018/04/22'
 
 """
 
@@ -22,6 +22,7 @@ History:
   2018/02/05: 0.0.3 added option -i
   2018/04/01: 0.0.4 added support for # to option -o
   2018/04/17: refactored support for # to option -o
+  2018/04/22: updated man page with -r option
 
 Todo:
 """
@@ -99,6 +100,40 @@ The result:
 
 If a line contains more separators than specified by the columns argument, then everything past the last expected separator is considered the last value (this includes the extra separator(s)). We can see this with line "username3:pass:word". The password is pass:word (not pass). SBC returns pass:word.
 If a line contains less separators than specified by the columns argument, then the failvalue is returned. [] makes python-per-line skip an output line, that is why no output is produced for user2.
+
+Option -r is used to generated a list of numbers and use that as input, in stead of a file.
+This option accepts 1 to 3 numbers (separeted by a comma (,)), which are used as arguments to Python function xrange.
+If just one number is given, then xrange is used with values (0, number, 1).
+Example:
+ python-per-line.py -r 10 "'Number ' + line"
+ Number 0
+ Number 1
+ Number 2
+ Number 3
+ Number 4
+ Number 5
+ Number 6
+ Number 7
+ Number 8
+ Number 9
+
+Also here, variable line is a string.
+
+If two numbers are given, then xrange is used with values (number1, number2, 1).
+Example:
+ python-per-line.py -r 5,10 "'Number ' + line"
+ Number 5
+ Number 6
+ Number 7
+ Number 8
+ Number 9
+
+If three numbers are given, then xrange is used with values (number1, number2, number3).
+Example:
+ python-per-line.py -r 5,10,2 "'Number ' + line"
+ Number 5
+ Number 7
+ Number 9
 
 The lines are written to standard output, except when option -o is used. When option -o is used, the lines are written to the filename specified by option -o.
 Filenames used with option -o starting with # have special meaning.
