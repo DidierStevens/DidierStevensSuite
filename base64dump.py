@@ -2,8 +2,8 @@
 
 __description__ = 'Extract base64 strings from file'
 __author__ = 'Didier Stevens'
-__version__ = '0.0.9'
-__date__ = '2018/05/07'
+__version__ = '0.0.10'
+__date__ = '2018/05/23'
 
 """
 
@@ -27,6 +27,7 @@ History:
   2017/07/01: 0.0.7 added option -z
   2017/10/21: 0.0.8 added option -t
   2018/05/07: 0.0.9: added bx and ah encoding; added YARA support; added decoders
+  2018/05/23: 0.0.10: added zxle and zxbe encoding; added option --ignore
 
 Todo:
 """
@@ -86,12 +87,18 @@ pu
 hex
 bx
 ah
+zxle
+zxbe
 
 bu stands for "backslash UNICODE" (\\u), it looks like this: \\u9090\\ueb77...
 pu stands for "percent UNICODE" (%u), it looks like this: %u9090%ueb77...
 hex stands for "hexadecimal", it looks like this: 6D6573736167652C...
 bx stands for "backslash hexadecimal" (\\x), it looks like this: \\x90\\x90...
 ah stands for "ampersand hexadecimal" (&H), it looks like this: &H90&H90...
+zxle stands for "zero hexadecimal little-endian" (0x), it looks like this: 0x909090900xeb77...
+zxbe stands for "zero hexadecimal big-endian" (0x), it looks like this: 0x909090900x77eb...
+
+zxle and zxbe encoding looks for 1 to 8 hexadecimal characters after the prefix 0x. If the number of hexadecimal characters is uneven, a 0 (digit zero) will be prefixed to have an even number of hexadecimal digits.
 
 Select a datastream for further analysis with option -s followed by the ID number of the datastream (or a for all). For example -s 2:
 
@@ -124,13 +131,14 @@ You can also specify the minimum length of the decoded base64 datastream with op
 
 With option -w (ignorewhitespace), you can instruct base64dump to ignore all whitespace characters. So for example if the base64 text is split into lines, then you will get one base64 stream.
 With option -z (ignorenullbytes), you can instruct base64dump to ignore all leading 0x00 bytes. This can help to decode UNICODE text.
+With option -i (ignore), you can instruct base64dump to ignore all characters you provide as a value to option -i. For example, with -i , you can parse strings like 0x44332211,0x88776655,... with encoding zxle by ignoring the separator character ,.
 
 It's also possible to try all encodings: all
 Example:
 base64dump.py -e all -n 80 sample.vir
 
-Enc  Size    Encoded          Decoded          MD5 decoded                     
----  ----    -------          -------          -----------                     
+Enc  Size    Encoded          Decoded          MD5 decoded
+---  ----    -------          -------          -----------
 b64:     176 bebafeca41414141 m.+}t.p^5p^5p^5p e3bed37dcd137c9bb5da103d3c45be49
 hex:     176 bebafeca41414141 +..-AAAAAAAAAAAA 56464bd2b2c42bbf2edda87d54ab91f5
 b64:     192 28000e1358000e13 .-4-fwt-4-fwm.+} 81c587874b1c3ddc5479a283179d29f7
@@ -625,6 +633,42 @@ def DecodeDataAH(data):
     for ah in re.findall(r'(?:&H[ABCDEFabcdef0123456789]{2})+', data):
         yield (ah, DecodeBX(ah))
 
+def ReverseCount(data, count):
+    result = ''
+    while data != '':
+        part = data[0:count]
+        data = data[count:]
+        result = part + result
+    return result
+
+def DecodeZXLittleEndian(data):
+    decoded = ''
+    for hex in data.split('0x'):
+        if hex == '':
+            continue
+        if len(hex) % 2 == 1:
+            hex = '0' + hex
+        decoded += binascii.a2b_hex(ReverseCount(hex, 2))
+    return decoded
+
+def DecodeDataZXLittleEndian(data):
+    for zx in re.findall(r'(?:0x[ABCDEFabcdef0123456789]{1,8})+', data):
+        yield (zx, DecodeZXLittleEndian(zx))
+
+def DecodeZXBigEndian(data):
+    decoded = ''
+    for hex in data.split('0x'):
+        if hex == '':
+            continue
+        if len(hex) % 2 == 1:
+            hex = '0' + hex
+        decoded += binascii.a2b_hex(hex)
+    return decoded
+
+def DecodeDataZXBigEndian(data):
+    for zx in re.findall(r'(?:0x[ABCDEFabcdef0123456789]{1,8})+', data):
+        yield (zx, DecodeZXBigEndian(zx))
+
 def YARACompile(ruledata):
     if ruledata.startswith('#'):
         if ruledata.startswith('#h#'):
@@ -715,6 +759,8 @@ def BASE64Dump(filename, options):
         'hex': ('hexadecimal, example: 6D6573736167652C...', DecodeDataHex),
         'bx': ('\\x hexadecimal, example: \\x90\\x90...', DecodeDataBX),
         'ah': ('&H hexadecimal, example: &H90&H90...', DecodeDataAH),
+        'zxle': ('0x hexadecimal little-endian, example: 0x909090900xeb77...', DecodeDataZXLittleEndian),
+        'zxbe': ('0x hexadecimal big-endian, example: 0x909090900x77eb...', DecodeDataZXBigEndian),
     }
 
     if options.encoding == '?' :
@@ -774,6 +820,8 @@ def BASE64Dump(filename, options):
     if options.ignorewhitespace:
         for whitespacecharacter in string.whitespace:
             data = data.replace(whitespacecharacter, '')
+    for ignore in options.ignore:
+        data = data.replace(ignore, '')
     if options.ignorenullbytes:
         previous_char_was_zero = False
         result = ''
@@ -853,7 +901,7 @@ def BASE64Dump(filename, options):
                     print('Error: provide only one decoder when using option select')
                     return
                 if DumpFunction == None:
-                    filehash, magicPrintable, magicHex, fileSize, entropy, countUniqueBytes, countNullByte, countControlBytes, countWhitespaceBytes, countPrintableBytes, countHighBytes = CalculateFileMetaData(decodeddata)
+                    filehash, magicPrintable, magicHex, fileSize, entropy, countUniqueBytes, countNullByte, countControlBytes, countWhitespaceBytes, countPrintableBytes, countHighBytes = CalculateFileMetaData(CutData(decodeddata, options.cut))
                     print('Info:')
                     print(' %s: %s' % ('MD5', filehash))
                     print(' %s: %d' % ('Filesize', fileSize))
@@ -887,6 +935,7 @@ def Main():
     oParser.add_option('-w', '--ignorewhitespace', action='store_true', default=False, help='ignore whitespace')
     oParser.add_option('-u', '--unique', action='store_true', default=False, help='do not repeat identical decoded data')
     oParser.add_option('-z', '--ignorenullbytes', action='store_true', default=False, help='ignore null (zero) bytes')
+    oParser.add_option('-i', '--ignore', type=str, default='', help='characters to ignore')
     oParser.add_option('-y', '--yara', help="YARA rule-file, @file, directory or #rule to check data (YARA search doesn't work with -s option)")
     oParser.add_option('-D', '--decoders', type=str, default='', help='decoders to load (separate decoders with a comma , ; @file supported)')
     oParser.add_option('--decoderoptions', type=str, default='', help='options for the decoder')
