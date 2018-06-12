@@ -2,8 +2,8 @@
 
 __description__ = 'Tool for displaying PE file info'
 __author__ = 'Didier Stevens'
-__version__ = '0.7.2'
-__date__ = '2018/02/12'
+__version__ = '0.7.3'
+__date__ = '2018/05/17'
 
 """
 
@@ -35,6 +35,7 @@ History:
   2017/11/01: V0.7.1 added -g support for -o s; added cDump
   2017/11/03: continued
   2018/02/12: V0.7.2 bug fix Signature()
+  2018/05/17: V0.7.3 better error handling for PEiD files
 
 Todo:
 """
@@ -61,7 +62,7 @@ REGEX_STANDARD = '[\x09\x20-\x7E]'
 try:
     import pefile
     import peutils
-except:
+except ImportError:
     print('Missing pefile and/or peutils Python module, please check if it is installed.')
     exit()
 
@@ -197,12 +198,12 @@ def Signature(pe):
 
     try:
         from pyasn1.codec.der import decoder as der_decoder
-    except:
+    except ImportError:
         print(' Signature present but error importing pyasn1 module')
         return
     try:
         from pyasn1_modules import rfc2315
-    except:
+    except ImportError:
         print(' Signature present but error importing pyasn1_modules module')
         return
 
@@ -248,8 +249,8 @@ def SingleFileInfo(filename, signatures, options):
     print('')
 
     print('PEiD:')
-    if signatures == None:
-        print('Error: signature database missing')
+    if type(signatures) == str:
+        print(signatures)
     else:
         print(signatures.match(pe, ep_only = True))
 
@@ -798,9 +799,12 @@ def Main():
             dbfile = options.db
             if dbfile == '':
                 dbfile = os.path.join(os.path.dirname(sys.argv[0]), 'userdb.txt')
-            signatures = peutils.SignatureDatabase(dbfile)
+            if os.path.exists(dbfile):
+                signatures = peutils.SignatureDatabase(dbfile)
+            else:
+                signatures = 'Error: signature database missing'
         except:
-            signatures = None
+            signatures = 'Error: while reading the signature database: %s' % sys.exc_info()[1].message
         if len(args) == 0:
             SingleFile('', signatures, options)
         elif options.scan:
