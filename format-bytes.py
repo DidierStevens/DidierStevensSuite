@@ -3,7 +3,7 @@
 __description__ = 'This is essentialy a wrapper for the struct module'
 __author__ = 'Didier Stevens'
 __version__ = '0.0.5'
-__date__ = '2018/03/05'
+__date__ = '2018/06/12'
 
 """
 Source code put in public domain by Didier Stevens, no Copyright
@@ -31,6 +31,7 @@ History:
   2018/02/24: updated man
   2018/02/26: changed options -c and -s to -C and -S, added options -s -a -x -d, updated man
   2018/03/05: updated #e# expressions
+  2018/06/12: updated man
 
 Todo:
 """
@@ -255,6 +256,7 @@ When using this file (list.txt) in the following command:
 tool.py @list.txt
 
 the tool will process the following files: sample-1.bin, sample-5.bin and sample-7.bin.
+A single @ character as filename is a here file read from stdin.
 
 Wildcards are supported too. The classic *, ? and [] wildcard characters are supported. For example, use the following command to process all .exe and .dll files in the Windows directory:
 

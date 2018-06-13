@@ -3,7 +3,7 @@
 __description__ = 'JPEG file analysis tool'
 __author__ = 'Didier Stevens'
 __version__ = '0.0.5'
-__date__ = '2018/03/05'
+__date__ = '2018/06/12'
 
 """
 Source code put in public domain by Didier Stevens, no Copyright
@@ -20,7 +20,8 @@ History:
   2017/12/18: refactoring; man page
   2018/01/28: added option -c
   2018/01/30: 0.0.4 added option -e
-  2018/03/05: updated #e# expressions
+  2018/03/05: 0.0.5 updated #e# expressions
+  2018/06/12: man updated
 
 Todo:
 """
@@ -226,6 +227,7 @@ When using this file (list.txt) in the following command:
 tool.py @list.txt
 
 the tool will process the following files: sample-1.bin, sample-5.bin and sample-7.bin.
+A single @ character as filename is a here file read from stdin.
 
 Wildcards are supported too. The classic *, ? and [] wildcard characters are supported. For example, use the following command to process all .exe and .dll files in the Windows directory:
 

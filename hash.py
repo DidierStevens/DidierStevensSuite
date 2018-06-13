@@ -2,8 +2,8 @@
 
 __description__ = 'This is essentialy a wrapper for the hashlib module'
 __author__ = 'Didier Stevens'
-__version__ = '0.0.3'
-__date__ = '2018/04/16'
+__version__ = '0.0.4'
+__date__ = '2018/06/12'
 
 """
 Source code put in public domain by Didier Stevens, no Copyright
@@ -17,6 +17,7 @@ History:
   2018/02/09: added option --recursedir
   2018/03/05: 0.0.3 updated #e# expressions
   2018/04/16: added option -s
+  2018/06/12: 0.0.4 cosmetic change
 
 Todo:
 """
@@ -254,6 +255,7 @@ When using this file (list.txt) in the following command:
 tool.py @list.txt
 
 the tool will process the following files: sample-1.bin, sample-5.bin and sample-7.bin.
+A single @ character as filename is a here file read from stdin.
 
 Wildcards are supported too. The classic *, ? and [] wildcard characters are supported. For example, use the following command to process all .exe and .dll files in the Windows directory:
 
@@ -1048,7 +1050,10 @@ def HashFiles(filenames, options):
                         print(' Files with unique %s hash value:' % (name))
                         for filename in uniques:
                             print('  %s' % filename)
-                print(' There are %d different %s hashes' % (len(dHashes), name))                
+                if len(dHashes) == 1:
+                    print(' All %s hashes are identical' % name)                
+                else:
+                    print(' There are %d different %s hashes' % (len(dHashes), name))                
 
 def Main():
     moredesc = '''
