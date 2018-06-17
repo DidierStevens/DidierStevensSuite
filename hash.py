@@ -2,8 +2,8 @@
 
 __description__ = 'This is essentialy a wrapper for the hashlib module'
 __author__ = 'Didier Stevens'
-__version__ = '0.0.4'
-__date__ = '2018/06/12'
+__version__ = '0.0.5'
+__date__ = '2018/06/17'
 
 """
 Source code put in public domain by Didier Stevens, no Copyright
@@ -18,6 +18,7 @@ History:
   2018/03/05: 0.0.3 updated #e# expressions
   2018/04/16: added option -s
   2018/06/12: 0.0.4 cosmetic change
+  2018/06/17: 0.0.5 added option -v
 
 Todo:
 """
@@ -163,6 +164,14 @@ File hash summary:
  There are 2 different sha256 hashes
 
 Option -s can take a list of hashes to skip, separated by character ; or ,. This option is useful in combination with option -c, to skip specified hash values when comparing.
+Option -v can take a list of hashes to validate, separated by character ; or ,.
+
+Example:
+
+hash.py -v fc2ea5bd5307d2cfa5aaa38e0c0ddce9 C:\Windows\notepad.exe
+md5   : fc2ea5bd5307d2cfa5aaa38e0c0ddce9 (validated)
+sha1  : a3b46609d159615d5c78f5c54ea24d46805ce374
+sha256: 0f8a84968fac3cadc04471c1ee5c4644414491c89a4a7149845c170258b6a6d1
 
 This tool can also split each processed file in blocks and calculate hash values for each block. This "block mode" is initiated with option -b.
 Option -c (compare) and option -b (block) are mutually exclusive.
@@ -234,7 +243,7 @@ If a file argument does not start with @ or #, it is considered to be a file on 
 If the file is not a compressed file, the binary content of the file is read from disk for processing.
 Compressed files are solely recognized based on their extension: .zip and .gz.
 If a file argument with extension .gz is provided, the tool will decompress the gzip file in memory and process the decompressed content. No checks are made to ensure that the file with extension .gz is an actual gzip compressed file.
-If a file argument with extension .zip is provided, the tool will extract the first file (or only file) from the ZIP file in memory and process the decompressed content. No checks are made to ensure that the file with extension .zip is an actual ZIP compressed file.
+If a file argument with extension .zip is provided and it contains a single file, the tool will extract the file from the ZIP file in memory and process the decompressed content. No checks are made to ensure that the file with extension .zip is an actual ZIP compressed file.
 Password protected ZIP files can be processed too. The tool uses password 'infected' (without quotes) as default password. A different password can be provided using option --password.
 
 Example:
@@ -700,6 +709,7 @@ class cBinaryFile:
         self.noextraction = noextraction
         self.literalfilename = literalfilename
         self.oZipfile = None
+        self.extracted = False
 
         fch, data = FilenameCheckHash(self.filename, self.literalfilename)
         if fch == FCH_ERROR:
@@ -716,12 +726,14 @@ class cBinaryFile:
             self.oZipfile = zipfile.ZipFile(self.filename, 'r')
             if len(self.oZipfile.infolist()) == 1:
                 self.fIn = self.oZipfile.open(self.oZipfile.infolist()[0], 'r', self.zippassword)
+                self.extracted = True
             else:
                 self.oZipfile.close()
                 self.oZipfile = None
                 self.fIn = open(self.filename, 'rb')
         elif not self.noextraction and self.filename.lower().endswith('.gz'):
             self.fIn = gzip.GzipFile(self.filename, 'rb')
+            self.extracted = True
         else:
             self.fIn = open(self.filename, 'rb')
 
@@ -957,17 +969,24 @@ def GetHashObjects(algorithms):
             return [], {}
     return hashes, {h: hashlib.new(h) for h in hashes}
 
+def ParseHashList(data):
+    separator = ','
+    if not separator in data:
+        separator = ';'
+    return data.lower().split(separator)
+
 def HashSingle(filename, cutexpression, prefix, dFileHashes, options):
-    data = cBinaryFile(filename, C2BIP3(options.password), options.noextraction, options.literalfilenames).read()
+    oBinaryFile = cBinaryFile(filename, C2BIP3(options.password), options.noextraction, options.literalfilenames)
+    data = oBinaryFile.read()
     if cutexpression != '':
         data = CutData(data, cutexpression)
     hashes, dHashes = GetHashObjects(options.algorithms)
     if hashes == []:
         return
-    if ',' in options.skip:
-        skipHashes = options.skip.lower().split(',')
-    else:
-        skipHashes = options.skip.lower().split(';')
+    skipHashes = ParseHashList(options.skip)
+    validateHashes = ParseHashList(options.validate)
+    if not options.quiet and oBinaryFile.extracted:
+        print('%sExtracted!' % (prefix))
     if options.block == 0:
         for name in hashes:
             if not name in dFileHashes:
@@ -984,7 +1003,10 @@ def HashSingle(filename, cutexpression, prefix, dFileHashes, options):
                 if options.quiet:
                     print(hashdigest)
                 else:
-                    print('%s%-6s: %s' % (prefix, name, hashdigest))
+                    validated = ''
+                    if hashdigest.lower() in validateHashes:
+                        validated = ' (validated)'
+                    print('%s%-6s: %s%s' % (prefix, name, hashdigest, validated))
     else:
         dBlockHashes = {name: {} for name in hashes}
         countBlocks = 0
@@ -1069,6 +1091,7 @@ https://DidierStevens.com'''
     oParser.add_option('-c', '--compare', action='store_true', default=False, help='Compare file hash values (except in block mode)')
     oParser.add_option('-b', '--block', default='', help='Block size for hashing')
     oParser.add_option('-s', '--skip', default='', help='Hashes to skip (except in block mode)')
+    oParser.add_option('-v', '--validate', default='', help='Hashes to validate (except in block mode)')
     oParser.add_option('-q', '--quiet', action='store_true', default=False, help='Just print hash values (except in block mode)')
     oParser.add_option('--password', default='infected', help='The ZIP password to be used (default infected)')
     oParser.add_option('--noextraction', action='store_true', default=False, help='Do not extract from archive file')

@@ -2,8 +2,8 @@
 
 __description__ = 'JPEG file analysis tool'
 __author__ = 'Didier Stevens'
-__version__ = '0.0.5'
-__date__ = '2018/06/12'
+__version__ = '0.0.6'
+__date__ = '2018/06/17'
 
 """
 Source code put in public domain by Didier Stevens, no Copyright
@@ -22,6 +22,7 @@ History:
   2018/01/30: 0.0.4 added option -e
   2018/03/05: 0.0.5 updated #e# expressions
   2018/06/12: man updated
+  2018/06/17: 0.0.6 added property extracted to cBinaryFile
 
 Todo:
 """
@@ -206,7 +207,7 @@ If a file argument does not start with @ or #, it is considered to be a file on 
 If the file is not a compressed file, the binary content of the file is read from disk for processing.
 Compressed files are solely recognized based on their extension: .zip and .gz.
 If a file argument with extension .gz is provided, the tool will decompress the gzip file in memory and process the decompressed content. No checks are made to ensure that the file with extension .gz is an actual gzip compressed file.
-If a file argument with extension .zip is provided, the tool will extract the first file (or only file) from the ZIP file in memory and process the decompressed content. No checks are made to ensure that the file with extension .zip is an actual ZIP compressed file.
+If a file argument with extension .zip is provided and it contains a single file, the tool will extract the file from the ZIP file in memory and process the decompressed content. No checks are made to ensure that the file with extension .zip is an actual ZIP compressed file.
 Password protected ZIP files can be processed too. The tool uses password 'infected' (without quotes) as default password. A different password can be provided using option --password.
 
 Example:
@@ -655,6 +656,7 @@ class cBinaryFile:
         self.noextraction = noextraction
         self.literalfilename = literalfilename
         self.oZipfile = None
+        self.extracted = False
 
         fch, data = FilenameCheckHash(self.filename, self.literalfilename)
         if fch == FCH_ERROR:
@@ -671,12 +673,14 @@ class cBinaryFile:
             self.oZipfile = zipfile.ZipFile(self.filename, 'r')
             if len(self.oZipfile.infolist()) == 1:
                 self.fIn = self.oZipfile.open(self.oZipfile.infolist()[0], 'r', self.zippassword)
+                self.extracted = True
             else:
                 self.oZipfile.close()
                 self.oZipfile = None
                 self.fIn = open(self.filename, 'rb')
         elif not self.noextraction and self.filename.lower().endswith('.gz'):
             self.fIn = gzip.GzipFile(self.filename, 'rb')
+            self.extracted = True
         else:
             self.fIn = open(self.filename, 'rb')
 
@@ -1166,8 +1170,9 @@ def ProcessJPEGFileSub(data, options, startposition=0):
     return oOutput, None, None
 
 def ProcessJPEGFile(filename, cutexpression, options):
-    data = CutData(cBinaryFile(filename, C2BIP3(options.password), options.noextraction, options.literalfilenames).Data(), cutexpression)
-    Print('File: %s' % filename, options)
+    oBinaryFile = cBinaryFile(filename, C2BIP3(options.password), options.noextraction, options.literalfilenames)
+    data = CutData(oBinaryFile.Data(), cutexpression)
+    Print('File: %s%s' % (filename, IFF(oBinaryFile.extracted, ' (extracted)', '')), options)
     if options.findsoi:
         position = 0
         while True:
