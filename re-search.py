@@ -2,8 +2,8 @@
 
 __description__ = "Program to use Python's re.findall on files"
 __author__ = 'Didier Stevens'
-__version__ = '0.0.9'
-__date__ = '2017/09/06'
+__version__ = '0.0.10'
+__date__ = '2018/06/25'
 
 """
 
@@ -33,6 +33,7 @@ History:
   2017/05/18: 0.0.7 fixed regex btc, thanks @SecurityBeard
   2017/06/13: 0.0.8 added --script and --execute
   2017/09/06: 0.0.9 added option -x
+  2018/06/25: 0.0.10 added regexs email-domain, url-domain and onion 
 
 Todo:
   add hostname to header
@@ -58,10 +59,13 @@ except:
 
 dLibrary = {
             'email': r'[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,6}',
+            'email-domain': r'[a-zA-Z0-9._%+-]+@([a-zA-Z0-9.-]+\.[a-zA-Z]{2,6})',
             'url': r'[a-zA-Z]+://[-a-zA-Z0-9.]+(?:/[-a-zA-Z0-9+&@#/%=~_|!:,.;]*)?(?:\?[a-zA-Z0-9+&@#/%=~_|!:,.;]*)?',
+            'url-domain': r'[a-zA-Z]+://([-a-zA-Z0-9.]+)(?:/[-a-zA-Z0-9+&@#/%=~_|!:,.;]*)?(?:\?[a-zA-Z0-9+&@#/%=~_|!:,.;]*)?',
             'ipv4': r'\b(?:(?:25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9])\.){3}(?:25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9])\b',
             'str': r'"[^"]+"',
             'btc': r'(?#extra=P:BTCValidate)\b[13][a-km-zA-HJ-NP-Z1-9]{25,34}\b',
+            'onion': r'[a-zA-Z2-7]{16}\.onion',
            }
 
 def PrintManual():

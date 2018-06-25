@@ -2,8 +2,8 @@
 
 __description__ = 'ZIP dump utility'
 __author__ = 'Didier Stevens'
-__version__ = '0.0.11'
-__date__ = '2017/07/18'
+__version__ = '0.0.12'
+__date__ = '2018/06/25'
 
 """
 
@@ -40,6 +40,7 @@ History:
   2017/07/02: 0.0.9: added # support for option -y
   2017/07/11: 0.0.10: added option --yarastringsraw
   2017/07/18: 0.0.11: added #s# and #q# support for option -y
+  2018/06/25: 0.0.12: added option -t
 
 Todo:
 """
@@ -60,10 +61,15 @@ import operator
 import time
 import gzip
 import zlib
+import codecs
 try:
     import yara
 except:
     pass
+if sys.version_info[0] >= 3:
+    from io import StringIO
+else:
+    from cStringIO import StringIO
 
 QUOTE = '"'
 
@@ -123,6 +129,10 @@ PE check for '':
 Entropy: 6.425034 (Min=0.0, Max=8.0)
 MD5     hash: 9b7f8260724e2cb643ad0729ec995b40
 ...
+
+If the dump needs to be processed by a string codec, like utf16, use option -t instead of -d and provide the codec:
+C:\Demo>zipdump.py -s 1 -t utf16 example.zip
+You can also provide a Python string expression, like .decode('utf16').encode('utf8'). Remark that this uses the Python eval function with untrusted input, so be careful, it can be used for code injection.
 
 When options -x, -a or -d are used without selecting a file (option -s), the first file in the ZIP file is selected and dumped.
 When options -X, -A or -D are used without selecting a file (option -s), all files in the ZIP file are selected and dumped.
@@ -406,47 +416,92 @@ def YARACompile(ruledata):
                 dFilepaths[filename] = filename
         return yara.compile(filepaths=dFilepaths)
 
-class cDumpStream():
-    def __init__(self):
-        self.text = ''
+class cDump():
+    def __init__(self, data, prefix='', offset=0, dumplinelength=16):
+        self.data = data
+        self.prefix = prefix
+        self.offset = offset
+        self.dumplinelength = dumplinelength
 
-    def Addline(self, line):
-        if line != '':
-            self.text += line + '\n'
+    def HexDump(self):
+        oDumpStream = self.cDumpStream(self.prefix)
+        hexDump = ''
+        for i, b in enumerate(self.data):
+            if i % self.dumplinelength == 0 and hexDump != '':
+                oDumpStream.Addline(hexDump)
+                hexDump = ''
+            hexDump += IFF(hexDump == '', '', ' ') + '%02X' % self.C2IIP2(b)
+        oDumpStream.Addline(hexDump)
+        return oDumpStream.Content()
 
-    def Content(self):
-        return self.text
+    def CombineHexAscii(self, hexDump, asciiDump):
+        if hexDump == '':
+            return ''
+        countSpaces = 3 * (self.dumplinelength - len(asciiDump))
+        if len(asciiDump) <= self.dumplinelength / 2:
+            countSpaces += 1
+        return hexDump + '  ' + (' ' * countSpaces) + asciiDump
+
+    def HexAsciiDump(self):
+        oDumpStream = self.cDumpStream(self.prefix)
+        hexDump = ''
+        asciiDump = ''
+        for i, b in enumerate(self.data):
+            b = self.C2IIP2(b)
+            if i % self.dumplinelength == 0:
+                if hexDump != '':
+                    oDumpStream.Addline(self.CombineHexAscii(hexDump, asciiDump))
+                hexDump = '%08X:' % (i + self.offset)
+                asciiDump = ''
+            if i % self.dumplinelength == self.dumplinelength / 2:
+                hexDump += ' '
+            hexDump += ' %02X' % b
+            asciiDump += IFF(b >= 32 and b <= 128, chr(b), '.')
+        oDumpStream.Addline(self.CombineHexAscii(hexDump, asciiDump))
+        return oDumpStream.Content()
+
+    def Base64Dump(self, nowhitespace=False):
+        encoded = binascii.b2a_base64(self.data)
+        if nowhitespace:
+            return encoded
+        oDumpStream = self.cDumpStream(self.prefix)
+        length = 64
+        for i in range(0, len(encoded), length):
+            oDumpStream.Addline(encoded[0+i:length+i])
+        return oDumpStream.Content()
+
+    class cDumpStream():
+        def __init__(self, prefix=''):
+            self.oStringIO = StringIO()
+            self.prefix = prefix
+
+        def Addline(self, line):
+            if line != '':
+                self.oStringIO.write(self.prefix + line + '\n')
+
+        def Content(self):
+            return self.oStringIO.getvalue()
+
+    @staticmethod
+    def C2IIP2(data):
+        if sys.version_info[0] > 2:
+            return data
+        else:
+            return ord(data)
 
 def HexDump(data):
-    oDumpStream = cDumpStream()
-    hexDump = ''
-    for i, b in enumerate(data):
-        if i % dumplinelength == 0 and hexDump != '':
-            oDumpStream.Addline(hexDump)
-            hexDump = ''
-        hexDump += IFF(hexDump == '', '', ' ') + '%02X' % ord(b)
-    oDumpStream.Addline(hexDump)
-    return oDumpStream.Content()
-
-def CombineHexAscii(hexDump, asciiDump):
-    if hexDump == '':
-        return ''
-    return hexDump + '  ' + (' ' * (3 * (16 - len(asciiDump)))) + asciiDump
+    return cDump(data, dumplinelength=dumplinelength).HexDump()
 
 def HexAsciiDump(data):
-    oDumpStream = cDumpStream()
-    hexDump = ''
-    asciiDump = ''
-    for i, b in enumerate(data):
-        if i % dumplinelength == 0:
-            if hexDump != '':
-                oDumpStream.Addline(CombineHexAscii(hexDump, asciiDump))
-            hexDump = '%08X:' % i
-            asciiDump = ''
-        hexDump+= ' %02X' % ord(b)
-        asciiDump += IFF(ord(b) >= 32, b, '.')
-    oDumpStream.Addline(CombineHexAscii(hexDump, asciiDump))
-    return oDumpStream.Content()
+    return cDump(data, dumplinelength=dumplinelength).HexAsciiDump()
+
+def Translate(expression):
+    try:
+        codecs.lookup(expression)
+        command = '.decode("%s")' % expression
+    except LookupError:
+        command = expression
+    return lambda x: eval('x' + command)
 
 #Fix for http://bugs.python.org/issue11395
 def StdoutWriteChunked(data):
@@ -4465,7 +4520,7 @@ def ZIPDump(zipfilename, options):
             return
         rules = YARACompile(options.yara)
 
-    if options.dump or options.dumpall or options.hexdump or options.hexdumpall or options.asciidump or options.asciidumpall:
+    if options.dump or options.dumpall or options.hexdump or options.hexdumpall or options.asciidump or options.asciidumpall or options.translate != '':
         if options.dump or options.dumpall:
             DumpFunction = lambda x:x
             if sys.platform == 'win32':
@@ -4473,6 +4528,8 @@ def ZIPDump(zipfilename, options):
                 msvcrt.setmode(sys.stdout.fileno(), os.O_BINARY)
         elif options.hexdump or options.hexdumpall:
             DumpFunction = HexDump
+        elif options.translate != '':
+            DumpFunction = Translate(options.translate)
         else:
             DumpFunction = HexAsciiDump
         counter = 0
@@ -4579,6 +4636,7 @@ def Main():
     oParser.add_option('-X', '--hexdumpall', action='store_true', default=False, help='perform hex dump of all files or selected file')
     oParser.add_option('-a', '--asciidump', action='store_true', default=False, help='perform ascii dump of first file or selected file')
     oParser.add_option('-A', '--asciidumpall', action='store_true', default=False, help='perform ascii dump of all files or selected file')
+    oParser.add_option('-t', '--translate', type=str, default='', help='string translation, like utf16 or .decode("utf8")')
     oParser.add_option('-e', '--extended', action='store_true', default=False, help='report extended information')
     oParser.add_option('-p', '--password', default='infected', help='The ZIP password to be used (default infected)')
     oParser.add_option('-P', '--passwordfile', default='', help='A file with ZIP passwords to be used in a dictionary attack')
