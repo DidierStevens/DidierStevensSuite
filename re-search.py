@@ -2,8 +2,8 @@
 
 __description__ = "Program to use Python's re.findall on files"
 __author__ = 'Didier Stevens'
-__version__ = '0.0.10'
-__date__ = '2018/06/25'
+__version__ = '0.0.11'
+__date__ = '2018/06/30'
 
 """
 
@@ -33,7 +33,9 @@ History:
   2017/05/18: 0.0.7 fixed regex btc, thanks @SecurityBeard
   2017/06/13: 0.0.8 added --script and --execute
   2017/09/06: 0.0.9 added option -x
-  2018/06/25: 0.0.10 added regexs email-domain, url-domain and onion 
+  2018/06/25: 0.0.10 added regexs email-domain, url-domain and onion
+  2018/06/29: 0.0.11 fixed ProcessFile for Linux/OSX
+  2018/06/30: added option -e
 
 Todo:
   add hostname to header
@@ -57,6 +59,8 @@ except:
     print("This program requires module reextra (it is a part of the re-search package).\nMake sure it is installed in Python's module repository or the same folder where re-search.py is installed.")
     exit(-1)
 
+REGEX_STANDARD = '[\x09\x20-\x7E]'
+
 dLibrary = {
             'email': r'[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,6}',
             'email-domain': r'[a-zA-Z0-9._%+-]+@([a-zA-Z0-9.-]+\.[a-zA-Z]{2,6})',
@@ -67,6 +71,15 @@ dLibrary = {
             'btc': r'(?#extra=P:BTCValidate)\b[13][a-km-zA-HJ-NP-Z1-9]{25,34}\b',
             'onion': r'[a-zA-Z2-7]{16}\.onion',
            }
+
+excludeRegexesForAll = ['str', 'url-domain', 'email-domain']
+
+def ListLibraryNames():
+    result = ''
+    MergeUserLibrary()
+    for key in sorted(dLibrary.keys()):
+        result += ' %s%s: %s\n' % (key, IFF(key in excludeRegexesForAll, '', '*'), dLibrary[key])
+    return result + ' all: all names marked with *\n'
 
 def PrintManual():
     manual = '''
@@ -106,6 +119,7 @@ http://ryzaocnsyvozkd.com
 http://www.microsoft.com
 http://ahsnvyetdhfkg.com
 
+Here is a list of build-in regular expressions:\n''' + ListLibraryNames() + '''
 You can also use a capture group in your regular expression. The selected text will be extracted from the first capture group:
 re-search.py ([a-z]+)\.com list.txt
 
@@ -118,9 +132,10 @@ microsoft
 ahsnvyetdhfkg
 
 By default the regular expression matching is not case sensitive. You can make it case sensitive with option -c. To surround the regular expression with boundaries (\b), use option -b. Output can be mode lowercase with option -l and unique with option -u. Output can be saved to a file with option -o filename. And if you also want to output the regular expression used for matching, use option -d.
-To get grep-like output, use option -g. Option -r removes the anchor (^and $) or the regular expression. Use option -D (dotall) to make the . expression match newline characters. 
-By default, re-search reads the file(s) line-by-line. Binary files can also be processed, but are best read completely and not line-by-line. Use option -f (fullread) to perform a fule read of the file (and not line-by-line).
-Option -G (grepall) will also do a full binary read of the (like -f --fulread), but output the complete file if there is a match. This is usefull to select files for further processing, like string searching.
+To get grep-like output, use option -g. Option -r removes the anchor (^and $) or the regular expression. Use option -D (dotall) to make the . expression match newline characters.
+By default, re-search reads the file(s) line-by-line. Binary files can also be processed, but are best read completely and not line-by-line. Use option -f (fullread) to perform a full binary read of the file (and not line-by-line).
+Option -e (extractstrings) will also do a full binary read of the file (like -f --fullread), and then extract all strings (ASCII and UNICODE, and at least 4 characters long) for further matching.
+Option -G (grepall) will also do a full binary read of the file (like -f --fullread), but output the complete file if there is a match. This is usefull to select files for further processing, like string searching.
 Option -x (hex) will produce hexadecimal output.
 
 If you have a list of regular expressions to match, put them in a csv file, and use option -v, -S, -I, -H, -R and -C.
@@ -333,6 +348,12 @@ def Library(name):
         PrintLibrary()
         sys.exit(-1)
 
+def LibraryAllNames():
+    global dLibrary
+
+    MergeUserLibrary()
+    return sorted(dLibrary.keys())
+
 class cOutputResult():
     def __init__(self, options):
         if options.output:
@@ -364,8 +385,7 @@ def CompileRegex(regex, options):
     try:
         oREExtra = reextra.cREExtra(regex, IFF(options.casesensitive, 0, re.IGNORECASE) + IFF(options.dotall, 0, re.DOTALL), options.sensical)
     except:
-        print('Error regex: %s' % regex)
-        raise
+        raise Exception('Error regex: %s' % regex)
     return regex, oREExtra
 
 def ProcessFile(fIn, fullread):
@@ -373,7 +393,7 @@ def ProcessFile(fIn, fullread):
         yield fIn.read()
     else:
         for line in fIn:
-            yield line.strip('\n')
+            yield line.strip('\n\r')
 
 def Hex(data, dohex):
     if dohex:
@@ -381,28 +401,48 @@ def Hex(data, dohex):
     else:
         return data
 
+def ExtractStringsASCII(data):
+    regex = REGEX_STANDARD + '{%d,}'
+    return re.findall(regex % 4, data)
+
+def ExtractStringsUNICODE(data):
+    regex = '((' + REGEX_STANDARD + '\x00){%d,})'
+    return [foundunicodestring.replace('\x00', '') for foundunicodestring, dummy in re.findall(regex % 4, data)]
+
+def ExtractStrings(data):
+    return ExtractStringsASCII(data) + ExtractStringsUNICODE(data)
+
+def DumpFunctionStrings(data):
+    return ''.join([extractedstring + '\n' for extractedstring in ExtractStrings(data)])
+
 def RESearchSingle(regex, filenames, oOutput, options):
-    regex, oREExtra = CompileRegex(regex, options)
-    if options.display:
-        oOutput.Line('Regex: %s' % regex)
+    if options.name and regex == 'all':
+        regexes = [CompileRegex(name, options) for name in LibraryAllNames() if not name in excludeRegexesForAll]
+    else:
+        regexes = [CompileRegex(regex, options)]
     for filename in filenames:
         if filename == '':
-            if options.fullread or options.grepall:
+            if options.fullread or options.extractstrings or options.grepall:
                 IfWIN32SetBinary(sys.stdin)
             fIn = sys.stdin
         else:
-            fIn = open(filename, IFF(options.fullread or options.grepall, 'rb', 'r'))
-        for line in ProcessFile(fIn, options.fullread or options.grepall):
-            results = oREExtra.Findall(line)
-            if options.grepall or options.grep:
-                if results != []:
-                    oOutput.Line(Hex(line, options.hex))
-            else:
-                for result in results:
-                    if isinstance(result, str):
-                        oOutput.Line(Hex(result, options.hex))
-                    if isinstance(result, tuple):
-                        oOutput.Line(Hex(result[0], options.hex))
+            fIn = open(filename, IFF(options.fullread or options.extractstrings or options.grepall, 'rb', 'r'))
+        for line in ProcessFile(fIn, options.fullread or options.extractstrings or options.grepall):
+            if options.extractstrings:
+                line = DumpFunctionStrings(line)
+            for regex, oREExtra in regexes:
+                if options.display:
+                    oOutput.Line('Regex: %s' % regex)
+                results = oREExtra.Findall(line)
+                if options.grepall or options.grep:
+                    if results != []:
+                        oOutput.Line(Hex(line, options.hex))
+                else:
+                    for result in results:
+                        if isinstance(result, str):
+                            oOutput.Line(Hex(result, options.hex))
+                        if isinstance(result, tuple):
+                            oOutput.Line(Hex(result[0], options.hex))
         if fIn != sys.stdin:
             fIn.close()
 
@@ -432,12 +472,14 @@ def RESearchCSV(csvFilename, filenames, oOutput, options):
 
     for filename in filenames:
         if filename == '':
-            if options.fullread or options.grepall:
+            if options.fullread or options.extractstrings or options.grepall:
                 IfWIN32SetBinary(sys.stdin)
             fIn = sys.stdin
         else:
-            fIn = open(filename, IFF(options.fullread or options.grepall, 'rb', 'r'))
-        for line in ProcessFile(fIn, options.fullread or options.grepall):
+            fIn = open(filename, IFF(options.fullread or options.extractstrings or options.grepall, 'rb', 'r'))
+        for line in ProcessFile(fIn, options.fullread or options.extractstrings or options.grepall):
+            if options.extractstrings:
+                line = DumpFunctionStrings(line)
             for regex, (oREExtra, comment) in dRegex.items():
                 results = oREExtra.Findall(line)
                 newRow = [regex]
@@ -493,10 +535,7 @@ wildcards are supported
 Valid regex library names:
 '''
 
-    MergeUserLibrary()
-    for key in sorted(dLibrary.keys()):
-        moredesc += ' %s: %s\n' % (key, dLibrary[key])
-
+    moredesc += ListLibraryNames()
     moredesc += '''
 Source code put in the public domain by Didier Stevens, no Copyright
 Use at your own risk
@@ -521,7 +560,8 @@ https://DidierStevens.com'''
     oParser.add_option('-H', '--header', action='store_true', default=False, help='Header')
     oParser.add_option('-R', '--regexindex', default='', help='Index or title of the regex column in the CSV file')
     oParser.add_option('-C', '--commentindex', default='', help='Index or title of the comment column in the CSV file')
-    oParser.add_option('-f', '--fullread', action='store_true', default=False, help='Do a full read of the input, not line per line')
+    oParser.add_option('-f', '--fullread', action='store_true', default=False, help='Do a full binary read of the input, not line per line')
+    oParser.add_option('-e', '--extractstrings', action='store_true', default=False, help='Do a full binary read of the input, and extract strings for matching')
     oParser.add_option('-G', '--grepall', action='store_true', default=False, help='Do a full read of the input and a full write when there is a match, not line per line')
     oParser.add_option('-D', '--dotall', action='store_true', default=False, help='. matches newline too')
     oParser.add_option('-x', '--hex', action='store_true', default=False, help='output in hex format')
