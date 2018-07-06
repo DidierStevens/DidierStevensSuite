@@ -2,8 +2,8 @@
 
 __description__ = 'ZIP dump utility'
 __author__ = 'Didier Stevens'
-__version__ = '0.0.12'
-__date__ = '2018/06/25'
+__version__ = '0.0.13'
+__date__ = '2018/07/01'
 
 """
 
@@ -41,6 +41,7 @@ History:
   2017/07/11: 0.0.10: added option --yarastringsraw
   2017/07/18: 0.0.11: added #s# and #q# support for option -y
   2018/06/25: 0.0.12: added option -t
+  2018/07/01: 0.0.13: added option --jsonoutput
 
 Todo:
 """
@@ -62,6 +63,7 @@ import time
 import gzip
 import zlib
 import codecs
+import json
 try:
     import yara
 except:
@@ -287,6 +289,8 @@ C:\Demo>zipdump.py -y contains_pe_file.yara -C decoder_xor1,decoder_rol1,decoder
 Some decoders take options, to be provided with option --decoderoptions.
 
 Use option -v to have verbose error messages when debugging your decoders.
+
+With option -j, zipdump will output the content of the ZIP file as a JSON object that can be piped into other tools that support this JSON format.
 
 Option -c (--cut) allows for the partial selection of a file. Use this option to "cut out" part of the file.
 The --cut option takes an argument to specify which section of bytes to select from the file. This argument is composed of 2 terms separated by a colon (:), like this:
@@ -4504,6 +4508,21 @@ def ZIPDump(zipfilename, options):
     else:
         fOut = None
 
+    if options.jsonoutput:
+        object = []
+        counter = 1
+        for oZipInfo in oZipfile.infolist():
+            file = oZipfile.open(oZipInfo, 'r', zippassword)
+            filecontent = file.read()
+            file.close()
+            object.append({'id': counter, 'name': oZipInfo.filename, 'content': binascii.b2a_base64(filecontent).strip('\n')})
+            counter += 1
+        Print(json.dumps({'version': 1, 'fields': ['id', 'name', 'content'], 'items': object}), fOut)
+        if fOut:
+            fOut.close()
+        oZipfile.close()
+        return
+
     if options.passwordfile != '':
         passwordfound = DictionaryAttack(options.passwordfile, oZipfile, fOut, False)
         if passwordfound != None:
@@ -4651,6 +4670,7 @@ def Main():
     oParser.add_option('-r', '--regular', action='store_true', default=False, help='if the ZIP file contains a single ZIP file, handle it like a regular (non-ZIP) file')
     oParser.add_option('-z', '--zipfilename', action='store_true', default=False, help='include the filename of the ZIP file in the output')
     oParser.add_option('-E', '--extra', type=str, default='', help='add extra info (environment variable: ZIPDUMP_EXTRA)')
+    oParser.add_option('-j', '--jsonoutput', action='store_true', default=False, help='produce json output')
     (options, args) = oParser.parse_args()
 
     if options.man:
