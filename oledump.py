@@ -2,8 +2,8 @@
 
 __description__ = 'Analyze OLE files (Compound Binary Files)'
 __author__ = 'Didier Stevens'
-__version__ = '0.0.35'
-__date__ = '2018/07/01'
+__version__ = '0.0.36'
+__date__ = '2018/07/07'
 
 """
 
@@ -76,6 +76,7 @@ History:
   2018/05/06: 0.0.34 -s is more userfriendly
   2018/07/01: 0.0.35 rename option --json to --jsonoutput
   2018/07/01: fix for json output with OOXML files
+  2018/07/07: 0.0.36: updated to version 2 of jsonoutput
 
 Todo:
 """
@@ -1444,7 +1445,7 @@ def OLESub(ole, prefix, rules, options):
         for orphan, fname, entry_type, stream in OLEGetStreams(ole):
             object.append({'id': counter, 'name': PrintableName(fname), 'content': binascii.b2a_base64(stream).strip('\n')})
             counter += 1
-        print(json.dumps({'version': 1, 'fields': ['id', 'name', 'content'], 'items': object}))
+        print(json.dumps({'version': 2, 'id': 'didierstevens.com', 'type': 'content', 'fields': ['id', 'name', 'content'], 'items': object}))
         return
 
     if options.select == '':

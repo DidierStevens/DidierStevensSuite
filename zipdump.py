@@ -2,8 +2,8 @@
 
 __description__ = 'ZIP dump utility'
 __author__ = 'Didier Stevens'
-__version__ = '0.0.13'
-__date__ = '2018/07/01'
+__version__ = '0.0.14'
+__date__ = '2018/07/07'
 
 """
 
@@ -42,6 +42,7 @@ History:
   2017/07/18: 0.0.11: added #s# and #q# support for option -y
   2018/06/25: 0.0.12: added option -t
   2018/07/01: 0.0.13: added option --jsonoutput
+  2018/07/07: 0.0.14: updated to version 2 of jsonoutput
 
 Todo:
 """
@@ -4517,7 +4518,7 @@ def ZIPDump(zipfilename, options):
             file.close()
             object.append({'id': counter, 'name': oZipInfo.filename, 'content': binascii.b2a_base64(filecontent).strip('\n')})
             counter += 1
-        Print(json.dumps({'version': 1, 'fields': ['id', 'name', 'content'], 'items': object}), fOut)
+        Print(json.dumps({'version': 2, 'id': 'didierstevens.com', 'type': 'content', 'fields': ['id', 'name', 'content'], 'items': object}), fOut)
         if fOut:
             fOut.close()
         oZipfile.close()
