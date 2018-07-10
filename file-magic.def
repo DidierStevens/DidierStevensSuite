@@ -1,0 +1,17 @@
+# 2017/01/28
+
+#------------------------------------------------------------------------------
+# zlib:  file(1) magic zlib
+#
+# http://stackoverflow.com/questions/9050260/what-does-a-zlib-header-look-like
+#
+0	beshort	0x7801	zlib No Compression/low
+0	beshort	0x789C	zlib Default Compression
+0	beshort	0x78DA	zlib Best Compression
+
+# 2017/05/08
+
+#------------------------------------------------------------------------------
+# vbe:  file(1) magic vbe
+#
+0 belong 0x23407E5E	VBE file (encoded VBScript)
