@@ -1,9 +1,11 @@
 #!/usr/bin/env python
 
-__description__ = 'Set operations on 2 files: union, intersection, subtraction, exclusive or, sample'
+from __future__ import print_function
+
+__description__ = 'Set operations on 2 (or 1) files: union, intersection, subtraction, exclusive or, sample, join'
 __author__ = 'Didier Stevens'
 __version__ = '0.0.2'
-__date__ = '2017/08/02'
+__date__ = '2018/07/17'
 
 """
 
@@ -17,6 +19,7 @@ History:
   2017/03/01: added # filename and option -b
   2017/03/03: added man
   2017/08/02: 0.0.2: added operation sample
+  2018/07/17: added operation join
 
 Todo:
 """
@@ -94,6 +97,11 @@ Output:
  Line 4
  Line 5
 
+Example to join the elements of file set1.txt into one string separated by _x_ (without newlines):
+ sets.py set1.txt join _x_
+Output:
+ Line 1_x_Line 2_x_Line 3_x_Line 4_x_Line 5_x_Line 6
+
 This program can also work on bytes/characters in stead of lines. This is done with option -b.
 
 Content of file set1-bytes.txt:
@@ -136,6 +144,12 @@ class cOutput():
             self.f.write(line + '\n')
         else:
             print(line)
+
+    def String(self, string):
+        if self.f:
+            self.f.write(string)
+        else:
+            print(string, end='')
 
     def Close(self):
         if self.f:
@@ -184,7 +198,7 @@ def File2List(filename, bytemode):
 		            f.close()
     else:
 		    try:
-		        lines = [x.strip('\n') for x in f.readlines()]
+		        lines = [x.strip('\n\r') for x in f.readlines()]
 		    except:
 		        return None
 		    finally:
@@ -202,9 +216,12 @@ def Sample(set1, k):
     random.seed()
     return random.sample(set1, k)
 
+def Join(set1, separator):
+    return separator.join(set1)
+
 def SetOperation(file1, operation, file2, options):
     content1 = File2List(file1, options.bytemode)
-    if operation != 'sample':
+    if not operation in ['sample', 'join']:
         content2 = File2List(file2, options.bytemode)
     if operation == 'union':
         result = content1 + Subtract(content2, content1)
@@ -216,19 +233,23 @@ def SetOperation(file1, operation, file2, options):
         result = Subtract(content1, content2) + Subtract(content2, content1)
     elif operation == 'sample':
         result = Sample(content1, int(file2))
+    elif operation == 'join':
+        result = Join(content1, file2)
     else:
         print('Unknown operation: %s' % operation)
         return
     oOutput = cOutput(options.output)
     if options.bytemode:
         oOutput.Line(''.join(result))
+    elif operation == 'join':
+        oOutput.String(result)
     else:
         for line in result:
             oOutput.Line(line)
     oOutput.Close()
 
 def Main():
-    oParser = optparse.OptionParser(usage='usage: %prog [options] [file1] union|intersect|subtract|xor|sample file2\n' + __description__, version='%prog ' + __version__)
+    oParser = optparse.OptionParser(usage='usage: %prog [options] [file1] union|intersect|subtract|xor|sample|join file2\n' + __description__, version='%prog ' + __version__)
     oParser.add_option('-m', '--man', action='store_true', default=False, help='Print manual')
     oParser.add_option('-o', '--output', default='', help='Output file')
     oParser.add_option('-b', '--bytemode', action='store_true', default=False, help='byte mode')

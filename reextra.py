@@ -2,14 +2,16 @@
 
 __description__ = 're extra'
 __author__ = 'Didier Stevens'
-__version__ = '0.0.2'
-__date__ = '2017/05/17'
+__version__ = '0.0.4'
+__date__ = '2018/07/15'
 
 """
 
 History:
   2014/04/04: refactoring from proxy-snort.py
   2017/05/17: 0.0.2 added extra=P
+  2017/06/13: 0.0.3 added Script and Execute
+  2018/07/15: 0.0.4 made decode_base58 more robust
 
 Todo:
 """
@@ -116,6 +118,8 @@ def decode_base58(bc, length):
     digits58 = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz'
     n = 0
     for char in bc:
+        if not char in digits58:
+            return None
         n = n * 58 + digits58.index(char)
 #    print(n.to_bytes(length, 'big'))
 #    return n.to_bytes(length, 'big')
@@ -123,7 +127,21 @@ def decode_base58(bc, length):
 
 def BTCValidate(bc):
     bcbytes = decode_base58(bc, 25)
+    if bcbytes == None:
+        return False
     return bcbytes[-4:] == hashlib.sha256(hashlib.sha256(bcbytes[:-4]).digest()).digest()[:4]
+
+def CountUniques(data):
+    dCount = {}
+    for b in data:
+        dCount[b] = True
+    return len(dCount)
+
+def Script(filename):
+    execfile(filename, globals(), globals())
+
+def Execute(pythoncode):
+    exec(pythoncode, globals())
 
 class cGibberishDetector():
     def __init__(self, filenamePickle='', acceptedCharacters='abcdefghijklmnopqrstuvwxyz '):
