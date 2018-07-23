@@ -28,6 +28,7 @@ History:
   2017/10/21: 0.0.8 added option -t
   2018/05/07: 0.0.9: added bx and ah encoding; added YARA support; added decoders
   2018/05/23: 0.0.10: added zxle and zxbe encoding; added option --ignore
+  2018/07/23: 0.0.11: added option -I
 
 Todo:
 """
@@ -132,6 +133,7 @@ You can also specify the minimum length of the decoded base64 datastream with op
 With option -w (ignorewhitespace), you can instruct base64dump to ignore all whitespace characters. So for example if the base64 text is split into lines, then you will get one base64 stream.
 With option -z (ignorenullbytes), you can instruct base64dump to ignore all leading 0x00 bytes. This can help to decode UNICODE text.
 With option -i (ignore), you can instruct base64dump to ignore all characters you provide as a value to option -i. For example, with -i , you can parse strings like 0x44332211,0x88776655,... with encoding zxle by ignoring the separator character ,.
+Option -I is like option -i, except that you specify the characters to ignore as an hexadecimal string. For example, -I 2226 will ignore characters " (22) and & (26).
 
 It's also possible to try all encodings: all
 Example:
@@ -822,6 +824,8 @@ def BASE64Dump(filename, options):
             data = data.replace(whitespacecharacter, '')
     for ignore in options.ignore:
         data = data.replace(ignore, '')
+    for ignore in binascii.a2b_hex(options.ignorehex):
+        data = data.replace(ignore, '')
     if options.ignorenullbytes:
         previous_char_was_zero = False
         result = ''
@@ -936,6 +940,7 @@ def Main():
     oParser.add_option('-u', '--unique', action='store_true', default=False, help='do not repeat identical decoded data')
     oParser.add_option('-z', '--ignorenullbytes', action='store_true', default=False, help='ignore null (zero) bytes')
     oParser.add_option('-i', '--ignore', type=str, default='', help='characters to ignore')
+    oParser.add_option('-I', '--ignorehex', type=str, default='', help='characters to ignore (hexadecimal)')
     oParser.add_option('-y', '--yara', help="YARA rule-file, @file, directory or #rule to check data (YARA search doesn't work with -s option)")
     oParser.add_option('-D', '--decoders', type=str, default='', help='decoders to load (separate decoders with a comma , ; @file supported)')
     oParser.add_option('--decoderoptions', type=str, default='', help='options for the decoder')
