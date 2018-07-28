@@ -2,8 +2,8 @@
 
 __description__ = 'Tool to test a PDF file'
 __author__ = 'Didier Stevens'
-__version__ = '0.2.4'
-__date__ = '2018/01/29'
+__version__ = '0.2.5'
+__date__ = '2018/07/05'
 
 """
 
@@ -53,6 +53,7 @@ History:
   2018/01/03: V0.2.4: bugfix entropy calculation for PDFs without streams; sample 28cb208d976466b295ee879d2d233c8a https://twitter.com/DubinRan/status/947783629123416069
   2018/01/15: bugfix ConfigParser privately reported
   2018/01/29: bugfix oPDFEOF.cntCharsAfterLastEOF when no %%EOF
+  2018/07/05: V0.2.5 introduced cExpandFilenameArguments; renamed option literal to literalfilenames
 
 Todo:
   - update XML example (entropy, EOF)
@@ -72,6 +73,7 @@ import json
 import zipfile
 import collections
 import glob
+import fnmatch
 if sys.version_info[0] >= 3:
     import urllib.request as urllib23
 else:
@@ -881,8 +883,93 @@ def AddPlugin(cClass):
 
     plugins.append(cClass)
 
-def ExpandFilenameArguments(filenames):
-    return list(collections.OrderedDict.fromkeys(sum(map(glob.glob, sum(map(ProcessAt, filenames), [])), [])))
+class cExpandFilenameArguments():
+    def __init__(self, filenames, literalfilenames=False, recursedir=False, checkfilenames=False, expressionprefix=None):
+        self.containsUnixShellStyleWildcards = False
+        self.warning = False
+        self.message = ''
+        self.filenameexpressions = []
+        self.expressionprefix = expressionprefix
+        self.literalfilenames = literalfilenames
+
+        expression = ''
+        if len(filenames) == 0:
+            self.filenameexpressions = [['', '']]
+        elif literalfilenames:
+            self.filenameexpressions = [[filename, ''] for filename in filenames]
+        elif recursedir:
+            for dirwildcard in filenames:
+                if expressionprefix != None and dirwildcard.startswith(expressionprefix):
+                    expression = dirwildcard[len(expressionprefix):]
+                else:
+                    if dirwildcard.startswith('@'):
+                        for filename in ProcessAt(dirwildcard):
+                            self.filenameexpressions.append([filename, expression])
+                    elif os.path.isfile(dirwildcard):
+                        self.filenameexpressions.append([dirwildcard, expression])
+                    else:
+                        if os.path.isdir(dirwildcard):
+                            dirname = dirwildcard
+                            basename = '*'
+                        else:
+                            dirname, basename = os.path.split(dirwildcard)
+                            if dirname == '':
+                                dirname = '.'
+                        for path, dirs, files in os.walk(dirname):
+                            for filename in fnmatch.filter(files, basename):
+                                self.filenameexpressions.append([os.path.join(path, filename), expression])
+        else:
+            for filename in list(collections.OrderedDict.fromkeys(sum(map(self.Glob, sum(map(ProcessAt, filenames), [])), []))):
+                if expressionprefix != None and filename.startswith(expressionprefix):
+                    expression = filename[len(expressionprefix):]
+                else:
+                    self.filenameexpressions.append([filename, expression])
+            self.warning = self.containsUnixShellStyleWildcards and len(self.filenameexpressions) == 0
+            if self.warning:
+                self.message = "Your filename argument(s) contain Unix shell-style wildcards, but no files were matched.\nCheck your wildcard patterns or use option literalfilenames if you don't want wildcard pattern matching."
+                return
+        if self.filenameexpressions == [] and expression != '':
+            self.filenameexpressions = [['', expression]]
+        if checkfilenames:
+            self.CheckIfFilesAreValid()
+
+    def Glob(self, filename):
+        if not ('?' in filename or '*' in filename or ('[' in filename and ']' in filename)):
+            return [filename]
+        self.containsUnixShellStyleWildcards = True
+        return glob.glob(filename)
+
+    def CheckIfFilesAreValid(self):
+        valid = []
+        doesnotexist = []
+        isnotafile = []
+        for filename, expression in self.filenameexpressions:
+            hashfile = False
+            try:
+                hashfile = FilenameCheckHash(filename, self.literalfilenames)[0] == FCH_DATA
+            except:
+                pass
+            if filename == '' or hashfile:
+                valid.append([filename, expression])
+            elif not os.path.exists(filename):
+                doesnotexist.append(filename)
+            elif not os.path.isfile(filename):
+                isnotafile.append(filename)
+            else:
+                valid.append([filename, expression])
+        self.filenameexpressions = valid
+        if len(doesnotexist) > 0:
+            self.warning = True
+            self.message += 'The following files do not exist and will be skipped: ' + ' '.join(doesnotexist) + '\n'
+        if len(isnotafile) > 0:
+            self.warning = True
+            self.message += 'The following files are not regular files and will be skipped: ' + ' '.join(isnotafile) + '\n'
+
+    def Filenames(self):
+        if self.expressionprefix == None:
+            return [filename for filename, expression in self.filenameexpressions]
+        else:
+            return self.filenameexpressions
 
 class cPluginParent():
     onlyValidPDF = True
@@ -949,7 +1036,8 @@ https://DidierStevens.com'''
     oParser.add_option('-n', '--nozero', action='store_true', default=False, help='supress output for counts equal to zero')
     oParser.add_option('-o', '--output', type=str, default='', help='output to log file')
     oParser.add_option('--pluginoptions', type=str, default='', help='options for the plugin')
-    oParser.add_option('-l', '--literal', action='store_true', default=False, help='take filenames literally, no wildcards')
+    oParser.add_option('-l', '--literalfilenames', action='store_true', default=False, help='take filenames literally, no wildcard matching')
+    oParser.add_option('--recursedir', action='store_true', default=False, help='Recurse directories (wildcards and here files (@...) allowed)')
     (options, args) = oParser.parse_args()
 
     if len(args) == 0:
@@ -960,11 +1048,12 @@ https://DidierStevens.com'''
             print('Option scan not supported with stdin')
             options.scan = False
         filenames = ['']
-    elif options.literal:
-        filenames = args
     else:
         try:
-            filenames = ExpandFilenameArguments(args)
+            oExpandFilenameArguments = cExpandFilenameArguments(args, options.literalfilenames, options.recursedir, False)
+            filenames = oExpandFilenameArguments.Filenames()
+            if oExpandFilenameArguments.warning:
+                print(oExpandFilenameArguments.message)
         except Exception as e:
             print(e)
             return

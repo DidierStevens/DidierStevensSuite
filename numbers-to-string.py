@@ -2,8 +2,8 @@
 
 __description__ = "Program to convert numbers into a string"
 __author__ = 'Didier Stevens'
-__version__ = '0.0.3'
-__date__ = '2017/11/10'
+__version__ = '0.0.4'
+__date__ = '2018/07/28'
 
 """
 
@@ -17,6 +17,9 @@ History:
   2016/09/10: added option -j
   2017/08/11: 0.0.2 added option -i
   2017/11/10: 0.0.3 added man page
+  2018/06/29: 0.0.4 added options --grep and --grepoptions
+  2018/07/25: added options --begin and --end
+  2018/07/25: updated man
 
 Todo:
 """
@@ -96,6 +99,17 @@ numbers-to-string.py needs at least 3 numbers per line to start extracting. Line
 Errors that occur when evaluating the Python expression will be silently ignored. To have the tool raise these errors, use option -e.
 
 If the resulting value of the expression is more than 255, an error will be generated, unless option -i is used to ignore these errors.
+
+Option --grep can be used to select (grep) lines that have to be processed.
+If this option is not used, all lines will be processed.
+To select particular lines to be processed, used option --grep and provide a regular expression. All lines matching this regular expression will be processed.
+You can also use a capture group in your regular expression. The line to be processed will become the content of the first capture group (and not the complete line).
+The regular expression matching operation is case sensitive. Use option --grepoptions i to make the matching operation case insensitive.
+Use option --grepoptions v to invert the selection.
+Use option --grepoptions F to match a fixed string in stead of a regular expression.
+
+Option --begin can be used to provide the string that is the start of number processing per line.
+Option --end can be used to provide the string that is the end of number processing per line.
 
 '''
     for line in manual.split('\n'):
@@ -178,7 +192,7 @@ def ProcessFile(fIn, fullread):
         yield fIn.read()
     else:
         for line in fIn:
-            yield line.strip('\n')
+            yield line.strip('\n\r')
 
 def Chr(number):
     try:
@@ -186,7 +200,51 @@ def Chr(number):
     except:
         return ''
 
+class cGrep():
+    def __init__(self, expression, options):
+        self.expression = expression
+        self.options = options
+        if self.expression == '' and self.options != '':
+            raise Exception('Option --grepoptions can not be used without option --grep')
+        self.dogrep = self.expression != ''
+        self.oRE = None
+        self.invert = False
+        self.caseinsensitive = False
+        self.fixedstring = False
+        if self.dogrep:
+            flags = 0
+            for option in self.options:
+                if option == 'i':
+                    flags = re.IGNORECASE
+                    self.caseinsensitive = True
+                elif option == 'v':
+                    self.invert = True
+                elif option == 'F':
+                    self.fixedstring = True
+                else:
+                    raise Exception('Unknown grep option: %s' % option)
+            self.oRE = re.compile(self.expression, flags)
+
+    def Grep(self, line):
+        if self.fixedstring:
+            if self.caseinsensitive:
+                found = self.expression.lower() in line.lower()
+            else:
+                found = self.expression in line
+            if self.invert:
+                return not found, line
+            else:
+                return found, line
+        else:
+            oMatch = self.oRE.search(line)
+            if self.invert:
+                return oMatch == None, line
+            if oMatch != None and len(oMatch.groups()) > 0:
+                line = oMatch.groups()[0]
+            return oMatch != None, line
+
 def NumbersToStringSingle(function, filenames, oOutput, options):
+    oGrep = cGrep(options.grep, options.grepoptions)
     if function == '':
         Function = lambda x: x
     elif function.startswith('lambda '):
@@ -205,6 +263,21 @@ def NumbersToStringSingle(function, filenames, oOutput, options):
         else:
             fIn = open(filename, 'r')
         for line in ProcessFile(fIn, False):
+            selected = True
+            if oGrep.dogrep:
+                selected, line = oGrep.Grep(line)
+            if not selected:
+                continue
+            if options.begin != '':
+                position = line.find(options.begin)
+                if position == -1:
+                    continue
+                line = line[position:]
+            if options.end != '':
+                position = line.find(options.end)
+                if position == -1:
+                    continue
+                line = line[:position + len(options.end)]
             results = oRE.findall(line)
             if len(results) >= options.number:
                 error = True
@@ -258,6 +331,10 @@ https://DidierStevens.com'''
     oParser.add_option('-i', '--ignore', action='store_true', default=False, help='Ignore numbers greater than 255')
     oParser.add_option('-n', '--number', type=int, default=3, help='Minimum number of numbers (3 by default)')
     oParser.add_option('-j', '--join', action='store_true', default=False, help='Join output')
+    oParser.add_option('--grep', type=str, default='', help='Grep expression')
+    oParser.add_option('--grepoptions', type=str, default='', help='Grep options')
+    oParser.add_option('--begin', type=str, default='', help='Begin substring')
+    oParser.add_option('--end', type=str, default='', help='End substring')
     (options, args) = oParser.parse_args()
 
     if options.man:

@@ -2,8 +2,8 @@
 
 __description__ = "Program to evaluate a Python expression for each line in the provided text file(s)"
 __author__ = 'Didier Stevens'
-__version__ = '0.0.4'
-__date__ = '2018/04/22'
+__version__ = '0.0.5'
+__date__ = '2018/07/28'
 
 """
 
@@ -23,6 +23,8 @@ History:
   2018/04/01: 0.0.4 added support for # to option -o
   2018/04/17: refactored support for # to option -o
   2018/04/22: updated man page with -r option
+  2018/07/21: 0.0.5 added options --grep and --grepoptions
+  2018/07/28: added options --begingrep, --begingrepoptions, --endgrep, and --endgrepoptions
 
 Todo:
 """
@@ -35,6 +37,7 @@ import textwrap
 import gzip
 import os
 import time
+import re
 
 def PrintManual():
     manual = '''
@@ -134,6 +137,30 @@ Example:
  Number 5
  Number 7
  Number 9
+
+Option --grep can be used to select (grep) lines that have to be processed.
+If this option is not used, all lines will be processed.
+To select particular lines to be processed, used option --grep and provide a regular expression. All lines matching this regular expression will be processed.
+You can also use a capture group in your regular expression. The line to be processed will become the content of the first capture group (and not the complete line).
+The regular expression matching operation is case sensitive. Use option --grepoptions i to make the matching operation case insensitive.
+Use option --grepoptions v to invert the selection.
+Use option --grepoptions F to match a fixed string in stead of a regular expression.
+
+Option --begingrep can be used to select the first line from which on lines have to be processed.
+If this option is not used, all lines will be processed.
+To select the first line to be processed, used option --begingrep and provide a regular expression. The line matching this regular expression and all following lines will be processed (depending on --grep and --endgrep).
+The regular expression matching operation is case sensitive. Use option --begingrepoptions i to make the matching operation case insensitive.
+Use option --begingrepoptions v to invert the selection.
+Use option --begingrepoptions F to match a fixed string in stead of a regular expression.
+
+Option --endgrep can be used to select the last line to be processed.
+If this option is not used, all lines will be processed.
+To select the last line to be processed, used option --endgrep and provide a regular expression. The line matching this regular expression will be the last line to be processed (depending on --grep).
+The regular expression matching operation is case sensitive. Use option --endgrepoptions i to make the matching operation case insensitive.
+Use option --endgrepoptions v to invert the selection.
+Use option --endgrepoptions F to match a fixed string in stead of a regular expression.
+
+When combining --begingrep and --endgrep, make sure that --endgrep does not match a line before --begingrep does.
 
 The lines are written to standard output, except when option -o is used. When option -o is used, the lines are written to the filename specified by option -o.
 Filenames used with option -o starting with # have special meaning.
@@ -393,7 +420,57 @@ class cOutputResult():
     def Close(self):
         self.oOutput.Close()
 
-def ProcessFile(fIn, fullread):
+class cGrep():
+    def __init__(self, expression, options):
+        self.expression = expression
+        self.options = options
+        if self.expression == '' and self.options != '':
+            raise Exception('Option --grepoptions can not be used without option --grep')
+        self.dogrep = self.expression != ''
+        self.oRE = None
+        self.invert = False
+        self.caseinsensitive = False
+        self.fixedstring = False
+        if self.dogrep:
+            flags = 0
+            for option in self.options:
+                if option == 'i':
+                    flags = re.IGNORECASE
+                    self.caseinsensitive = True
+                elif option == 'v':
+                    self.invert = True
+                elif option == 'F':
+                    self.fixedstring = True
+                else:
+                    raise Exception('Unknown grep option: %s' % option)
+            self.oRE = re.compile(self.expression, flags)
+
+    def Grep(self, line):
+        if self.fixedstring:
+            if self.caseinsensitive:
+                found = self.expression.lower() in line.lower()
+            else:
+                found = self.expression in line
+            if self.invert:
+                return not found, line
+            else:
+                return found, line
+        else:
+            oMatch = self.oRE.search(line)
+            if self.invert:
+                return oMatch == None, line
+            if oMatch != None and len(oMatch.groups()) > 0:
+                line = oMatch.groups()[0]
+            return oMatch != None, line
+
+def ProcessFile(fIn, oBeginGrep, oGrep, oEndGrep, fullread):
+    if fIn == None:
+        return
+
+    begin = oBeginGrep == None or not oBeginGrep.dogrep
+    end = False
+    returnendline = False
+
     if type(fIn) == list:
         for index in xrange(fIn[0], fIn[1], fIn[2]):
             yield str(index)
@@ -401,7 +478,25 @@ def ProcessFile(fIn, fullread):
         yield fIn.read()
     else:
         for line in fIn:
-            yield line.strip('\n\r')
+            line = line.rstrip('\n\r')
+            if not begin:
+                begin, line = oBeginGrep.Grep(line)
+            if not begin:
+                continue
+            if not end and oEndGrep != None and oEndGrep.dogrep:
+                end, line = oEndGrep.Grep(line)
+                if end:
+                    returnendline = True
+            if end and not returnendline:
+                continue
+            selected = True
+            if oGrep != None and oGrep.dogrep:
+                selected, line = oGrep.Grep(line)
+            if not selected:
+                continue
+            if end and returnendline:
+                returnendline = False
+            yield line
 
 def Duckify(line):
     result = ['ENTER']
@@ -409,7 +504,7 @@ def Duckify(line):
         result[0:0] = ['STRING ' + line]
     return result
 
-def PythonPerLineSingle(expression, filename, oOutput, options):
+def PythonPerLineSingle(expression, filename, oBeginGrep, oGrep, oEndGrep, oOutput, options):
     if filename == '':
         fIn = sys.stdin
     elif type(filename) == list:
@@ -418,7 +513,7 @@ def PythonPerLineSingle(expression, filename, oOutput, options):
         fIn = gzip.GzipFile(filename, 'rb')
     else:
         fIn = open(filename, 'r')
-    for line in ProcessFile(fIn, False):
+    for line in ProcessFile(fIn, oBeginGrep, oGrep, oEndGrep, False):
         expressionToEvaluate = expression.replace('{}', repr(line))
         try:
             result = eval(expressionToEvaluate)
@@ -451,10 +546,13 @@ def PythonPerLine(expression, filenames, options):
     if options.script != '':
         execfile(options.script, globals(), globals())
 
+    oGrep = cGrep(options.grep, options.grepoptions)
+    oBeginGrep = cGrep(options.begingrep, options.begingrepoptions)
+    oEndGrep = cGrep(options.endgrep, options.endgrepoptions)
     oOutput = cOutputResult(options)
     for filename in filenames:
         oOutput.Filename(filename)
-        PythonPerLineSingle(expression, filename, oOutput, options)
+        PythonPerLineSingle(expression, filename, oBeginGrep, oGrep, oEndGrep, oOutput, options)
     oOutput.Close()
 
 def CheckArgumentsAndOptions(oParser, args, options):
@@ -495,6 +593,12 @@ https://DidierStevens.com'''
     oParser.add_option('-e', '--execute', default='', help='Commands to execute')
     oParser.add_option('-r', '--range', type=str, default='', help='Parameters to generate input with xrange')
     oParser.add_option('-i', '--ignore', action='store_true', default=False, help='Ignore errors when evaluating the expression')
+    oParser.add_option('--grep', type=str, default='', help='Grep expression')
+    oParser.add_option('--grepoptions', type=str, default='', help='Grep options (ivF)')
+    oParser.add_option('--begingrep', type=str, default='', help='Grep expression for begin line')
+    oParser.add_option('--begingrepoptions', type=str, default='', help='begingrep options (ivF)')
+    oParser.add_option('--endgrep', type=str, default='', help='Grep expression for end line')
+    oParser.add_option('--endgrepoptions', type=str, default='', help='endgrep options (ivF)')
     (options, args) = oParser.parse_args()
 
     if CheckArgumentsAndOptions(oParser, args, options):

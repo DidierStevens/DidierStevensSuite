@@ -3,7 +3,7 @@
 __description__ = 'This is essentialy a wrapper for the struct module'
 __author__ = 'Didier Stevens'
 __version__ = '0.0.5'
-__date__ = '2018/06/12'
+__date__ = '2018/07/21'
 
 """
 Source code put in public domain by Didier Stevens, no Copyright
@@ -32,6 +32,8 @@ History:
   2018/02/26: changed options -c and -s to -C and -S, added options -s -a -x -d, updated man
   2018/03/05: updated #e# expressions
   2018/06/12: updated man
+  2018/06/17: added property extracted to cBinaryFile
+  2018/07/21: updated CheckJSON
 
 Todo:
 """
@@ -695,6 +697,7 @@ class cBinaryFile:
         self.noextraction = noextraction
         self.literalfilename = literalfilename
         self.oZipfile = None
+        self.extracted = False
 
         if content != None:
             self.fIn = DataIO(content)
@@ -715,12 +718,14 @@ class cBinaryFile:
             self.oZipfile = zipfile.ZipFile(self.filename, 'r')
             if len(self.oZipfile.infolist()) == 1:
                 self.fIn = self.oZipfile.open(self.oZipfile.infolist()[0], 'r', self.zippassword)
+                self.extracted = True
             else:
                 self.oZipfile.close()
                 self.oZipfile = None
                 self.fIn = open(self.filename, 'rb')
         elif not self.noextraction and self.filename.lower().endswith('.gz'):
             self.fIn = gzip.GzipFile(self.filename, 'rb')
+            self.extracted = True
         else:
             self.fIn = open(self.filename, 'rb')
 
@@ -802,6 +807,7 @@ def CheckJSON(stringJSON):
         object = json.loads(stringJSON)
     except:
         print('Error parsing JSON')
+        print(sys.exc_info()[1])
         return None
     if not isinstance(object, dict):
         print('Error JSON is not a dictionary')
@@ -809,8 +815,20 @@ def CheckJSON(stringJSON):
     if not 'version' in object:
         print('Error JSON dictionary has no version')
         return None
-    if object['version'] != 1:
+    if object['version'] != 2:
         print('Error JSON dictionary has wrong version')
+        return None
+    if not 'id' in object:
+        print('Error JSON dictionary has no id')
+        return None
+    if object['id'] != 'didierstevens.com':
+        print('Error JSON dictionary has wrong id')
+        return None
+    if not 'type' in object:
+        print('Error JSON dictionary has no type')
+        return None
+    if object['type'] != 'content':
+        print('Error JSON dictionary has wrong type')
         return None
     if not 'fields' in object:
         print('Error JSON dictionary has no fields')
@@ -1278,7 +1296,7 @@ def FormatBytesSingle(filename, cutexpression, content, options):
     oBinaryFile.close()
 
     if filename != '' and options.select == '':
-        print('File: %s' % filename)
+        print('File: %s%s' % (filename, IFF(oBinaryFile.extracted, ' (extracted)', '')))
     if format == '':
         print('s:signed u:unsigned l:little-endian b:big-endian m:mixed-endian')
     if format != '':

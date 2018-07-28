@@ -2,8 +2,8 @@
 
 __description__ = "Program to use Python's re.findall on files"
 __author__ = 'Didier Stevens'
-__version__ = '0.0.11'
-__date__ = '2018/06/30'
+__version__ = '0.0.12'
+__date__ = '2018/07/28'
 
 """
 
@@ -36,6 +36,7 @@ History:
   2018/06/25: 0.0.10 added regexs email-domain, url-domain and onion
   2018/06/29: 0.0.11 fixed ProcessFile for Linux/OSX
   2018/06/30: added option -e
+  2018/07/28: added regexes str-e, str-u and str-eu
 
 Todo:
   add hostname to header
@@ -68,6 +69,9 @@ dLibrary = {
             'url-domain': r'[a-zA-Z]+://([-a-zA-Z0-9.]+)(?:/[-a-zA-Z0-9+&@#/%=~_|!:,.;]*)?(?:\?[a-zA-Z0-9+&@#/%=~_|!:,.;]*)?',
             'ipv4': r'\b(?:(?:25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9])\.){3}(?:25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9])\b',
             'str': r'"[^"]+"',
+            'str-e': r'"[^"]*"',
+            'str-u': r'"([^"]+)"',
+            'str-eu': r'"([^"]*)"',
             'btc': r'(?#extra=P:BTCValidate)\b[13][a-km-zA-HJ-NP-Z1-9]{25,34}\b',
             'onion': r'[a-zA-Z2-7]{16}\.onion',
            }
