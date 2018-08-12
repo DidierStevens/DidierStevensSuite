@@ -2,8 +2,8 @@
 
 __description__ = 'MSG plugin for oledump.py'
 __author__ = 'Didier Stevens'
-__version__ = '0.0.1'
-__date__ = '2017/12/16'
+__version__ = '0.0.3'
+__date__ = '2018/07/14'
 
 """
 
@@ -13,12 +13,16 @@ Use at your own risk
 
 History:
   2017/12/16: start
+  2017/12/17: 0.0.2 added options -d and -a
+  2017/12/30: removed option -a (becomes default) and -d; and added option -n
+  2018/07/14: 0.0.3 added option -k
 
 Todo:
 """
 
 import struct
 import re
+import optparse
 
 class cMSG(cPluginParent):
     macroOnly = False
@@ -149,10 +153,29 @@ class cMSG(cPluginParent):
 
         dTypes = {'001E': 'ASC', '001F': 'UNI', '0102': 'BIN'}
 
+        oParser = optparse.OptionParser()
+        oParser.add_option('-n', '--nodecode', action='store_true', default=False, help='Do not decode data')
+        oParser.add_option('-k', '--known', action='store_true', default=False, help='Only display known hexcodes')
+        (options, args) = oParser.parse_args(self.options.split(' '))
+
         self.ran = True
         oMatch = re.search('_[0-9A-F]{8}', self.streamname[-1])
         if oMatch != None:
-            result.append('%s %s: %s %s' % (oMatch.group()[1:5], oMatch.group()[5:], dTypes.get(oMatch.group()[5:], '?  '), dCodes.get(oMatch.group()[1:5], '?')))
+            hexcode = oMatch.group()[1:5]
+            hextype = oMatch.group()[5:]
+            if hextype == '001F':
+                decoded = self.stream.decode('utf16')
+            elif hextype == '0102':
+                decoded = repr(self.stream)
+            else:
+                decoded = ''
+            line = '%s %s: %s %s' % (hexcode, hextype, dTypes.get(hextype, '?  '), dCodes.get(hexcode, '?'))
+            if options.nodecode:
+                pass
+            else:
+                line = (line + ' ' * 40)[0:40] + ' ' + decoded[0:40]
+            if not options.known or options.known and hexcode in dCodes:
+                result.append(line)
         
         return result
 

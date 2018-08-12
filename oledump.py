@@ -2,8 +2,8 @@
 
 __description__ = 'Analyze OLE files (Compound Binary Files)'
 __author__ = 'Didier Stevens'
-__version__ = '0.0.36'
-__date__ = '2018/07/07'
+__version__ = '0.0.37'
+__date__ = '2018/08/04'
 
 """
 
@@ -77,6 +77,7 @@ History:
   2018/07/01: 0.0.35 rename option --json to --jsonoutput
   2018/07/01: fix for json output with OOXML files
   2018/07/07: 0.0.36: updated to version 2 of jsonoutput
+  2018/08/04: 0.0.37 added option --vbadecompressskipattributes
 
 Todo:
 """
@@ -247,6 +248,8 @@ Attribute VB_Customizable = True
 
 If the VBA code contains other statements than Attribute or Options statements, then the indicator is a upper case letter M.
 This M/m indicator allows you to focus first on interesting VBA macros.
+
+To decompress the macros and skip the initial attributes, use option --vbadecompressskipattributes.
 
 When compressed VBA code is corrupted, the status indicatore will be E (error).
 C:\Demo>oledump.py Book2-vba.xls
@@ -770,12 +773,22 @@ def SearchAndDecompressSub(data):
         compressedData = data[position - 3:]
     return Decompress(compressedData)
 
-def SearchAndDecompress(data, ifError='Error: unable to decompress\n'):
+def SkipAttributes(text):
+    oAttribute = re.compile('^Attribute VB_.+? = [^\n]+\n')
+    while True:
+        oMatch = oAttribute.match(text)
+        if oMatch == None:
+            break
+        text = text[len(oMatch.group()):]
+    return text
+
+def SearchAndDecompress(data, ifError='Error: unable to decompress\n', skipAttributes=False):
     result, decompress = SearchAndDecompressSub(data)
-    if result:
-        return decompress
-    elif ifError == None:
-        return decompress
+    if result or ifError == None:
+        if skipAttributes:
+            return SkipAttributes(decompress)
+        else:
+            return decompress
     else:
         return ifError
 
@@ -1560,6 +1573,11 @@ def OLESub(ole, prefix, rules, options):
                 DumpFunction = lambda x: SearchAndDecompress(x, '')
             else:
                 DumpFunction = SearchAndDecompress
+        elif options.vbadecompressskipattributes:
+            if options.select == 'a':
+                DumpFunction = lambda x: SearchAndDecompress(x, '', True)
+            else:
+                DumpFunction = lambda x: SearchAndDecompress(x, skipAttributes=True)
         elif options.vbadecompresscorrupt:
             DumpFunction = lambda x: SearchAndDecompress(x, None)
         elif options.extract:
@@ -1636,9 +1654,9 @@ def OLEDump(filename, options):
             data = File2String(filename)
         if options.vbadecompress:
             if options.vbadecompresscorrupt:
-                vba = SearchAndDecompress(data, None)
+                vba = SearchAndDecompress(data, None, skipAttributes=options.vbadecompressskipattributes)
             else:
-                vba = SearchAndDecompress(data)
+                vba = SearchAndDecompress(data, skipAttributes=options.vbadecompressskipattributes)
             if options.plugins == '':
                 print(vba)
                 return returnCode
@@ -1779,6 +1797,7 @@ def Main():
     oParser.add_option('-a', '--asciidump', action='store_true', default=False, help='perform ascii dump')
     oParser.add_option('-S', '--strings', action='store_true', default=False, help='perform strings dump')
     oParser.add_option('-v', '--vbadecompress', action='store_true', default=False, help='VBA decompression')
+    oParser.add_option('--vbadecompressskipattributes', action='store_true', default=False, help='VBA decompression, skipping initial attributes')
     oParser.add_option('--vbadecompresscorrupt', action='store_true', default=False, help='VBA decompression, display beginning if corrupted')
     oParser.add_option('-r', '--raw', action='store_true', default=False, help='read raw file (use with options -v or -p')
     oParser.add_option('-t', '--translate', type=str, default='', help='string translation, like utf16 or .decode("utf8")')
