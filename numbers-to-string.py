@@ -2,8 +2,8 @@
 
 __description__ = "Program to convert numbers into a string"
 __author__ = 'Didier Stevens'
-__version__ = '0.0.4'
-__date__ = '2018/07/28'
+__version__ = '0.0.5'
+__date__ = '2018/08/25'
 
 """
 
@@ -20,6 +20,7 @@ History:
   2018/06/29: 0.0.4 added options --grep and --grepoptions
   2018/07/25: added options --begin and --end
   2018/07/25: updated man
+  2018/08/25: 0.0.5 added option -S
 
 Todo:
 """
@@ -91,6 +92,12 @@ With option -j, the output strings can be concatenated:
 
 C:\Demo>numbers-to-string.py -j n test.js
 DidierStevens
+
+numbers-to-string.py can also generate statistics, to help with the identification of the encoding. Use option -S to generate statistics, like this:
+
+C:\Demo>numbers-to-string.py -S test.js
+Line      1: count =     25 minimum =     47 maximum =    119 average =     97
+Total      : count =     25 minimum =     47 maximum =    119 average =     97
 
 Output can be written to a file using option -o.
 
@@ -243,6 +250,10 @@ class cGrep():
                 line = oMatch.groups()[0]
             return oMatch != None, line
 
+def CalculateStatistics(numbers):
+    numbers = map(int, numbers)
+    return (len(numbers), min(numbers), max(numbers), sum(numbers) / len(numbers))
+
 def NumbersToStringSingle(function, filenames, oOutput, options):
     oGrep = cGrep(options.grep, options.grepoptions)
     if function == '':
@@ -262,47 +273,59 @@ def NumbersToStringSingle(function, filenames, oOutput, options):
             fIn = sys.stdin
         else:
             fIn = open(filename, 'r')
-        for line in ProcessFile(fIn, False):
-            selected = True
-            if oGrep.dogrep:
-                selected, line = oGrep.Grep(line)
-            if not selected:
-                continue
-            if options.begin != '':
-                position = line.find(options.begin)
-                if position == -1:
+        if options.statistics:
+            linecounter = 1
+            totalResults = []
+            for line in ProcessFile(fIn, False):
+                results = oRE.findall(line)
+                totalResults += results
+                if results != []:
+                    oOutput.Line('Line %6d: count = %6d minimum = %6d maximum = %6d average = %6d' % ((linecounter, ) + CalculateStatistics(results)))
+                linecounter += 1
+            if totalResults != []:
+                oOutput.Line('Total      : count = %6d minimum = %6d maximum = %6d average = %6d' % CalculateStatistics(totalResults))
+        else:
+            for line in ProcessFile(fIn, False):
+                selected = True
+                if oGrep.dogrep:
+                    selected, line = oGrep.Grep(line)
+                if not selected:
                     continue
-                line = line[position:]
-            if options.end != '':
-                position = line.find(options.end)
-                if position == -1:
-                    continue
-                line = line[:position + len(options.end)]
-            results = oRE.findall(line)
-            if len(results) >= options.number:
-                error = True
-                if Function == None:
-                    try:
-                        result = ''.join(map(ChrFunction, [eval(function) for n in map(int, results)]))
-                        error = False
-                    except:
-                        if options.error:
-                            print('n = %d' % n)
-                            raise
-                else:
-                    try:
-                        result = ''.join(map(ChrFunction, Function(map(int, results))))
-                        error = False
-                    except:
-                        if options.error:
-                            raise
-                if not error:
-                    if options.join:
-                        joined += result
+                if options.begin != '':
+                    position = line.find(options.begin)
+                    if position == -1:
+                        continue
+                    line = line[position:]
+                if options.end != '':
+                    position = line.find(options.end)
+                    if position == -1:
+                        continue
+                    line = line[:position + len(options.end)]
+                results = oRE.findall(line)
+                if len(results) >= options.number:
+                    error = True
+                    if Function == None:
+                        try:
+                            result = ''.join(map(ChrFunction, [eval(function) for n in map(int, results)]))
+                            error = False
+                        except:
+                            if options.error:
+                                print('n = %d' % n)
+                                raise
                     else:
-                        oOutput.Line(result)
-        if options.join:
-            oOutput.Line(joined)
+                        try:
+                            result = ''.join(map(ChrFunction, Function(map(int, results))))
+                            error = False
+                        except:
+                            if options.error:
+                                raise
+                    if not error:
+                        if options.join:
+                            joined += result
+                        else:
+                            oOutput.Line(result)
+            if options.join:
+                oOutput.Line(joined)
         if fIn != sys.stdin:
             fIn.close()
 
@@ -331,6 +354,7 @@ https://DidierStevens.com'''
     oParser.add_option('-i', '--ignore', action='store_true', default=False, help='Ignore numbers greater than 255')
     oParser.add_option('-n', '--number', type=int, default=3, help='Minimum number of numbers (3 by default)')
     oParser.add_option('-j', '--join', action='store_true', default=False, help='Join output')
+    oParser.add_option('-S', '--statistics', action='store_true', default=False, help='Generate statistics')
     oParser.add_option('--grep', type=str, default='', help='Grep expression')
     oParser.add_option('--grepoptions', type=str, default='', help='Grep options')
     oParser.add_option('--begin', type=str, default='', help='Begin substring')
@@ -344,8 +368,10 @@ https://DidierStevens.com'''
 
     if len(args) == 0:
         NumbersToString('', [''], options)
-    elif len(args) == 1:
+    elif len(args) == 1 and not options.statistics:
         NumbersToString(args[0], [''], options)
+    elif options.statistics:
+        NumbersToString('', ExpandFilenameArguments(args), options)
     else:
         NumbersToString(args[0], ExpandFilenameArguments(args[1:]), options)
 
