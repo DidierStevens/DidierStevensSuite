@@ -2,8 +2,8 @@
 
 __description__ = 'Tool for displaying PE file info'
 __author__ = 'Didier Stevens'
-__version__ = '0.7.3'
-__date__ = '2018/05/17'
+__version__ = '0.7.4'
+__date__ = '2018/08/18'
 
 """
 
@@ -36,7 +36,7 @@ History:
   2017/11/03: continued
   2018/02/12: V0.7.2 bug fix Signature()
   2018/05/17: V0.7.3 better error handling for PEiD files
-
+  2018/08/18: V0.7.4 better error handling signatures
 Todo:
 """
 
@@ -195,6 +195,11 @@ def Signature(pe):
         return
 
     signature = pe.write()[address + 8:address + size]
+    if len(signature) != size - 8:
+        print(' Unable to extract full signature, file is most likely truncated')
+        print(' Extracted: %d bytes' % len(signature))
+        print(' Expected: %d bytes' % (size - 8))
+        return
 
     try:
         from pyasn1.codec.der import decoder as der_decoder
@@ -245,7 +250,10 @@ def SingleFileInfo(filename, signatures, options):
     print(pe.dump_info())
 
     print('Signature:')
-    Signature(pe)
+    try:
+        Signature(pe)
+    except Exception as e:
+        print(' Error occured: %s' % e.message)
     print('')
 
     print('PEiD:')
