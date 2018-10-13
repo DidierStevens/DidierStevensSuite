@@ -2,8 +2,8 @@
 
 __description__ = 'HTTP Heuristics plugin for oledump.py'
 __author__ = 'Didier Stevens'
-__version__ = '0.0.9'
-__date__ = '2016/12/11'
+__version__ = '0.0.10'
+__date__ = '2018/10/13'
 
 """
 
@@ -26,6 +26,7 @@ History:
   2015/03/23: 0.0.7 fixed regression bug Heuristics
   2015/04/01: 0.0.8 added PreProcess
   2016/12/11: 0.0.9 added iOffset loop
+  2018/10/13: 0.0.10 changed XOR logic, added options (-e -k)
 
 Todo:
 """
@@ -39,6 +40,23 @@ def ReplaceFunction(match):
     except:
         return match.group(0)
 
+keywords = ['http:', 'https:']
+extendedkeywords = ['msxml', 'adodb', 'shell', 'c:\\', 'cmd', 'powershell']
+
+def StartsWithHTTP(str):
+    tosearch = str.lower()
+    for keyword in keywords:
+        if tosearch.startswith(keyword):
+            return True
+    return False
+
+def ContainsHTTP(str):
+    tosearch = str.lower()
+    for keyword in keywords:
+        if keyword in tosearch:
+            return True
+    return False
+
 class cHTTPHeuristics(cPluginParent):
     macroOnly = True
     name = 'HTTP Heuristics plugin'
@@ -51,9 +69,9 @@ class cHTTPHeuristics(cPluginParent):
         self.ran = False
 
     def Heuristics(self, data, noDecode=False):
-        if data.lower().startswith('http:'):
+        if StartsWithHTTP(data):
             return data
-        if data[::-1].lower().startswith('http:'):
+        if StartsWithHTTP(data[::-1]):
             return data[::-1]
         if noDecode:
             return data
@@ -69,18 +87,21 @@ class cHTTPHeuristics(cPluginParent):
             except:
                 return data
 
-    # bruteforce XOR; short strings (< 10) are keys
+    # bruteforce XOR; if we have more than 250 strings, split in short strings (< 10) = keys and long strings = ciphertext
     def BruteforceDecode(self, strings):
         ciphertexts = []
         keys = []
         result = []
 
-        for string1 in strings:
-            if len(string1) >= 10:
-                ciphertexts.append(string1)
-            else:
-                keys.append(string1)
-
+        if len(strings) >= 250:
+            for string1 in strings:
+                if len(string1) >= 10:
+                    ciphertexts.append(string1)
+                else:
+                    keys.append(string1)
+        else:
+            ciphertexts = strings
+            keys = strings
         for key in keys:
             if key != '':
                 for ciphertext in ciphertexts:
@@ -111,8 +132,21 @@ class cHTTPHeuristics(cPluginParent):
         self.stream = re.sub(r'(\(\s*(\d+|\d+\.\d+)\s*[+*/-]\s*(\d+|\d+\.\d+)\s*\))', ReplaceFunction, self.streamOriginal)
 
     def Analyze(self):
+        global keywords
+
         self.ran = True
         self.PreProcess()
+
+        oParser = optparse.OptionParser()
+        oParser.add_option('-e', '--extended', action='store_true', default=False, help='Use extended keywords')
+        oParser.add_option('-k', '--keywords', type=str, default='', help='Provide keywords')
+        (options, args) = oParser.parse_args(self.options.split(' '))
+
+        if options.extended:
+            keywords = keywords + extendedkeywords
+
+        if options.keywords != '':
+            keywords = options.keywords.split(',')
 
         result = []
 
@@ -133,18 +167,18 @@ class cHTTPHeuristics(cPluginParent):
             if foundString != '':
                     result.append(foundString)
 
-        resultHttp = [line for line in result if line.lower().startswith('http:')]
+        resultHttp = [line for line in result if StartsWithHTTP(line)]
 
         if resultHttp == []:
-            resultHttp = [line for line in self.BruteforceDecode(result) if line.lower().startswith('http:')]
+            resultHttp = [line for line in self.BruteforceDecode(result) if StartsWithHTTP(line)]
 
         if resultHttp == []:
-            resultHttp = [line.decode('rot13') for line in self.Strings() if 'http:' in line.decode('rot13').lower()]
+            resultHttp = [line.decode('rot13') for line in self.Strings() if ContainsHTTP(line.decode('rot13'))]
         else:
             return resultHttp
 
         if resultHttp == []:
-            resultHttp = [line for line in self.StringsPerLine() if 'http:' in line.lower()]
+            resultHttp = [line for line in self.StringsPerLine() if ContainsHTTP(line)]
         else:
             return resultHttp
 

@@ -2,8 +2,8 @@
 
 __description__ = 'Analyze OLE files (Compound Binary Files)'
 __author__ = 'Didier Stevens'
-__version__ = '0.0.37'
-__date__ = '2018/08/04'
+__version__ = '0.0.38'
+__date__ = '2018/08/13'
 
 """
 
@@ -78,6 +78,7 @@ History:
   2018/07/01: fix for json output with OOXML files
   2018/07/07: 0.0.36: updated to version 2 of jsonoutput
   2018/08/04: 0.0.37 added option --vbadecompressskipattributes
+  2018/08/13: 0.0.38 changed output processing of plugins like plugin_ppt: if a plugin returns a string, that string is dumped with option -q
 
 Todo:
 """
@@ -1516,13 +1517,20 @@ def OLESub(ole, prefix, rules, options):
                             if oPlugin.indexQuiet:
                                 if result != []:
                                     print('%3s: %s' % (index, MyRepr(result[0])))
+                            elif type(result) == str:
+                                IfWIN32SetBinary(sys.stdout)
+                                StdoutWriteChunked(result)
                             else:
                                 for line in result:
                                     print(MyRepr(line))
                         else:
                             print('               Plugin: %s ' % oPlugin.name)
-                            for line in result:
-                                print('                 ' + MyRepr(line))
+                            if type(result) == str:
+                                print('                 use option -q to dump the following data')
+                                print('                 ' + MyRepr(result))
+                            else:
+                                for line in result:
+                                    print('                 ' + MyRepr(line))
             counter += 1
             if options.yara != None:
                 oDecoders = [cIdentity(stream, None)]
