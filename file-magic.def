@@ -14,4 +14,11 @@
 #------------------------------------------------------------------------------
 # vbe:  file(1) magic vbe
 #
-0 belong 0x23407E5E	VBE file (encoded VBScript)
+0	belong	0x23407E5E	VBE file (encoded VBScript)
+
+# 2018/10/26
+
+#------------------------------------------------------------------------------
+# Compressed RTF:  file(1) magic Compressed RTF
+#
+8	string	LZFu	Compressed RTF

@@ -4,8 +4,8 @@ from __future__ import print_function
 
 __description__ = 'Essentialy a wrapper for file (libmagic)'
 __author__ = 'Didier Stevens'
-__version__ = '0.0.2'
-__date__ = '2018/07/10'
+__version__ = '0.0.3'
+__date__ = '2018/10/26'
 
 """
 Source code put in public domain by Didier Stevens, no Copyright
@@ -25,6 +25,7 @@ History:
   2018/07/07: updated CheckJSON to version 2
   2018/07/08: merged with binary template
   2018/07/10: updated man
+  2018/10/26: 0.0.3 updated cOutput
 
 Todo:
 """
@@ -1121,11 +1122,13 @@ class cVariables():
 
 class cOutput():
     def __init__(self, filenameOption=None):
+        self.starttime = time.time()
         self.filenameOption = filenameOption
         self.separateFiles = False
         self.progress = False
         self.console = False
         self.fOut = None
+        self.rootFilenames = {}
         if self.filenameOption:
             if self.ParseHash(self.filenameOption):
                 if not self.separateFiles and self.filename != '':
@@ -1165,13 +1168,25 @@ class cOutput():
             epoch = time.time()
         return '%04d%02d%02d-%02d%02d%02d' % time.localtime(epoch)[0:6]
 
-    def Line(self, line):
+    def RootUnique(self, root):
+        if not root in self.rootFilenames:
+            self.rootFilenames[root] = None
+            return root
+        iter = 1
+        while True:
+            newroot = '%s_%04d' % (root, iter)
+            if not newroot in self.rootFilenames:
+                self.rootFilenames[newroot] = None
+                return newroot
+            iter += 1
+
+    def Line(self, line, eol='\n'):
         if self.fOut == None or self.console:
             try:
-                print(line)
+                print(line, end=eol)
             except UnicodeEncodeError:
                 encoding = sys.stdout.encoding
-                print(line.encode(encoding, errors='backslashreplace').decode(encoding))
+                print(line.encode(encoding, errors='backslashreplace').decode(encoding), end=eol)
 #            sys.stdout.flush()
         if self.fOut != None:
             self.fOut.write(line + '\n')
@@ -1183,7 +1198,12 @@ class cOutput():
     def Filename(self, filename, index, total):
         self.separateFilename = filename
         if self.progress:
-            PrintError('%d/%d %s' % (index + 1, total, self.separateFilename))
+            if index == 0:
+                eta = ''
+            else:
+                seconds = int(float((time.time() - self.starttime) / float(index)) * float(total - index))
+                eta = 'estimation %d seconds left, finished %s ' % (seconds, self.FormatTime(time.time() + seconds))
+            PrintError('%d/%d %s%s' % (index + 1, total, eta, self.separateFilename))
         if self.separateFiles and self.filename != '':
             oFilenameVariables = cVariables()
             oFilenameVariables.SetVariable('f', self.separateFilename)
@@ -1192,6 +1212,7 @@ class cOutput():
             oFilenameVariables.SetVariable('d', os.path.dirname(self.separateFilename))
             root, extension = os.path.splitext(basename)
             oFilenameVariables.SetVariable('r', root)
+            oFilenameVariables.SetVariable('ru', self.RootUnique(root))
             oFilenameVariables.SetVariable('e', extension)
 
             self.Close()
