@@ -4,8 +4,8 @@ from __future__ import print_function
 
 __description__ = 'Essentialy a wrapper for file (libmagic)'
 __author__ = 'Didier Stevens'
-__version__ = '0.0.3'
-__date__ = '2018/10/26'
+__version__ = '0.0.4'
+__date__ = '2018/10/27'
 
 """
 Source code put in public domain by Didier Stevens, no Copyright
@@ -26,6 +26,7 @@ History:
   2018/07/08: merged with binary template
   2018/07/10: updated man
   2018/10/26: 0.0.3 updated cOutput
+  2018/10/27: 0.0.4 added option -C
 
 Todo:
 """
@@ -129,6 +130,7 @@ file-magic.py requires the python-magic module (installed with 1) Windows/OSX: p
 On Windows, this requires VC Runtime 2015.
 
 file-magic.py can use optional magic definitions. These are contained in file file-magic.def in the same folder as file-magic.py.
+To restrict identification to these custom definitions, use option -C.
 
 
 As stated at the beginning of this manual, this tool is very versatile when it comes to handling files. This will be explained now.
@@ -1334,7 +1336,7 @@ def InstantiateCOutput(options):
         filenameOption = options.output
     return cOutput(filenameOption)
 
-class MyMagic():
+class cMyMagic():
     def __init__(self):
         self.oMagic=magic.Magic()
 
@@ -1345,7 +1347,10 @@ class MyMagic():
             print('Warning: custom magic file not found: %s' % filenameMagicCustom)
             self.oMagicCustom = None
 
-    def identify(self, data):
+    def Identify(self, data, custom=False):
+        if custom and self.oMagicCustom != None:
+            return self.oMagicCustom.from_buffer(data)
+
         filemagic = self.oMagic.from_buffer(data)
         if filemagic == 'data' and self.oMagicCustom != None:
             filemagic = self.oMagicCustom.from_buffer(data)
@@ -1388,16 +1393,16 @@ def FileMagicSingle(filename, content, cutexpression, oOutput, oLogfile, outputf
         data = content
 
     try:
-        oMyMagic = MyMagic()
+        oMyMagic = cMyMagic()
         if options.scan:
             for i in range(len(data)):
-                filemagic = oMyMagic.identify(data[i:])
+                filemagic = oMyMagic.Identify(data[i:], options.custom)
                 if filemagic != 'data':
                     line = RegexMatch(filemagic, options)
                     if line != None:
                         oOutput.Line('%08x: %s ' % (i, filemagic))
         else:
-            filemagic = oMyMagic.identify(data)
+            filemagic = oMyMagic.Identify(data, options.custom)
             line = RegexMatch(filemagic, options)
             if line != None:
                 if options.name:
@@ -1449,6 +1454,7 @@ https://DidierStevens.com'''
     oParser.add_option('-t', '--type', action='store_true', default=False, help='Output only file type')
     oParser.add_option('-c', '--csv', action='store_true', default=False, help='Output CSV')
     oParser.add_option('-b', '--buffersize', type=int, default=1024*1024, help='Maximum size of data to read from file expressed in bytes (default 1MB)')
+    oParser.add_option('-C', '--custom', action='store_true', default=False, help='Use only custom definitions')
     oParser.add_option('--password', default='infected', help='The ZIP password to be used (default infected)')
     oParser.add_option('--noextraction', action='store_true', default=False, help='Do not extract from archive file')
     oParser.add_option('--literalfilenames', action='store_true', default=False, help='Do not interpret filenames')
