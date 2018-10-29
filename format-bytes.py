@@ -2,8 +2,8 @@
 
 __description__ = 'This is essentialy a wrapper for the struct module'
 __author__ = 'Didier Stevens'
-__version__ = '0.0.5'
-__date__ = '2018/07/21'
+__version__ = '0.0.6'
+__date__ = '2018/10/28'
 
 """
 Source code put in public domain by Didier Stevens, no Copyright
@@ -34,6 +34,7 @@ History:
   2018/06/12: updated man
   2018/06/17: added property extracted to cBinaryFile
   2018/07/21: updated CheckJSON
+  2018/10/28: 0.0.6 added option -n
 
 Todo:
 """
@@ -159,6 +160,25 @@ File: random.bin
  2:    <type 'str'>         14 .4b...:... 89346218eece3ac3179f 3.807355 e1647bd9711cdfee7959dee4ff956590
 
 Strings can be selected with option -s for dumping. Default is ASCII dump (-a), but hexadecimal (-x) and binary (-d) dump is available too.
+
+Annotations can be added to particular members, using option -n. Like in this example:
+
+C:\Demo>format-bytes.py -f "<hib*:XEI" -n "2: Creation date 3: Temperature" random.bin
+File: random.bin
+ 1:    <type 'int'>       65bb
+ 2:    <type 'int'> 1982/12/18 19:52:41 Creation date
+ 3:    <type 'int'>        -18 Temperature
+Remainder: 9
+00000000: CE 3A C3 17 9F 6B 74 28  FB                       .:...kt(.
+
+1I: s -50 u 206
+2I: sl 15054 ul 15054 sb -12742 ub 52794
+4I: sl 398670542 ul 398670542 sb -835009769 ub 3459957527
+4F: l 0.000000 b -783336896.000000
+4N: b 206.58.195.23 l 23.195.58.206
+4E: l 1982/08/20 05:49:02 b 2079/08/22 19:18:47
+8I: sl 2915073189858196174 ul 2915073189858196174 sb -3586339647020895192 ub 14860404426688656424
+8F: l 0.000000 b -721504228050136948830706706079286975060186906491372824967789492043776.000000
 
 FYI, Python struct module format characters are:
 
@@ -1282,6 +1302,16 @@ def FormatBytesSingle(filename, cutexpression, content, options):
         remainder = True
     else:
         remainder = False
+
+    dAnnotations = {}
+    if options.annotations != '':
+        index = None
+        for token in re.split(r'(\d+:)', options.annotations):
+            if token.endswith(':'):
+                index = int(token[:-1])
+            elif index != None:
+                dAnnotations[index] = token.strip()
+
     oBinaryFile = cBinaryFile(filename, C2BIP3(options.password), options.noextraction, options.literalfilenames, content)
     if cutexpression == '':
         if format != '':
@@ -1316,21 +1346,22 @@ def FormatBytesSingle(filename, cutexpression, content, options):
                 if int(options.select) == index and (isinstance(element, str) or isinstance(element, bytes)):
                     StdoutWriteChunked(DumpFunction(element))
             else:
-		            if isinstance(element, int):
-		                if representation == '':
-		                    print('%2d: %15s %10d %10x  %s' % (index, type(element), element, element, IFF(element < 0, '', lambda: TimestampUTC(element))))
-		                elif representation[index] == 'X':
-		                    print('%2d: %15s %10x' % (index, type(element), element))
-		                elif representation[index] == 'I':
-		                    print('%2d: %15s %10d' % (index, type(element), element))
-		                elif representation[index] == 'E':
-		                    print('%2d: %15s %s' % (index, type(element), IFF(element < 0, '', lambda: TimestampUTC(element))))
-		            elif isinstance(element, str):
-		                print('%2d: %15s %10d %s %s %s %s' % (index, type(element), len(element), ExtraInfoHEADASCII(element[:10]), ExtraInfoHEADHEX(element[:10]), ExtraInfoENTROPY(element), ExtraInfoMD5(element)))
-		            elif isinstance(element, bytes):
-		                print('%2d: %15s %10d %s %s %s %s' % (index, type(element), len(element), ExtraInfoHEADASCII3(element[:10]), ExtraInfoHEADHEX(element[:10]), ExtraInfoENTROPY(element), ExtraInfoMD5(element)))
-		            else:
-		                print('%2d: %15s %s' % (index, type(element), str(element)))
+                if isinstance(element, int):
+                    if representation == '':
+                        line = '%2d: %15s %10d %10x  %s' % (index, type(element), element, element, IFF(element < 0, '', lambda: TimestampUTC(element)))
+                    elif representation[index - 1] == 'X':
+                        line = '%2d: %15s %10x' % (index, type(element), element)
+                    elif representation[index - 1] == 'I':
+                        line = '%2d: %15s %10d' % (index, type(element), element)
+                    elif representation[index - 1] == 'E':
+                        line = '%2d: %15s %s' % (index, type(element), IFF(element < 0, '', lambda: TimestampUTC(element)))
+                elif isinstance(element, str):
+                    line = '%2d: %15s %10d %s %s %s %s' % (index, type(element), len(element), ExtraInfoHEADASCII(element[:10]), ExtraInfoHEADHEX(element[:10]), ExtraInfoENTROPY(element), ExtraInfoMD5(element))
+                elif isinstance(element, bytes):
+                    line = '%2d: %15s %10d %s %s %s %s' % (index, type(element), len(element), ExtraInfoHEADASCII3(element[:10]), ExtraInfoHEADHEX(element[:10]), ExtraInfoENTROPY(element), ExtraInfoMD5(element))
+                else:
+                    line = '%2d: %15s %s' % (index, type(element), str(element))
+                print('%s %s' % (line, dAnnotations.get(index, '')))
         if options.select == '' and remainder:
             print('Remainder: %d' % (len(data) - size))
             remainderx100 = data[size:size + 0x100]
@@ -1360,6 +1391,7 @@ https://DidierStevens.com'''
     oParser = optparse.OptionParser(usage='usage: %prog [options] [[@]file|cut-expression ...]\n' + __description__ + moredesc, version='%prog ' + __version__)
     oParser.add_option('-m', '--man', action='store_true', default=False, help='Print manual')
     oParser.add_option('-f', '--format', default='', help='Struct format string to use')
+    oParser.add_option('-n', '--annotations', default='', help='Annotations')
     oParser.add_option('-s', '--select', default='', help='Select item nr for dumping')
     oParser.add_option('-d', '--dump', action='store_true', default=False, help='perform dump')
     oParser.add_option('-x', '--hexdump', action='store_true', default=False, help='perform hex dump')
