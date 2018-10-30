@@ -1517,7 +1517,8 @@ rule PEiD_00137_Armadillo_v1_60a_
         $a
 }
 
-rule PEiD_00138_Armadillo_v1_71_
+// This signature is a false positive
+/*rule PEiD_00138_Armadillo_v1_71_
 {
     meta:
         description = "[Armadillo v1.71]"
@@ -1526,7 +1527,7 @@ rule PEiD_00138_Armadillo_v1_71_
         $a = {55 8B EC 6A FF 68 ?? ?? ?? ?? 68 ?? ?? ?? ?? 64 A1}
     condition:
         $a
-}
+}*/
 
 rule PEiD_00139_Armadillo_v1_72___v1_73_
 {
