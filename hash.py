@@ -2,8 +2,8 @@
 
 __description__ = 'This is essentialy a wrapper for the hashlib module'
 __author__ = 'Didier Stevens'
-__version__ = '0.0.5'
-__date__ = '2018/06/17'
+__version__ = '0.0.6'
+__date__ = '2018/09/18'
 
 """
 Source code put in public domain by Didier Stevens, no Copyright
@@ -19,6 +19,7 @@ History:
   2018/04/16: added option -s
   2018/06/12: 0.0.4 cosmetic change
   2018/06/17: 0.0.5 added option -v
+  2018/09/18: 0.0.6 added option -C
 
 Todo:
 """
@@ -117,6 +118,12 @@ hash.py -u C:\Windows\notepad.exe
 md5   : FC2EA5BD5307D2CFA5AAA38E0C0DDCE9
 sha1  : A3B46609D159615D5C78F5C54EA24D46805CE374
 sha256: 0F8A84968FAC3CADC04471C1EE5C4644414491C89A4A7149845C170258B6A6D1
+
+To produce a csv list, use option -C:
+
+hash.py -C -a md5 C:\Windows\notepad.exe C:\Windows\write.exe
+C:\Windows\notepad.exe;9512e1cc66a1d36feb0a290cab09087b
+C:\Windows\write.exe;5266c61652051e9ef3a4d199001f6b17
 
 This tool can also be used to globally compare files. With option -c, the hash value(s) of each file will be compared and a report will be produced, like this:
 
@@ -371,6 +378,9 @@ This cut-expression can be used to dump the OLE file located inside the file con
 
     for line in manual.split('\n'):
         print(textwrap.fill(line, 79))
+
+SEPARATOR = ';'
+QUOTE = '"'
 
 #Convert 2 Bytes If Python 3
 def C2BIP3(string):
@@ -975,6 +985,24 @@ def ParseHashList(data):
         separator = ';'
     return data.lower().split(separator)
 
+def ToString(value):
+    if isinstance(value, str):
+        return value
+    else:
+        return str(value)
+
+def Quote(value, separator, quote):
+    value = ToString(value)
+    if value[0] == quote and value[-1] == quote:
+        return value
+    if separator in value or value == '':
+        return quote + value + quote
+    else:
+        return value
+
+def MakeCSVLine(row, separator, quote):
+    return separator.join([Quote(value, separator, quote) for value in row])
+
 def HashSingle(filename, cutexpression, prefix, dFileHashes, options):
     oBinaryFile = cBinaryFile(filename, C2BIP3(options.password), options.noextraction, options.literalfilenames)
     data = oBinaryFile.read()
@@ -985,9 +1013,10 @@ def HashSingle(filename, cutexpression, prefix, dFileHashes, options):
         return
     skipHashes = ParseHashList(options.skip)
     validateHashes = ParseHashList(options.validate)
-    if not options.quiet and oBinaryFile.extracted:
+    if not options.quiet and not options.csv and oBinaryFile.extracted:
         print('%sExtracted!' % (prefix))
     if options.block == 0:
+        row = [filename]
         for name in hashes:
             if not name in dFileHashes:
                 dFileHashes[name] = {}
@@ -996,17 +1025,21 @@ def HashSingle(filename, cutexpression, prefix, dFileHashes, options):
             if options.uppercase:
                 hashdigest = hashdigest.upper()
             if hashdigest.lower() in skipHashes:
-                if not options.quiet:
+                if not options.quiet and not options.csv:
                     print('%sskipped' % (prefix))
             else:
                 dFileHashes[name][hashdigest] = dFileHashes[name].get(hashdigest, []) + [filename]
                 if options.quiet:
                     print(hashdigest)
+                elif options.csv:
+                    row.append(hashdigest)
                 else:
                     validated = ''
                     if hashdigest.lower() in validateHashes:
                         validated = ' (validated)'
                     print('%s%-6s: %s%s' % (prefix, name, hashdigest, validated))
+        if options.csv:
+            print(MakeCSVLine(row, SEPARATOR, QUOTE))
     else:
         dBlockHashes = {name: {} for name in hashes}
         countBlocks = 0
@@ -1042,7 +1075,7 @@ def HashSingle(filename, cutexpression, prefix, dFileHashes, options):
 def HashFiles(filenames, options):
     dFileHashes = {}
     for filename, cutexpression in filenames:
-        if filename != '' and len(filenames) > 1 and not options.quiet:
+        if filename != '' and len(filenames) > 1 and not options.quiet and not options.csv:
             print('File: %s' % filename)
             prefix = ' '
         else:
@@ -1093,6 +1126,7 @@ https://DidierStevens.com'''
     oParser.add_option('-s', '--skip', default='', help='Hashes to skip (except in block mode)')
     oParser.add_option('-v', '--validate', default='', help='Hashes to validate (except in block mode)')
     oParser.add_option('-q', '--quiet', action='store_true', default=False, help='Just print hash values (except in block mode)')
+    oParser.add_option('-C', '--csv', action='store_true', default=False, help='Output CSV')
     oParser.add_option('--password', default='infected', help='The ZIP password to be used (default infected)')
     oParser.add_option('--noextraction', action='store_true', default=False, help='Do not extract from archive file')
     oParser.add_option('--literalfilenames', action='store_true', default=False, help='Do not interpret filenames')
