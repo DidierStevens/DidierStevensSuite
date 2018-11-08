@@ -2,8 +2,8 @@
 
 __description__ = 'Cut a section of bytes out of a file'
 __author__ = 'Didier Stevens'
-__version__ = '0.0.7'
-__date__ = '2018/03/05'
+__version__ = '0.0.8'
+__date__ = '2018/11/07'
 
 """
 
@@ -21,6 +21,7 @@ History:
   2017/11/01: 0.0.6 updated cDump, added cBinaryFile
   2017/12/01: 0.0.7 updated FilenameCheckHash to handle empty file: #
   2018/03/05: updated #e# expressions
+  2018/11/07: 0.0.8 added options -A, -g, -G and --jsonoutput; added hexadecimal support for offset in cut-expression
 
 Todo:
 """
@@ -34,6 +35,7 @@ import zipfile
 import binascii
 import random
 import gzip
+import json
 if sys.version_info[0] >= 3:
     from io import BytesIO as DataIO
 else:
@@ -52,6 +54,7 @@ Manual:
 
 cut-bytes.py reads a file (from disk, from stdin or from inside a (password protected) ZIP file) or a here document (#), and outputs it (partially) to stdout.
 cut-bytes.py can be instructed via a cut-expression to only send partial input to stdout.
+The cut-expression selects a part of the data to output. By default, only one match of the cut-expression is performed. With option -g (grep), all matches are selected. Option -G (grepno, e.g. grep non-overlapping) is the same as -g, but without overlap of the selected parts.
 
 The cut-expression allows for the partial selection of a stream. Use this expression to "cut out" part of the stream.
 This cut-expression is composed of 2 terms separated by a colon (:), like this:
@@ -72,13 +75,15 @@ termB can also be a negative number (decimal or hexademical): in that case the p
 If termB is a string to search for, then the cut section of bytes ends with the last byte at the position where the string is first found. If the string is not found, the cut is empty (0 bytes).
 No checks are made to assure that the position specified by termA is lower than the position specified by termB. This is left up to the user.
 Search string expressions (ASCII and hexadecimal) can be followed by an instance (a number equal to 1 or greater) to indicate which instance needs to be taken. For example, ['ABC']2 will search for the second instance of string 'ABC'. If this instance is not found, then nothing is selected.
-Search string expressions (ASCII and hexadecimal) can be followed by an offset (+ or - a number) to add (or substract) an offset to the found instance. For example, ['ABC']+3 will search for the first instance of string 'ABC' and then select the bytes after ABC (+ 3).
+Search string expressions (ASCII and hexadecimal) can be followed by an offset (+ or - a number) to add (or substract) an offset to the found instance. This number can be a decimal or hexadecimal (prefix 0x) value. For example, ['ABC']+3 will search for the first instance of string 'ABC' and then select the bytes after ABC (+ 3).
 Finally, search string expressions (ASCII and hexadecimal) can be followed by an instance and an offset.
 Examples:
 This cut-expression can be used to dump the first 256 bytes of a PE file located inside the stream: ['MZ']:0x100l
 This cut-expression can be used to dump the OLE file located inside the stream: [d0cf11e0]:
 
-By default the output uses the same representation as the input, but this can be changed to hex, ascii dump or base64 with options -x, -X, -a, -b and -B.
+By default the output uses the same representation as the input, but this can be changed to hex, ascii dump or base64 with options -x, -X, -a, -A, -b and -B.
+
+With option --jsonoutput (to be used with -g or -G), cut-bytes will output selected content as a JSON object that can be piped into other tools that support this JSON format.
 
 In stead of cutting from a file, the file argument can be a here document. To achieve this, precede the text with character #.
 If the text to pass via the argument contains control characters or non-printable characters, hexadecimal (#h#) or base64 (#b#) can be used.
@@ -194,22 +199,36 @@ class cDump():
             countSpaces += 1
         return hexDump + '  ' + (' ' * countSpaces) + asciiDump
 
-    def HexAsciiDump(self):
+    def HexAsciiDump(self, rle=False):
         oDumpStream = self.cDumpStream(self.prefix)
+        position = ''
         hexDump = ''
         asciiDump = ''
+        previousLine = None
+        countRLE = 0
         for i, b in enumerate(self.data):
             b = self.C2IIP2(b)
             if i % self.dumplinelength == 0:
                 if hexDump != '':
-                    oDumpStream.Addline(self.CombineHexAscii(hexDump, asciiDump))
-                hexDump = '%08X:' % (i + self.offset)
+                    line = self.CombineHexAscii(hexDump, asciiDump)
+                    if not rle or line != previousLine:
+                        if countRLE > 0:
+                            oDumpStream.Addline('* %d 0x%02x' % (countRLE, countRLE * self.dumplinelength))
+                        oDumpStream.Addline(position + line)
+                        countRLE = 0
+                    else:
+                        countRLE += 1
+                    previousLine = line
+                position = '%08X:' % (i + self.offset)
+                hexDump = ''
                 asciiDump = ''
             if i % self.dumplinelength == self.dumplinelength / 2:
                 hexDump += ' '
             hexDump += ' %02X' % b
             asciiDump += IFF(b >= 32 and b < 128, chr(b), '.')
-        oDumpStream.Addline(self.CombineHexAscii(hexDump, asciiDump))
+        if countRLE > 0:
+            oDumpStream.Addline('* %d 0x%02x' % (countRLE, countRLE * self.dumplinelength))
+        oDumpStream.Addline(self.CombineHexAscii(position + hexDump, asciiDump))
         return oDumpStream.Content()
 
     def Base64Dump(self, nowhitespace=False):
@@ -244,8 +263,8 @@ class cDump():
 def HexDump(data):
     return cDump(data, dumplinelength=dumplinelength).HexDump()
 
-def HexAsciiDump(data):
-    return cDump(data, dumplinelength=dumplinelength).HexAsciiDump()
+def HexAsciiDump(data, rle=False):
+    return cDump(data, dumplinelength=dumplinelength).HexAsciiDump(rle=rle)
 
 def Base64Dump(data, nowhitespace=False):
     return cDump(data, dumplinelength=dumplinelength).Base64Dump(nowhitespace=nowhitespace)
@@ -261,6 +280,18 @@ def Replace(string, dReplacements):
     else:
         return string
 
+def ParseInteger(argument):
+    sign = 1
+    if argument.startswith('+'):
+        argument = argument[1:]
+    elif argument.startswith('-'):
+        argument = argument[1:]
+        sign = -1
+    if argument.startswith('0x'):
+        return sign * int(argument[2:], 16)
+    else:
+        return sign * int(argument)
+
 def ParseCutTerm(argument):
     if argument == '':
         return CUTTERM_NOTHING, None, ''
@@ -273,23 +304,23 @@ def ParseCutTerm(argument):
             value = -value
         return CUTTERM_POSITION, value, argument[len(oMatch.group(0)):]
     if oMatch == None:
-        oMatch = re.match(r'\[([0-9a-f]+)\](\d+)?([+-]\d+)?', argument, re.I)
+        oMatch = re.match(r'\[([0-9a-f]+)\](\d+)?([+-](?:0x[0-9a-f]+|\d+))?', argument, re.I)
     else:
         value = int(oMatch.group(1))
         if argument.startswith('-'):
             value = -value
         return CUTTERM_POSITION, value, argument[len(oMatch.group(0)):]
     if oMatch == None:
-        oMatch = re.match(r"\[\'(.+?)\'\](\d+)?([+-]\d+)?", argument)
+        oMatch = re.match(r"\[\'(.+?)\'\](\d+)?([+-](?:0x[0-9a-f]+|\d+))?", argument)
     else:
         if len(oMatch.group(1)) % 2 == 1:
             raise Exception("Uneven length hexadecimal string")
         else:
-            return CUTTERM_FIND, (binascii.a2b_hex(oMatch.group(1)), int(Replace(oMatch.group(2), {None: '1'})), int(Replace(oMatch.group(3), {None: '0'}))), argument[len(oMatch.group(0)):]
+            return CUTTERM_FIND, (binascii.a2b_hex(oMatch.group(1)), int(Replace(oMatch.group(2), {None: '1'})), ParseInteger(Replace(oMatch.group(3), {None: '0'}))), argument[len(oMatch.group(0)):]
     if oMatch == None:
         return None, None, argument
     else:
-        return CUTTERM_FIND, (oMatch.group(1), int(Replace(oMatch.group(2), {None: '1'})), int(Replace(oMatch.group(3), {None: '0'}))), argument[len(oMatch.group(0)):]
+        return CUTTERM_FIND, (oMatch.group(1), int(Replace(oMatch.group(2), {None: '1'})), ParseInteger(Replace(oMatch.group(3), {None: '0'}))), argument[len(oMatch.group(0)):]
 
 def ParseCutArgument(argument):
     type, value, remainder = ParseCutTerm(argument.strip())
@@ -334,12 +365,12 @@ def Find(data, value, nth):
 
 def CutData(stream, cutArgument):
     if cutArgument == '':
-        return stream
+        return [stream, None, None]
 
     typeLeft, valueLeft, typeRight, valueRight = ParseCutArgument(cutArgument)
 
     if typeLeft == None:
-        return stream
+        return [stream, None, None]
 
     if typeLeft == CUTTERM_NOTHING:
         positionBegin = 0
@@ -348,7 +379,7 @@ def CutData(stream, cutArgument):
     elif typeLeft == CUTTERM_FIND:
         positionBegin = Find(stream, valueLeft[0], valueLeft[1])
         if positionBegin == -1:
-            return ''
+            return ['', None, None]
         positionBegin += valueLeft[2]
     else:
         raise Exception("Unknown value typeLeft")
@@ -364,14 +395,14 @@ def CutData(stream, cutArgument):
     elif typeRight == CUTTERM_FIND:
         positionEnd = Find(stream, valueRight[0], valueRight[1])
         if positionEnd == -1:
-            return ''
+            return ['', None, None]
         else:
             positionEnd += len(valueRight[0])
         positionEnd += valueRight[2]
     else:
         raise Exception("Unknown value typeRight")
 
-    return stream[positionBegin:positionEnd]
+    return [stream[positionBegin:positionEnd], positionBegin, positionEnd]
 
 #Fix for http://bugs.python.org/issue11395
 def StdoutWriteChunked(data):
@@ -731,29 +762,74 @@ class cBinaryFile:
         return data
 
 def CutBytes(expression, filename, options):
-    if options.hexdump:
-        DumpFunction = HexDump
-    elif options.hexdumpnows:
-        DumpFunction = lambda x: binascii.b2a_hex(x)
-    elif options.base64:
-        DumpFunction = Base64Dump
-    elif options.base64nows:
-        DumpFunction = lambda x: Base64Dump(x, True)
-    elif options.asciidump:
-        DumpFunction = HexAsciiDump
-    else:
-        DumpFunction = lambda x: x
-        IfWIN32SetBinary(sys.stdout)
+    if options.grep or options.grepno:
+        data = cBinaryFile(filename, C2BIP3(options.password), options.noextraction, options.literalfilenames).Data()
+        start = 0
+        if options.jsonoutput:
+            object = []
+            counter = 1
+        while True:
+            result = CutData(data[start:], expression)
+            if result[0] == '':
+                break
+            else:
+                oDump = cDump(result[0], offset=start + result[1], dumplinelength=dumplinelength)
+                if options.hexdump:
+                    StdoutWriteChunked(oDump.HexDump() + '\n')
+                elif options.hexdumpnows:
+                    StdoutWriteChunked(binascii.b2a_hex(result[0]) + '\n')
+                elif options.base64:
+                    StdoutWriteChunked(oDump.Base64Dump())
+                elif options.base64nows:
+                    StdoutWriteChunked(oDump.Base64Dump(True) + '\n')
+                elif options.asciidump:
+                    StdoutWriteChunked(oDump.HexAsciiDump() + '\n')
+                elif options.asciidumprle:
+                    StdoutWriteChunked(oDump.HexAsciiDump(True) + '\n')
+                elif options.jsonoutput:
+                    object.append({'id': counter, 'name': '0x%08x' % (start + result[1]), 'content': binascii.b2a_base64(result[0]).strip('\n')})
+                    counter += 1
+                else:
+                    if start == 0:
+                        IfWIN32SetBinary(sys.stdout)
+                    StdoutWriteChunked(result[0])
+                if options.grep:
+                    start += result[1] + 1
+                else:
+                    start += result[2]
+        if options.jsonoutput:
+            print(json.dumps({'version': 2, 'id': 'didierstevens.com', 'type': 'content', 'fields': ['id', 'name', 'content'], 'items': object}))
 
-    StdoutWriteChunked(DumpFunction(CutData(cBinaryFile(filename, C2BIP3(options.password), options.noextraction, options.literalfilenames).Data(), expression)))
+    else:
+        if options.hexdump:
+            DumpFunction = HexDump
+        elif options.hexdumpnows:
+            DumpFunction = lambda x: binascii.b2a_hex(x)
+        elif options.base64:
+            DumpFunction = Base64Dump
+        elif options.base64nows:
+            DumpFunction = lambda x: Base64Dump(x, True)
+        elif options.asciidump:
+            DumpFunction = HexAsciiDump
+        elif options.asciidumprle:
+            DumpFunction = lambda x: HexAsciiDump(x, True)
+        else:
+            DumpFunction = lambda x: x
+            IfWIN32SetBinary(sys.stdout)
+
+        StdoutWriteChunked(DumpFunction(CutData(cBinaryFile(filename, C2BIP3(options.password), options.noextraction, options.literalfilenames).Data(), expression)[0]))
 
 def Main():
     oParser = optparse.OptionParser(usage='usage: %prog [options] cut-expression [[#]file]\n' + __description__, version='%prog ' + __version__)
     oParser.add_option('-m', '--man', action='store_true', default=False, help='Print manual')
+    oParser.add_option('-g', '--grep', action='store_true', default=False, help='binary grep')
+    oParser.add_option('-G', '--grepno', action='store_true', default=False, help='binary grep non-overlapping')
+    oParser.add_option('--jsonoutput', action='store_true', default=False, help='produce json output')
     oParser.add_option('-d', '--dump', action='store_true', default=False, help='perform dump')
     oParser.add_option('-x', '--hexdump', action='store_true', default=False, help='perform hex dump')
     oParser.add_option('-X', '--hexdumpnows', action='store_true', default=False, help='perform hex dump without whitespace')
     oParser.add_option('-a', '--asciidump', action='store_true', default=False, help='perform ascii dump')
+    oParser.add_option('-A', '--asciidumprle', action='store_true', default=False, help='perform ascii dump with RLE')
     oParser.add_option('-b', '--base64', action='store_true', default=False, help='perform BASE64 dump')
     oParser.add_option('-B', '--base64nows', action='store_true', default=False, help='perform BASE64 dump without whitespace')
     oParser.add_option('--password', default='infected', help='The ZIP password to be used (default infected)')
