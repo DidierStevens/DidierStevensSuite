@@ -2,8 +2,8 @@
 
 __description__ = 'Analyze RTF files'
 __author__ = 'Didier Stevens'
-__version__ = '0.0.7'
-__date__ = '2017/12/24'
+__version__ = '0.0.8'
+__date__ = '2018/12/07'
 
 """
 
@@ -33,6 +33,7 @@ History:
   2017/12/09: 0.0.6 added longestContiguousHexstring; extra info -f O
   2017/12/10: cDump & YARACompile
   2017/12/24: 0.0.7 made changes level 0 -> remainder
+  2018/12/07: 0.0.8 added support for -s a; added selection warning; added option -A; added yara #x# #r#; updated ParseCutTerm; added --jsonoutput
 
 Todo:
 """
@@ -47,6 +48,7 @@ import textwrap
 import re
 import string
 import hashlib
+import json
 if sys.version_info[0] >= 3:
     from io import StringIO
 else:
@@ -135,22 +137,36 @@ class cDump():
             countSpaces += 1
         return hexDump + '  ' + (' ' * countSpaces) + asciiDump
 
-    def HexAsciiDump(self):
+    def HexAsciiDump(self, rle=False):
         oDumpStream = self.cDumpStream(self.prefix)
+        position = ''
         hexDump = ''
         asciiDump = ''
+        previousLine = None
+        countRLE = 0
         for i, b in enumerate(self.data):
             b = self.C2IIP2(b)
             if i % self.dumplinelength == 0:
                 if hexDump != '':
-                    oDumpStream.Addline(self.CombineHexAscii(hexDump, asciiDump))
-                hexDump = '%08X:' % (i + self.offset)
+                    line = self.CombineHexAscii(hexDump, asciiDump)
+                    if not rle or line != previousLine:
+                        if countRLE > 0:
+                            oDumpStream.Addline('* %d 0x%02x' % (countRLE, countRLE * self.dumplinelength))
+                        oDumpStream.Addline(position + line)
+                        countRLE = 0
+                    else:
+                        countRLE += 1
+                    previousLine = line
+                position = '%08X:' % (i + self.offset)
+                hexDump = ''
                 asciiDump = ''
             if i % self.dumplinelength == self.dumplinelength / 2:
                 hexDump += ' '
             hexDump += ' %02X' % b
             asciiDump += IFF(b >= 32 and b < 128, chr(b), '.')
-        oDumpStream.Addline(self.CombineHexAscii(hexDump, asciiDump))
+        if countRLE > 0:
+            oDumpStream.Addline('* %d 0x%02x' % (countRLE, countRLE * self.dumplinelength))
+        oDumpStream.Addline(self.CombineHexAscii(position + hexDump, asciiDump))
         return oDumpStream.Content()
 
     def Base64Dump(self, nowhitespace=False):
@@ -181,13 +197,12 @@ class cDump():
             return data
         else:
             return ord(data)
-#-ENDCODE cDump--------------------------------------------------------------------------------------
 
 def HexDump(data):
     return cDump(data, dumplinelength=dumplinelength).HexDump()
 
-def HexAsciiDump(data):
-    return cDump(data, dumplinelength=dumplinelength).HexAsciiDump()
+def HexAsciiDump(data, rle=False):
+    return cDump(data, dumplinelength=dumplinelength).HexAsciiDump(rle=rle)
 
 #Fix for http://bugs.python.org/issue11395
 def StdoutWriteChunked(data):
@@ -429,6 +444,8 @@ def ReadDWORD(data):
         return None, None
     return ord(data[0]) + ord(data[1]) *0x100 + ord(data[2]) *0x10000 + ord(data[3]) *0x1000000, data[4:]
 
+# https://msdn.microsoft.com/en-us/library/dd942076.aspx
+# https://www.linkedin.com/pulse/microsoft-office-zero-day-detecting-hta-handler-kevin-douglas
 def ExtractOleInfo(data):
     dataSave = data
     word1, data = ReadDWORD(data)
@@ -479,6 +496,18 @@ def Replace(string, dReplacements):
     else:
         return string
 
+def ParseInteger(argument):
+    sign = 1
+    if argument.startswith('+'):
+        argument = argument[1:]
+    elif argument.startswith('-'):
+        argument = argument[1:]
+        sign = -1
+    if argument.startswith('0x'):
+        return sign * int(argument[2:], 16)
+    else:
+        return sign * int(argument)
+
 def ParseCutTerm(argument):
     if argument == '':
         return CUTTERM_NOTHING, None, ''
@@ -491,23 +520,23 @@ def ParseCutTerm(argument):
             value = -value
         return CUTTERM_POSITION, value, argument[len(oMatch.group(0)):]
     if oMatch == None:
-        oMatch = re.match(r'\[([0-9a-f]+)\](\d+)?([+-]\d+)?', argument, re.I)
+        oMatch = re.match(r'\[([0-9a-f]+)\](\d+)?([+-](?:0x[0-9a-f]+|\d+))?', argument, re.I)
     else:
         value = int(oMatch.group(1))
         if argument.startswith('-'):
             value = -value
         return CUTTERM_POSITION, value, argument[len(oMatch.group(0)):]
     if oMatch == None:
-        oMatch = re.match(r"\[\'(.+?)\'\](\d+)?([+-]\d+)?", argument)
+        oMatch = re.match(r"\[\'(.+?)\'\](\d+)?([+-](?:0x[0-9a-f]+|\d+))?", argument)
     else:
         if len(oMatch.group(1)) % 2 == 1:
             raise Exception("Uneven length hexadecimal string")
         else:
-            return CUTTERM_FIND, (binascii.a2b_hex(oMatch.group(1)), int(Replace(oMatch.group(2), {None: '1'})), int(Replace(oMatch.group(3), {None: '0'}))), argument[len(oMatch.group(0)):]
+            return CUTTERM_FIND, (binascii.a2b_hex(oMatch.group(1)), int(Replace(oMatch.group(2), {None: '1'})), ParseInteger(Replace(oMatch.group(3), {None: '0'}))), argument[len(oMatch.group(0)):]
     if oMatch == None:
         return None, None, argument
     else:
-        return CUTTERM_FIND, (oMatch.group(1), int(Replace(oMatch.group(2), {None: '1'})), int(Replace(oMatch.group(3), {None: '0'}))), argument[len(oMatch.group(0)):]
+        return CUTTERM_FIND, (oMatch.group(1), int(Replace(oMatch.group(2), {None: '1'})), ParseInteger(Replace(oMatch.group(3), {None: '0'}))), argument[len(oMatch.group(0)):]
 
 def ParseCutArgument(argument):
     type, value, remainder = ParseCutTerm(argument.strip())
@@ -694,6 +723,19 @@ def RTFSub(oStringIO, prefix, rules, options):
         dAnalysis[counter] = cAnalysis(counter, leader, oIteminfo.level, oIteminfo.beginPosition, oIteminfo.endPosition + IFF(oIteminfo.level == 0, 1, 0), oIteminfo.countChildren, countUnexpectedCharacters, controlWord, content, hexstring, longestContiguousHexstring, ExtractOleInfo(HexDecode(hexstring, options)))
         counter += 1
 
+    if options.jsonoutput:
+        object = []
+        for counter in range(1, len(dAnalysis) + 1):
+            data = HexDecodeIfRequested(dAnalysis[counter], options)
+            if options.extract and len(data) > 0:
+                try:
+                    data = ExtractPackage(data)
+                except:
+                    data = ''
+            object.append({'id': counter, 'name': str(counter), 'content': binascii.b2a_base64(data).strip('\n')})
+        print(json.dumps({'version': 2, 'id': 'didierstevens.com', 'type': 'content', 'fields': ['id', 'name', 'content'], 'items': object}))
+        return
+
     if options.select == '':
         for counter in range(1, len(dAnalysis) + 1):
             hexcount, bincount = HexBinCount(dAnalysis[counter].hexstring)
@@ -744,13 +786,23 @@ def RTFSub(oStringIO, prefix, rules, options):
             DumpFunction = HexDump
         elif options.info:
             DumpFunction = Info
+        elif options.asciidumprle:
+            DumpFunction = lambda x: HexAsciiDump(x, True)
         else:
             DumpFunction = HexAsciiDump
         if options.extract:
             ExtractFunction = ExtractPackage
         else:
             ExtractFunction = lambda x:x
-        StdoutWriteChunked(DumpFunction(ExtractFunction(DecodeFunction(decoders, options, CutData(HexDecodeIfRequested(dAnalysis[int(options.select)], options), options.cut)))))
+
+        for key in dAnalysis.keys():
+            if options.select != 'a' and options.select != str(key):
+                del dAnalysis[key]
+        if len(dAnalysis) == 0:
+            print('Warning: no item was selected with expression %s' % options.select)
+            return
+        for key in sorted(dAnalysis.keys()):
+            StdoutWriteChunked(DumpFunction(ExtractFunction(DecodeFunction(decoders, options, CutData(HexDecodeIfRequested(dAnalysis[key], options), options.cut)))))
 
     return returnCode
 
@@ -764,6 +816,10 @@ def YARACompile(ruledata):
             rule = 'rule string {strings: $a = "%s" ascii wide nocase condition: $a}' % ruledata[3:]
         elif ruledata.startswith('#q#'):
             rule = ruledata[3:].replace("'", '"')
+        elif ruledata.startswith('#x#'):
+            rule = 'rule hexadecimal {strings: $a = { %s } condition: $a}' % ruledata[3:]
+        elif ruledata.startswith('#r#'):
+            rule = 'rule regex {strings: $a = /%s/ ascii wide nocase condition: $a}' % ruledata[3:]
         else:
             rule = ruledata[1:]
         return yara.compile(source=rule, externals={'streamname': '', 'VBA': False})
@@ -820,6 +876,7 @@ def Main():
     oParser.add_option('-d', '--dump', action='store_true', default=False, help='perform dump')
     oParser.add_option('-x', '--hexdump', action='store_true', default=False, help='perform hex dump')
     oParser.add_option('-a', '--asciidump', action='store_true', default=False, help='perform ascii dump')
+    oParser.add_option('-A', '--asciidumprle', action='store_true', default=False, help='perform ascii dump with RLE')
     oParser.add_option('-H', '--hexdecode', action='store_true', default=False, help='decode hexadecimal data; append 0 in case of uneven number of hexadecimal digits')
     oParser.add_option('-S', '--hexshift', action='store_true', default=False, help='shift one nibble')
     oParser.add_option('-p', '--plugins', type=str, default='', help='plugins to load (separate plugins with a comma , ; @file supported)')
@@ -835,6 +892,7 @@ def Main():
     oParser.add_option('-E', '--extract', action='store_true', default=False, help='extract package')
     oParser.add_option('-f', '--filter', type=str, default='', help='filter')
     oParser.add_option('--recursionlimit', type=int, default=2000, help='set recursionlimit for Python (default 2000)')
+    oParser.add_option('-j', '--jsonoutput', action='store_true', default=False, help='produce json output')
     (options, args) = oParser.parse_args()
 
     if options.man:
