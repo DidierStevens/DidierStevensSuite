@@ -2,8 +2,8 @@
 
 __description__ = 'Analyze RTF files'
 __author__ = 'Didier Stevens'
-__version__ = '0.0.8'
-__date__ = '2018/12/07'
+__version__ = '0.0.9'
+__date__ = '2018/12/09'
 
 """
 
@@ -34,6 +34,7 @@ History:
   2017/12/10: cDump & YARACompile
   2017/12/24: 0.0.7 made changes level 0 -> remainder
   2018/12/07: 0.0.8 added support for -s a; added selection warning; added option -A; added yara #x# #r#; updated ParseCutTerm; added --jsonoutput
+  2018/12/09: 0.0.9 changed extra output for remainder
 
 Todo:
 """
@@ -749,7 +750,25 @@ def RTFSub(oStringIO, prefix, rules, options):
                     if dAnalysis[counter].oleInfo != []:
                         print('      Name: %s Size: %d md5: %s magic: %s' % (repr(dAnalysis[counter].oleInfo[0]), dAnalysis[counter].oleInfo[2], dAnalysis[counter].oleInfo[3], dAnalysis[counter].oleInfo[4]))
                     if dAnalysis[counter].level == 0:
-                        print('      Left curly braces = %d  Right curly braces = %d ' % (dAnalysis[counter].content.count('{'), dAnalysis[counter].content.count('}')))
+                        message = []
+                        countWhitespace = len([c for c in dAnalysis[counter].content if c in string.whitespace])
+                        countNull = dAnalysis[counter].content.count('\x00')
+                        if countWhitespace == len(dAnalysis[counter].content):
+                            message.append('Only whitespace = %d' % countWhitespace)
+                        elif countNull == len(dAnalysis[counter].content):
+                            message.append('Only NULL bytes = %d' % countNull)
+                        elif countWhitespace + countNull == len(dAnalysis[counter].content):
+                            message.append('Only whitespace = %d and NULL bytes = %d' % (countWhitespace, countNull))
+                        else:
+                            if countWhitespace > 0:
+                                message.append('Whitespace = %d' % countWhitespace)
+                            if countNull > 0:
+                                message.append('NULL bytes = %d' % countNull)
+                            if dAnalysis[counter].content.count('{') > 0:
+                                message.append('Left curly braces = %d' % dAnalysis[counter].content.count('{'))
+                            if dAnalysis[counter].content.count('}') > 0:
+                                message.append('Right curly braces = %d' % dAnalysis[counter].content.count('}'))
+                        print('      ' + '  '.join(message))
                     linePrinted = True
                 elif dAnalysis[counter].content != None:
                     stream = HexDecodeIfRequested(dAnalysis[counter], options)
