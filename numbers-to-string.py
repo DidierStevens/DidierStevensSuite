@@ -2,8 +2,8 @@
 
 __description__ = "Program to convert numbers into a string"
 __author__ = 'Didier Stevens'
-__version__ = '0.0.5'
-__date__ = '2018/08/25'
+__version__ = '0.0.6'
+__date__ = '2018/12/15'
 
 """
 
@@ -21,6 +21,7 @@ History:
   2018/07/25: added options --begin and --end
   2018/07/25: updated man
   2018/08/25: 0.0.5 added option -S
+  2018/12/15: 0.0.6 added option -t and changed option --end
 
 Todo:
 """
@@ -93,6 +94,11 @@ With option -j, the output strings can be concatenated:
 C:\Demo>numbers-to-string.py -j n test.js
 DidierStevens
 
+numbers-to-string translates numbers into characters according to the ASCII table. You can use another table (index starting aat zero), by using option -t and providing a string with the character sequence needed for proper decoding:
+
+C:\Demo>echo "3,1,2,2,4" | numbers-to-string.py -t "xelHo"
+Hello
+
 numbers-to-string.py can also generate statistics, to help with the identification of the encoding. Use option -S to generate statistics, like this:
 
 C:\Demo>numbers-to-string.py -S test.js
@@ -116,7 +122,7 @@ Use option --grepoptions v to invert the selection.
 Use option --grepoptions F to match a fixed string in stead of a regular expression.
 
 Option --begin can be used to provide the string that is the start of number processing per line.
-Option --end can be used to provide the string that is the end of number processing per line.
+Option --end can be used to provide the string (last occurence) that is the end of number processing per line.
 
 '''
     for line in manual.split('\n'):
@@ -201,12 +207,6 @@ def ProcessFile(fIn, fullread):
         for line in fIn:
             yield line.strip('\n\r')
 
-def Chr(number):
-    try:
-        return chr(number)
-    except:
-        return ''
-
 class cGrep():
     def __init__(self, expression, options):
         self.expression = expression
@@ -254,6 +254,18 @@ def CalculateStatistics(numbers):
     numbers = map(int, numbers)
     return (len(numbers), min(numbers), max(numbers), sum(numbers) / len(numbers))
 
+def Chr(number, options):
+    try:
+        if options.table == '':
+            return chr(number)
+        else:
+            return options.table[number]
+    except:
+        if options.ignore:
+            return ''
+        else:
+            raise
+
 def NumbersToStringSingle(function, filenames, oOutput, options):
     oGrep = cGrep(options.grep, options.grepoptions)
     if function == '':
@@ -263,10 +275,7 @@ def NumbersToStringSingle(function, filenames, oOutput, options):
     else:
         Function = None
     oRE = re.compile('\d+')
-    if options.ignore:
-        ChrFunction = Chr
-    else:
-        ChrFunction = chr
+    ChrFunction = lambda c: Chr(c, options)
     for filename in filenames:
         joined = ''
         if filename == '':
@@ -297,7 +306,7 @@ def NumbersToStringSingle(function, filenames, oOutput, options):
                         continue
                     line = line[position:]
                 if options.end != '':
-                    position = line.find(options.end)
+                    position = line.rfind(options.end)
                     if position == -1:
                         continue
                     line = line[:position + len(options.end)]
@@ -355,6 +364,7 @@ https://DidierStevens.com'''
     oParser.add_option('-n', '--number', type=int, default=3, help='Minimum number of numbers (3 by default)')
     oParser.add_option('-j', '--join', action='store_true', default=False, help='Join output')
     oParser.add_option('-S', '--statistics', action='store_true', default=False, help='Generate statistics')
+    oParser.add_option('-t', '--table', type=str, default='', help='Translation table')
     oParser.add_option('--grep', type=str, default='', help='Grep expression')
     oParser.add_option('--grepoptions', type=str, default='', help='Grep options')
     oParser.add_option('--begin', type=str, default='', help='Begin substring')
