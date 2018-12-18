@@ -2,8 +2,8 @@
 
 __description__ = 'Analyze OLE files (Compound Binary Files)'
 __author__ = 'Didier Stevens'
-__version__ = '0.0.39'
-__date__ = '2018/11/30'
+__version__ = '0.0.40'
+__date__ = '2018/12/18'
 
 """
 
@@ -82,6 +82,7 @@ History:
   2018/11/25: 0.0.39 started VBA/dir parsing for modules, to display with option -i
   2018/11/26: continued VBA/dir parsing for modules; added c and s selection; added selection warning; added option -A and option -T; added yara #x#
   2018/11/30: added yara #r#; updated ParseCutTerm
+  2018/12/18: 0.0.40 added option --password
 
 Todo:
 """
@@ -1908,7 +1909,7 @@ def OLEDump(filename, options):
         oStringIO = cStringIO.StringIO(sys.stdin.read())
     elif FilenameInSimulations(filename):
         oZipfile = zipfile.ZipFile(dslsimulationdb.GetSimulation(filename), 'r')
-        oZipContent = oZipfile.open(oZipfile.infolist()[0], 'r', C2BIP3(MALWARE_PASSWORD))
+        oZipContent = oZipfile.open(oZipfile.infolist()[0], 'r', C2BIP3(options.password))
         zipContent = oZipContent.read()
         if zipContent.startswith('Neut'):
             zipContent = OLEFILE_MAGIC + zipContent[4:]
@@ -1917,7 +1918,7 @@ def OLEDump(filename, options):
         oZipfile.close()
     elif filename.lower().endswith('.zip'):
         oZipfile = zipfile.ZipFile(filename, 'r')
-        oZipContent = oZipfile.open(oZipfile.infolist()[0], 'r', C2BIP3(MALWARE_PASSWORD))
+        oZipContent = oZipfile.open(oZipfile.infolist()[0], 'r', C2BIP3(options.password))
         oStringIO = cStringIO.StringIO(oZipContent.read())
         oZipContent.close()
         oZipfile.close()
@@ -2030,6 +2031,7 @@ def Main():
     oParser.add_option('-C', '--cut', type=str, default='', help='cut data')
     oParser.add_option('-E', '--extra', type=str, default='', help='add extra info (environment variable: OLEDUMP_EXTRA)')
     oParser.add_option('-j', '--jsonoutput', action='store_true', default=False, help='produce json output')
+    oParser.add_option('--password', default=MALWARE_PASSWORD, help='The ZIP password to be used (default %s)' % MALWARE_PASSWORD)
     (options, args) = oParser.parse_args()
 
     if options.man:

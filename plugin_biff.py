@@ -2,8 +2,8 @@
 
 __description__ = 'BIFF plugin for oledump.py'
 __author__ = 'Didier Stevens'
-__version__ = '0.0.2'
-__date__ = '2017/12/12'
+__version__ = '0.0.3'
+__date__ = '2018/10/26'
 
 """
 
@@ -17,6 +17,9 @@ History:
   2017/12/10: 0.0.2 added optparse & option -o
   2017/12/12: added option -f
   2017/12/13: added 0x support for option -f
+  2018/10/24: 0.0.3 started coding Excel 4.0 macro support
+  2018/10/25: continue
+  2018/10/26: continue
 
 Todo:
 """
@@ -61,6 +64,169 @@ def Strings(data, encodings='sL'):
             dStrings[encoding] = StringsUNICODE(data)
     return dStrings
 
+def ParseExpression(expression):
+    dTokens = {
+0x01: 'ptgExp',
+0x02: 'ptgTbl',
+0x03: 'ptgAdd',
+0x04: 'ptgSub',
+0x05: 'ptgMul',
+0x06: 'ptgDiv',
+0x07: 'ptgPower',
+0x08: 'ptgConcat',
+0x09: 'ptgLT',
+0x0A: 'ptgLE',
+0x0B: 'ptgEQ',
+0x0C: 'ptgGE',
+0x0D: 'ptgGT',
+0x0E: 'ptgNE',
+0x0F: 'ptgIsect',
+0x10: 'ptgUnion',
+0x11: 'ptgRange',
+0x12: 'ptgUplus',
+0x13: 'ptgUminus',
+0x14: 'ptgPercent',
+0x15: 'ptgParen',
+0x16: 'ptgMissArg',
+0x17: 'ptgStr',
+0x19: 'ptgAttr',
+0x1A: 'ptgSheet',
+0x1B: 'ptgEndSheet',
+0x1C: 'ptgErr',
+0x1D: 'ptgBool',
+0x1E: 'ptgInt',
+0x1F: 'ptgNum',
+0x20: 'ptgArray',
+0x21: 'ptgFunc',
+0x22: 'ptgFuncVar',
+0x23: 'ptgName',
+0x24: 'ptgRef',
+0x25: 'ptgArea',
+0x26: 'ptgMemArea',
+0x27: 'ptgMemErr',
+0x28: 'ptgMemNoMem',
+0x29: 'ptgMemFunc',
+0x2A: 'ptgRefErr',
+0x2B: 'ptgAreaErr',
+0x2C: 'ptgRefN',
+0x2D: 'ptgAreaN',
+0x2E: 'ptgMemAreaN',
+0x2F: 'ptgMemNoMemN',
+0x39: 'ptgNameX',
+0x3A: 'ptgRef3d',
+0x3B: 'ptgArea3d',
+0x3C: 'ptgRefErr3d',
+0x3D: 'ptgAreaErr3d',
+0x40: 'ptgArrayV',
+0x41: 'ptgFuncV',
+0x42: 'ptgFuncVarV',
+0x43: 'ptgNameV',
+0x44: 'ptgRefV',
+0x45: 'ptgAreaV',
+0x46: 'ptgMemAreaV',
+0x47: 'ptgMemErrV',
+0x48: 'ptgMemNoMemV',
+0x49: 'ptgMemFuncV',
+0x4A: 'ptgRefErrV',
+0x4B: 'ptgAreaErrV',
+0x4C: 'ptgRefNV',
+0x4D: 'ptgAreaNV',
+0x4E: 'ptgMemAreaNV',
+0x4F: 'ptgMemNoMemNV',
+0x58: 'ptgFuncCEV',
+0x59: 'ptgNameXV',
+0x5A: 'ptgRef3dV',
+0x5B: 'ptgArea3dV',
+0x5C: 'ptgRefErr3dV',
+0x5D: 'ptgAreaErr3dV',
+0x60: 'ptgArrayA',
+0x61: 'ptgFuncA',
+0x62: 'ptgFuncVarA',
+0x63: 'ptgNameA',
+0x64: 'ptgRefA',
+0x65: 'ptgAreaA',
+0x66: 'ptgMemAreaA',
+0x67: 'ptgMemErrA',
+0x68: 'ptgMemNoMemA',
+0x69: 'ptgMemFuncA',
+0x6A: 'ptgRefErrA',
+0x6B: 'ptgAreaErrA',
+0x6C: 'ptgRefNA',
+0x6D: 'ptgAreaNA',
+0x6E: 'ptgMemAreaNA',
+0x6F: 'ptgMemNoMemNA',
+0x78: 'ptgFuncCEA',
+0x79: 'ptgNameXA',
+0x7A: 'ptgRef3dA',
+0x7B: 'ptgArea3dA',
+0x7C: 'ptgRefErr3dA',
+0x7D: 'ptgAreaErr3dA',
+}
+
+    dFunctions = {0x36: 'HALT', 0x6E: 'EXEC', 0x76: 'ALERT', 0x95: 'REGISTER', 0xAC: 'WHILE', 0xAE: 'NEXT'}
+    result = ''
+    while len(expression) > 0:
+        ptgid = ord(expression[0])
+        expression = expression[1:]
+        if ptgid in dTokens:
+            result += dTokens[ptgid] + ' '
+            if ptgid == 0x17:
+                length = ord(expression[0])
+                expression = expression[1:]
+                if expression[0] == '\x00': # probably BIFF8 -> UNICODE (compressed)
+                    expression = expression[1:]
+                result += '"%s" ' % expression[:length]
+                expression = expression[length:]
+            elif ptgid == 0x19:
+                grbit = ord(expression[0])
+                expression = expression[1:]
+                if grbit & 0x04:
+                    result += 'CHOOSE '
+                    break
+                else:
+                    expression = expression[2:]
+            elif ptgid == 0x16 or ptgid == 0x0e:
+                pass
+            elif ptgid == 0x1e:
+                result += '%d ' % (ord(expression[0]) + ord(expression[1]) * 0x100)
+                expression = expression[2:]
+            elif ptgid == 0x41:
+                functionid = ord(expression[0]) + ord(expression[1]) * 0x100
+                result += '%04x (%s) ' % (functionid, dFunctions.get(functionid % 0x8000, '???'))
+                expression = expression[2:]
+            elif ptgid == 0x22 or ptgid == 0x42:
+                functionid = ord(expression[1]) + ord(expression[2]) * 0x100
+                result += 'args %d func %04x (%s) ' % (ord(expression[0]), functionid, dFunctions.get(functionid % 0x8000, '???'))
+                expression = expression[3:]
+            elif ptgid == 0x23:
+                result += '%04x ' % (ord(expression[0]) + ord(expression[1]) * 0x100)
+                expression = expression[14:]
+            elif ptgid == 0x1f:
+                result += 'FLOAT '
+                expression = expression[8:]
+            elif ptgid == 0x26:
+                expression = expression[4:]
+                expression = expression[ord(expression[0]) + ord(expression[1]) * 0x100:]
+                result += 'REFERENCE-EXPRESSION '
+            elif ptgid == 0x01:
+                formatcodes = 'HH'
+                formatsize = struct.calcsize(formatcodes)
+                row, column = struct.unpack(formatcodes, expression[0:formatsize])
+                expression = expression[formatsize:]
+                result += 'R%dC%d ' % (row + 1, column + 1)
+            elif ptgid == 0x24 or  ptgid == 0x44:
+                result += 'REFERENCE '
+                expression = expression[4:]
+            else:
+                break
+        else:
+            result += '??? '
+            break
+    if expression == '':
+        return result
+    else:
+        return result + ' --- ' + repr(expression)
+
 class cBIFF(cPluginParent):
     macroOnly = False
     name = 'BIFF plugin'
@@ -74,6 +240,7 @@ class cBIFF(cPluginParent):
     def Analyze(self):
         result = []
         dOpcodes = {
+            0x06: 'FORMULA : Cell Formula',
             0x0A: 'EOF : End of File',
             0x0C: 'CALCCOUNT : Iteration Count',
             0x0D: 'CALCMODE : Calculation Mode',
@@ -87,6 +254,7 @@ class cBIFF(cPluginParent):
             0x15: 'FOOTER : Print Footer on Each Page',
             0x16: 'EXTERNCOUNT : Number of External References',
             0x17: 'EXTERNSHEET : External Reference',
+            0x18: 'LABEL : Cell Value, String Constant',
             0x19: 'WINDOWPROTECT : Windows Are Protected',
             0x1A: 'VERTICALPAGEBREAKS : Explicit Column Page Breaks',
             0x1B: 'HORIZONTALPAGEBREAKS : Explicit Row Page Breaks',
@@ -332,7 +500,7 @@ class cBIFF(cPluginParent):
             0x8ca: 'MKREXT : Extension information for markers in Mac Office 11'
         }
 
-        if self.streamname == ['Workbook']:
+        if self.streamname in [['Workbook'], ['Book']]:
             self.ran = True
             stream = self.stream
 
@@ -358,7 +526,36 @@ class cBIFF(cPluginParent):
                     opcodename = dOpcodes[opcode]
                 else:
                     opcodename = ''
-                line = '%04x %6d %s ' % (opcode, length, opcodename)
+                line = '%04x %6d %s' % (opcode, length, opcodename)
+
+                # FORMULA record
+                if opcode == 0x06 and len(data) >= 21:
+                    formatcodes = 'HH'
+                    formatsize = struct.calcsize(formatcodes)
+                    row, column = struct.unpack(formatcodes, data[0:formatsize])
+                    formatcodes = 'H'
+                    formatsize = struct.calcsize(formatcodes)
+                    length = struct.unpack(formatcodes, data[20:20 + formatsize])[0]
+                    expression = data[22:]
+                    line += ' - R%dC%d %d %s' % (row + 1, column + 1, length, ParseExpression(expression))
+
+                # FORMULA record #a# difference BIFF4 and BIFF5+
+                if opcode == 0x18 and len(data) >= 16:
+                    if ord(data[0]) & 0x20:
+                        dBuildInNames = {1: 'Auto_Open', 2: 'Auto_Close'}
+                        code = ord(data[14])
+                        if code == 0: #a# hack with BIFF8 Unicode
+                            code = ord(data[15])
+                        line += ' - build-in-name %d %s' % (code, dBuildInNames.get(code, '?'))
+                    else:
+                        pass
+                        line += ' - %s' % (data[14:14+ord(data[3])])
+
+                # BOUNDSHEET record
+                if opcode == 0x85 and len(data) >= 6:
+                    dSheetType = {0: 'worksheet or dialog sheet', 1: 'Excel 4.0 macro sheet', 2: 'chart', 6: 'Visual Basic module'}
+                    dSheetState = {0: 'visible', 1: 'hidden', 2: 'very hidden'}
+                    line += ' - %s, %s' % (dSheetType.get(ord(data[5]), '%02x' % ord(data[5])), dSheetState.get(ord(data[4]), '%02x' % ord(data[4])))
 
                 if options.find == '' and options.opcode == '' or options.opcode != '' and options.opcode.lower() in line.lower() or options.find != '' and options.find in data:
                     result.append(line)
