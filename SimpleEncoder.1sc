@@ -1,0 +1,142 @@
+//------------------------------------------------
+//--- 010 Editor Script File
+//
+//      File: SimpleEncoder.1sc
+//   Authors: Didier Stevens
+//   Version: 1.0
+//   Purpose: Encode current selection by shifting characters. Supported encodings: ROT-5, ROT-13, ROT-47, Caesar and custom shifts. The complete file is encoded when nothing is selected.
+//  Category: Binary
+//   History: 
+//   1.0   2018-12-25 Didier Stevens: start
+//
+// Source code put in public domain by Didier Stevens, no Copyright
+// https://DidierStevens.com
+// Use at your own risk
+//------------------------------------------------
+
+#define TITLE "SimpleEncoder"
+
+#define CODE_ROT5_ID 0
+#define CODE_ROT5_STR "ROT-5"
+#define CODE_ROT13_ID 1
+#define CODE_ROT13_STR "ROT-13"
+#define CODE_ROT47_ID 2
+#define CODE_ROT47_STR "ROT-47"
+#define CODE_CAESAR_ENCODE_ID 3
+#define CODE_CAESAR_ENCODE_STR "Caesar (encode)"
+#define CODE_CAESAR_DECODE_ID 4
+#define CODE_CAESAR_DECODE_STR "Caesar (decode)"
+#define CODE_CUSTOM_DIGIT_ID 5
+#define CODE_CUSTOM_DIGIT_STR "Custom shift (characters: 0-9)"
+#define CODE_CUSTOM_AZ_ID 6
+#define CODE_CUSTOM_AZ_STR "Custom shift (characters: a-zA-Z)"
+#define CODE_CUSTOM_PRT_ID 7
+#define CODE_CUSTOM_PRT_STR "Custom shift (characters: !-~)"
+
+int CalculateShift(ubyte bRead, ubyte bStart, ubyte bEnd, int bShift)
+{
+    if (bRead >= bStart && bRead <= bEnd)
+    {
+        if (bShift < 0)
+            bShift = (bEnd - bStart + 1) + bShift;
+        return bStart + ((bRead - bStart + bShift) % (bEnd - bStart + 1)) - bRead;
+    }
+    else
+        return 0;
+}
+
+void Main(void)
+{
+    int iIter, iStart, iSize;
+    int iChoice;
+    ubyte bRead;
+    int iShift;
+    int iShiftParameter;
+
+    // Check that a file is open
+    if(FileCount() == 0)
+    {
+        MessageBox(idOk, TITLE, TITLE + " can only be executed when a file is loaded.");
+        return;
+    }
+
+    // Initializes the variables
+    iSize = GetSelSize();
+    iStart = GetSelStart();
+
+    // Check that bytes were selected
+    if(iSize == 0)
+    {
+        iSize = FileSize();
+        iStart = 0;
+    }
+
+    iChoice = InputRadioButtonBox(TITLE, "Choose encoding:", 0, CODE_ROT5_STR, CODE_ROT13_STR, CODE_ROT47_STR, CODE_CAESAR_ENCODE_STR, CODE_CAESAR_DECODE_STR, CODE_CUSTOM_DIGIT_STR, CODE_CUSTOM_AZ_STR, CODE_CUSTOM_PRT_STR);
+    if (-1 == iChoice)
+        return;
+    if (iChoice >= CODE_CUSTOM_DIGIT_ID && iChoice <= CODE_CUSTOM_PRT_ID)
+    {
+        iShiftParameter = InputNumber(TITLE, "Choose shift value:", "");
+        if (BAD_VALUE == iShiftParameter || 0 == iShiftParameter)
+        {
+            MessageBox(idOk, TITLE, "Please provide a valid shift value.");
+            return;
+        }
+    }
+
+    // Modify the selection
+    for (iIter = 0; iIter < iSize; iIter++)
+    {
+        bRead = ReadUByte(iStart + iIter);
+        // Modify the current byte
+        switch (iChoice)
+        {
+            case CODE_ROT5_ID:
+                if (0 != iShift = CalculateShift(bRead, 48, 57, 5))
+                    WriteUByte(iStart + iIter, bRead + iShift);
+                break;
+            case CODE_ROT13_ID:
+                iShift = CalculateShift(bRead, 65, 90, 13);
+                if (0 == iShift)
+                    iShift = CalculateShift(bRead, 97, 122, 13);
+                if (0 != iShift)
+                    WriteUByte(iStart + iIter, bRead + iShift);
+                break;
+            case CODE_ROT47_ID:
+                if (0 != iShift = CalculateShift(bRead, 33, 126, 47))
+                    WriteUByte(iStart + iIter, bRead + iShift);
+                break;
+            case CODE_CAESAR_ENCODE_ID:
+                iShift = CalculateShift(bRead, 65, 90, 3);
+                if (0 == iShift)
+                    iShift = CalculateShift(bRead, 97, 122, 3);
+                if (0 != iShift)
+                    WriteUByte(iStart + iIter, bRead + iShift);
+                break;
+            case CODE_CAESAR_DECODE_ID:
+                iShift = CalculateShift(bRead, 65, 90, -3);
+                if (0 == iShift)
+                    iShift = CalculateShift(bRead, 97, 122, -3);
+                if (0 != iShift)
+                    WriteUByte(iStart + iIter, bRead + iShift);
+                break;
+            case CODE_CUSTOM_DIGIT_ID:
+                if (0 != iShift = CalculateShift(bRead, 48, 57, iShiftParameter))
+                    WriteUByte(iStart + iIter, bRead + iShift);
+                break;
+            case CODE_CUSTOM_AZ_ID:
+                iShift = CalculateShift(bRead, 65, 90, iShiftParameter);
+                if (0 == iShift)
+                    iShift = CalculateShift(bRead, 97, 122, iShiftParameter);
+                if (0 != iShift)
+                    WriteUByte(iStart + iIter, bRead + iShift);
+                break;
+            case CODE_CUSTOM_PRT_ID:
+                if (0 != iShift = CalculateShift(bRead, 33, 126, iShiftParameter))
+                    WriteUByte(iStart + iIter, bRead + iShift);
+                break;
+        }
+    }
+}
+
+Main();
