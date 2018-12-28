@@ -2,7 +2,7 @@
 
 __description__ = "Program to convert numbers into a string"
 __author__ = 'Didier Stevens'
-__version__ = '0.0.6'
+__version__ = '0.0.7'
 __date__ = '2018/12/15'
 
 """
@@ -22,6 +22,7 @@ History:
   2018/07/25: updated man
   2018/08/25: 0.0.5 added option -S
   2018/12/15: 0.0.6 added option -t and changed option --end
+  2018/12/15: 0.0.7 added option -T
 
 Todo:
 """
@@ -94,10 +95,12 @@ With option -j, the output strings can be concatenated:
 C:\Demo>numbers-to-string.py -j n test.js
 DidierStevens
 
-numbers-to-string translates numbers into characters according to the ASCII table. You can use another table (index starting aat zero), by using option -t and providing a string with the character sequence needed for proper decoding:
+numbers-to-string translates numbers into characters according to the ASCII table. You can use another table (index starting at zero), by using option -t and providing a string with the character sequence needed for proper decoding:
 
 C:\Demo>echo "3,1,2,2,4" | numbers-to-string.py -t "xelHo"
 Hello
+
+If the string for the translation is contained in the line with numbers, you can use option -T ... to extract the translation string by replacing ... with the start of the translation string.
 
 numbers-to-string.py can also generate statistics, to help with the identification of the encoding. Use option -S to generate statistics, like this:
 
@@ -254,12 +257,14 @@ def CalculateStatistics(numbers):
     numbers = map(int, numbers)
     return (len(numbers), min(numbers), max(numbers), sum(numbers) / len(numbers))
 
-def Chr(number, options):
+def Chr(number, options, translation):
     try:
-        if options.table == '':
-            return chr(number)
-        else:
+        if options.table != '':
             return options.table[number]
+        elif options.begintable != '':
+            return translation[number]
+        else:
+            return chr(number)
     except:
         if options.ignore:
             return ''
@@ -275,7 +280,6 @@ def NumbersToStringSingle(function, filenames, oOutput, options):
     else:
         Function = None
     oRE = re.compile('\d+')
-    ChrFunction = lambda c: Chr(c, options)
     for filename in filenames:
         joined = ''
         if filename == '':
@@ -300,6 +304,12 @@ def NumbersToStringSingle(function, filenames, oOutput, options):
                     selected, line = oGrep.Grep(line)
                 if not selected:
                     continue
+                translation = ''
+                if options.begintable != '':
+                    position = line.find(options.begintable)
+                    if position == -1:
+                        continue
+                    translation = line[position:]
                 if options.begin != '':
                     position = line.find(options.begin)
                     if position == -1:
@@ -312,6 +322,7 @@ def NumbersToStringSingle(function, filenames, oOutput, options):
                     line = line[:position + len(options.end)]
                 results = oRE.findall(line)
                 if len(results) >= options.number:
+                    ChrFunction = lambda c: Chr(c, options, translation)
                     error = True
                     if Function == None:
                         try:
@@ -365,6 +376,7 @@ https://DidierStevens.com'''
     oParser.add_option('-j', '--join', action='store_true', default=False, help='Join output')
     oParser.add_option('-S', '--statistics', action='store_true', default=False, help='Generate statistics')
     oParser.add_option('-t', '--table', type=str, default='', help='Translation table')
+    oParser.add_option('-T', '--begintable', type=str, default='', help='Begin translation table')
     oParser.add_option('--grep', type=str, default='', help='Grep expression')
     oParser.add_option('--grepoptions', type=str, default='', help='Grep options')
     oParser.add_option('--begin', type=str, default='', help='Begin substring')
