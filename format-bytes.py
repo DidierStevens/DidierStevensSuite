@@ -2,8 +2,8 @@
 
 __description__ = 'This is essentialy a wrapper for the struct module'
 __author__ = 'Didier Stevens'
-__version__ = '0.0.6'
-__date__ = '2018/10/28'
+__version__ = '0.0.7'
+__date__ = '2018/11/09'
 
 """
 Source code put in public domain by Didier Stevens, no Copyright
@@ -35,6 +35,8 @@ History:
   2018/06/17: added property extracted to cBinaryFile
   2018/07/21: updated CheckJSON
   2018/10/28: 0.0.6 added option -n
+  2018/11/09: 0.0.7 added X and S representation for strings; option -A
+  2018/12/08: updated ParseCutArgument; added selection warning
 
 Todo:
 """
@@ -111,7 +113,9 @@ File: random.bin
  2:    <type 'int'>  409089161   18623489  1982/12/18 19:52:41
  3:    <type 'int'>        -18        -12
 
-End the format string with character * to display which bytes remain.
+String lengths can also be specified in hexadecimal by using prefix 0x. For example, 16s, a 16 character long string, can also be specified as 0x10s in hexadecimal.
+
+End the format string with character * to display remaining bytes.
 Example:
 
 format-bytes.py -f "<hib*" random.bin
@@ -132,7 +136,7 @@ Remainder: 9
 8F: l 0.000000 b -721504228050136948830706706079286975060186906491372824967789492043776.000000
 
 You can also specify how the parsed bytes should be represented. To achieve this, append a double colon character (:) to the format string followed by a representation character for each member.
-Valid representation characters are X (for hexadecimal), I (for integer) and E (for epoch).
+Valid representation characters are X (for hexadecimal), I (for integer), E (for epoch) and S (for string with escaped characters).
 Example:
 
 C:\Demo>format-bytes.py -f "<hib*:XEI" random.bin
@@ -159,7 +163,7 @@ File: random.bin
  1:    <type 'int'>      26043       65bb  1970/01/01 07:14:03
  2:    <type 'str'>         14 .4b...:... 89346218eece3ac3179f 3.807355 e1647bd9711cdfee7959dee4ff956590
 
-Strings can be selected with option -s for dumping. Default is ASCII dump (-a), but hexadecimal (-x) and binary (-d) dump is available too.
+Strings can be selected with option -s for dumping. Default is ASCII dump (-a), but run-length encoded ASCII (-A), hexadecimal (-x) and binary (-d) dump is available too.
 
 Annotations can be added to particular members, using option -n. Like in this example:
 
@@ -410,6 +414,24 @@ def IFF(expression, valueTrue, valueFalse):
         return CIC(valueTrue)
     else:
         return CIC(valueFalse)
+
+def RINSub(data, specialcharacters=''):
+    if specialcharacters != '':
+        for specialcharacter in specialcharacters:
+            if specialcharacter in data:
+                return repr(data)
+        return data
+    elif "'" + data + "'" == repr(data):
+        return data
+    else:
+        return repr(data)
+
+# RIN: Repr If Needed
+def RIN(data, specialcharacters=''):
+    if type(data) == list:
+        return [RINSub(item, specialcharacters) for item in data]
+    else:
+        return RINSub(data, specialcharacters)
 
 #----------------------------------------------------------------------------------------------------
 #import random
@@ -894,6 +916,18 @@ def Replace(string, dReplacements):
     else:
         return string
 
+def ParseInteger(argument):
+    sign = 1
+    if argument.startswith('+'):
+        argument = argument[1:]
+    elif argument.startswith('-'):
+        argument = argument[1:]
+        sign = -1
+    if argument.startswith('0x'):
+        return sign * int(argument[2:], 16)
+    else:
+        return sign * int(argument)
+
 def ParseCutTerm(argument):
     if argument == '':
         return CUTTERM_NOTHING, None, ''
@@ -906,23 +940,23 @@ def ParseCutTerm(argument):
             value = -value
         return CUTTERM_POSITION, value, argument[len(oMatch.group(0)):]
     if oMatch == None:
-        oMatch = re.match(r'\[([0-9a-f]+)\](\d+)?([+-]\d+)?', argument, re.I)
+        oMatch = re.match(r'\[([0-9a-f]+)\](\d+)?([+-](?:0x[0-9a-f]+|\d+))?', argument, re.I)
     else:
         value = int(oMatch.group(1))
         if argument.startswith('-'):
             value = -value
         return CUTTERM_POSITION, value, argument[len(oMatch.group(0)):]
     if oMatch == None:
-        oMatch = re.match(r"\[\'(.+?)\'\](\d+)?([+-]\d+)?", argument)
+        oMatch = re.match(r"\[\'(.+?)\'\](\d+)?([+-](?:0x[0-9a-f]+|\d+))?", argument)
     else:
         if len(oMatch.group(1)) % 2 == 1:
             raise Exception("Uneven length hexadecimal string")
         else:
-            return CUTTERM_FIND, (binascii.a2b_hex(oMatch.group(1)), int(Replace(oMatch.group(2), {None: '1'})), int(Replace(oMatch.group(3), {None: '0'}))), argument[len(oMatch.group(0)):]
+            return CUTTERM_FIND, (binascii.a2b_hex(oMatch.group(1)), int(Replace(oMatch.group(2), {None: '1'})), ParseInteger(Replace(oMatch.group(3), {None: '0'}))), argument[len(oMatch.group(0)):]
     if oMatch == None:
         return None, None, argument
     else:
-        return CUTTERM_FIND, (oMatch.group(1), int(Replace(oMatch.group(2), {None: '1'})), int(Replace(oMatch.group(3), {None: '0'}))), argument[len(oMatch.group(0)):]
+        return CUTTERM_FIND, (oMatch.group(1), int(Replace(oMatch.group(2), {None: '1'})), ParseInteger(Replace(oMatch.group(3), {None: '0'}))), argument[len(oMatch.group(0)):]
 
 def ParseCutArgument(argument):
     type, value, remainder = ParseCutTerm(argument.strip())
@@ -1218,22 +1252,36 @@ class cDump():
             countSpaces += 1
         return hexDump + '  ' + (' ' * countSpaces) + asciiDump
 
-    def HexAsciiDump(self):
+    def HexAsciiDump(self, rle=False):
         oDumpStream = self.cDumpStream(self.prefix)
+        position = ''
         hexDump = ''
         asciiDump = ''
+        previousLine = None
+        countRLE = 0
         for i, b in enumerate(self.data):
             b = self.C2IIP2(b)
             if i % self.dumplinelength == 0:
                 if hexDump != '':
-                    oDumpStream.Addline(self.CombineHexAscii(hexDump, asciiDump))
-                hexDump = '%08X:' % (i + self.offset)
+                    line = self.CombineHexAscii(hexDump, asciiDump)
+                    if not rle or line != previousLine:
+                        if countRLE > 0:
+                            oDumpStream.Addline('* %d 0x%02x' % (countRLE, countRLE * self.dumplinelength))
+                        oDumpStream.Addline(position + line)
+                        countRLE = 0
+                    else:
+                        countRLE += 1
+                    previousLine = line
+                position = '%08X:' % (i + self.offset)
+                hexDump = ''
                 asciiDump = ''
             if i % self.dumplinelength == self.dumplinelength / 2:
                 hexDump += ' '
             hexDump += ' %02X' % b
             asciiDump += IFF(b >= 32 and b < 128, chr(b), '.')
-        oDumpStream.Addline(self.CombineHexAscii(hexDump, asciiDump))
+        if countRLE > 0:
+            oDumpStream.Addline('* %d 0x%02x' % (countRLE, countRLE * self.dumplinelength))
+        oDumpStream.Addline(self.CombineHexAscii(position + hexDump, asciiDump))
         return oDumpStream.Content()
 
     def Base64Dump(self, nowhitespace=False):
@@ -1269,8 +1317,8 @@ class cDump():
 def HexDump(data):
     return cDump(data).HexDump()
 
-def HexAsciiDump(data):
-    return cDump(data).HexAsciiDump()
+def HexAsciiDump(data, rle=False):
+    return cDump(data).HexAsciiDump(rle=rle)
 
 def IfWIN32SetBinary(io):
     if sys.platform == 'win32':
@@ -1290,8 +1338,14 @@ def StdoutWriteChunked(data):
                 return
             data = data[10000:]
 
-def FormatBytesSingle(filename, cutexpression, content, options):
-    formats = options.format.split(':')
+def SearchAndReplaceFormatCallBack(oMatch):
+    return '%ds' % int(oMatch.groups()[0], 16)
+
+def SearchAndReplaceFormat(format):
+    return re.sub(r'0x([0-9a-fA-F]+)s', SearchAndReplaceFormatCallBack, format)
+
+def ParseFormat(formatvalue):
+    formats = formatvalue.split(':')
     if len(formats) == 2:
         format, representation = formats
     else:
@@ -1302,6 +1356,11 @@ def FormatBytesSingle(filename, cutexpression, content, options):
         remainder = True
     else:
         remainder = False
+
+    return SearchAndReplaceFormat(format), representation, remainder
+
+def FormatBytesSingle(filename, cutexpression, content, options):
+    format, representation, remainder = ParseFormat(options.format)
 
     dAnnotations = {}
     if options.annotations != '':
@@ -1336,17 +1395,21 @@ def FormatBytesSingle(filename, cutexpression, content, options):
                 IfWIN32SetBinary(sys.stdout)
             elif options.hexdump:
                 DumpFunction = HexDump
+            elif options.asciidumprle:
+                DumpFunction = lambda x: HexAsciiDump(x, True)
             else:
                 DumpFunction = HexAsciiDump
 
+        selectionCounter = 0
         size = struct.calcsize(format)
         for index, element in enumerate(struct.unpack(format, data[0:size])):
             index += 1
             if options.select != '':
                 if int(options.select) == index and (isinstance(element, str) or isinstance(element, bytes)):
                     StdoutWriteChunked(DumpFunction(element))
+                    selectionCounter += 1
             else:
-                if isinstance(element, int):
+                if isinstance(element, int) or isinstance(element, long):
                     if representation == '':
                         line = '%2d: %15s %10d %10x  %s' % (index, type(element), element, element, IFF(element < 0, '', lambda: TimestampUTC(element)))
                     elif representation[index - 1] == 'X':
@@ -1356,12 +1419,19 @@ def FormatBytesSingle(filename, cutexpression, content, options):
                     elif representation[index - 1] == 'E':
                         line = '%2d: %15s %s' % (index, type(element), IFF(element < 0, '', lambda: TimestampUTC(element)))
                 elif isinstance(element, str):
-                    line = '%2d: %15s %10d %s %s %s %s' % (index, type(element), len(element), ExtraInfoHEADASCII(element[:10]), ExtraInfoHEADHEX(element[:10]), ExtraInfoENTROPY(element), ExtraInfoMD5(element))
+                    if representation != '' and representation[index - 1] == 'S':
+                        line = '%2d: %15s %s' % (index, type(element), RIN(element))
+                    elif representation != '' and representation[index - 1] == 'X':
+                        line = '%2d: %15s %s' % (index, type(element), binascii.b2a_hex(element))
+                    else:
+                        line = '%2d: %15s %10d %s %s %s %s' % (index, type(element), len(element), ExtraInfoHEADASCII(element[:10]), ExtraInfoHEADHEX(element[:10]), ExtraInfoENTROPY(element), ExtraInfoMD5(element))
                 elif isinstance(element, bytes):
                     line = '%2d: %15s %10d %s %s %s %s' % (index, type(element), len(element), ExtraInfoHEADASCII3(element[:10]), ExtraInfoHEADHEX(element[:10]), ExtraInfoENTROPY(element), ExtraInfoMD5(element))
                 else:
                     line = '%2d: %15s %s' % (index, type(element), str(element))
                 print('%s %s' % (line, dAnnotations.get(index, '')))
+        if options.select != '' and selectionCounter == 0:
+            print('Warning: no item was selected with expression %s' % options.select)
         if options.select == '' and remainder:
             print('Remainder: %d' % (len(data) - size))
             remainderx100 = data[size:size + 0x100]
@@ -1396,6 +1466,7 @@ https://DidierStevens.com'''
     oParser.add_option('-d', '--dump', action='store_true', default=False, help='perform dump')
     oParser.add_option('-x', '--hexdump', action='store_true', default=False, help='perform hex dump')
     oParser.add_option('-a', '--asciidump', action='store_true', default=False, help='perform ascii dump')
+    oParser.add_option('-A', '--asciidumprle', action='store_true', default=False, help='perform ascii dump with RLE')
     oParser.add_option('-C', '--count', type=int, default=1, help='The number of repeating bytes (default 1)')
     oParser.add_option('-S', '--step', type=int, default=1, help='The step to use when option --count is not 1 (default 1)')
     oParser.add_option('--password', default='infected', help='The ZIP password to be used (default infected)')
