@@ -4,8 +4,8 @@ from __future__ import print_function
 
 __description__ = 'Crack MS Office document password'
 __author__ = 'Didier Stevens'
-__version__ = '0.0.1'
-__date__ = '2018/12/30'
+__version__ = '0.0.2'
+__date__ = '2019/01/05'
 
 """
 Source code put in the public domain by Didier Stevens, no Copyright
@@ -14,6 +14,7 @@ Use at your own risk
 
 History:
   2018/12/30: start
+  2019/01/05: 0.0.2 added option -c and -e; password VelvetSweatshop
 
 Todo:
 """
@@ -34,7 +35,7 @@ try:
     import msoffcrypto
 except:
     print('This program requires module msoffcrypto.')
-    print("You can use get it from GitHub: https://github.com/nolze/msoffcrypto-tool\n")
+    print("You can get it from GitHub: https://github.com/nolze/msoffcrypto-tool\n")
     exit(-1)
 
 MALWARE_PASSWORD = 'infected'
@@ -51,6 +52,10 @@ The password for this ZIP file is "infected" (without double quotes) by default,
 Without any further options, the tool will proceed with a dictonary attack to recover the password of the encrypted MS Office document. The passwords for this dictionary are taken from an internal list.
 When a matching password is found, it will be printed and the tool will stop the dictionary attack.
 To provide your own password list for the dictionary attack, use option -p to provide the filename of a text file with passwords. This text file may be compressed with gzip, and the tool will decompress the file in memory.
+Another method to provide potential passwords, is using option -e: extractpasswords. You use this option with a text file, and the tool will extract all potential passwords from this text file and use as a dictionary. Potential passwords are space-delimited strings found inside the text file. Potential passwords that are surrounded by quotes (single and double) and/or follow after word "password", are put at the beginning of the list of potential passwords to be tested in the dictionay attack.
+One use case for option -e, is an email with password protected attachment: the password is probably mentioned in the message of the email, option -e can be used to generate a dictionary of passwords to try from this message.
+
+When a password has been found, option -c can be used to run the program again with the cracked password, and thus avoid the delay caused by the dictionary attack.
 
 The tool can also decrypt the provided MS Office document if the password is recovered: use option -o to decrypt the document and give the filename for the decrypted document. If you provide - as filename, the decrypted document will be outputed to stdout.
 
@@ -95,6 +100,7 @@ def GetDictionary(passwordfile):
         return [
           'infected',
           'P@ssw0rd',
+          'VelvetSweatshop',
           '123456',
           '12345',
           'password',
@@ -3646,10 +3652,40 @@ def FormatTime(epoch=None):
         epoch = time.time()
     return '%04d%02d%02d-%02d%02d%02d' % time.localtime(epoch)[0:6]
 
+def RemoveQuotes(word):
+    if len(word) < 3:
+        return ''
+    if word[0] != word[-1]:
+        return ''
+    if not word[0] in ['"', "'"]:
+        return ''
+    return word[1:-1]
+
+def DeduplicateAndPreserveOrder(list):
+    result = []
+    for element in list:
+        if not element in result:
+            result.append(element)
+    return result
+
+def Unquoted(list):
+    return [element for element in [RemoveQuotes(element) for element in list] if element != '']
+
+def ExtractPasswords(filename):
+    words = [word for line in File2Strings(filename) for word in line.split(' ') if len(word) > 0]
+    probablyPasswords = []
+    for index in range(len(words)):
+        if words[index].lower() == 'password':
+            probablyPasswords.extend(words[index+1:index+4])
+    return DeduplicateAndPreserveOrder(Unquoted(probablyPasswords) + probablyPasswords + Unquoted(words) + words)
+
 def Crack(filename, options):
     if filename == '':
         IfWIN32SetBinary(sys.stdin)
-        oDataIO = DataIO(sys.stdin.read())
+        if hasattr(sys.stdin, 'buffer'):  # For Python 2
+            oDataIO = DataIO(sys.stdin.buffer.read())
+        else:
+            oDataIO = DataIO(sys.stdin.read())
     elif filename.lower().endswith('.zip'):
         oZipfile = zipfile.ZipFile(filename, 'r')
         oZipContent = oZipfile.open(oZipfile.infolist()[0], 'r', C2BIP3(options.password))
@@ -3660,26 +3696,33 @@ def Crack(filename, options):
         oDataIO = DataIO(open(filename, 'rb').read())
 
     file = msoffcrypto.OfficeFile(oDataIO)
-    passwords = GetDictionary(options.passwordlist)
-    total = len(passwords)
-    starttime = time.time()
-    for index, password in enumerate(passwords):
-        if index == 0:
-            eta = ''
+
+    if options.crackedpassword == '':
+        if options.extractpasswords == '':
+            passwords = GetDictionary(options.passwordlist)
         else:
-            seconds = int(float((time.time() - starttime) / float(index)) * float(total - index))
-            eta = 'estimation %d seconds left, finished %s' % (seconds, FormatTime(time.time() + seconds))
-        if (index + 1) % 100 == 0 and options.output != '-':
-            print('%d/%d %s' % (index + 1, total, eta))
-        try:
-            file.load_key(password=password)
-        except KeyboardInterrupt:
-            raise
-        except:
-            continue
-        if options.output != '-':
-            print('Password found: %s' % password)
-        break
+            passwords = ExtractPasswords(options.extractpasswords)
+        total = len(passwords)
+        starttime = time.time()
+        for index, password in enumerate(passwords):
+            if index == 0:
+                eta = ''
+            else:
+                seconds = int(float((time.time() - starttime) / float(index)) * float(total - index))
+                eta = 'estimation %d seconds left, finished %s' % (seconds, FormatTime(time.time() + seconds))
+            if (index + 1) % 100 == 0 and options.output != '-':
+                print('%d/%d %s' % (index + 1, total, eta))
+            try:
+                file.load_key(password=password)
+            except KeyboardInterrupt:
+                raise
+            except:
+                continue
+            if options.output != '-':
+                print('Password found: %s' % password)
+            break
+    else:
+        file.load_key(password=options.crackedpassword)
 
     if options.output == '':
         pass
@@ -3702,6 +3745,8 @@ https://DidierStevens.com'''
     oParser = optparse.OptionParser(usage='usage: %prog [options] [file]\n' + __description__ + moredesc, version='%prog ' + __version__)
     oParser.add_option('-m', '--man', action='store_true', default=False, help='Print manual')
     oParser.add_option('-p', '--passwordlist', default='', help='The password list to use')
+    oParser.add_option('-e', '--extractpasswords', default='', help='A text file to extract passwords from')
+    oParser.add_option('-c', '--crackedpassword', default='', help='The password to use')
     oParser.add_option('--password', default=MALWARE_PASSWORD, help='The ZIP password to be used for the malware ZIP container (default %s)' % MALWARE_PASSWORD)
     oParser.add_option('-o', '--output', default='', help='Output filename for decrypted file (- for stdout)')
     (options, args) = oParser.parse_args()
