@@ -4,8 +4,8 @@ from __future__ import print_function
 
 __description__ = 'Crack MS Office document password'
 __author__ = 'Didier Stevens'
-__version__ = '0.0.2'
-__date__ = '2019/01/05'
+__version__ = '0.0.3'
+__date__ = '2019/01/22'
 
 """
 Source code put in the public domain by Didier Stevens, no Copyright
@@ -15,6 +15,7 @@ Use at your own risk
 History:
   2018/12/30: start
   2019/01/05: 0.0.2 added option -c and -e; password VelvetSweatshop
+  2019/01/22: 0.0.3 fixed agile decryption (Crypto version 4.4: Agile Encryption) bug by adding file.decrypt ...
 
 Todo:
 """
@@ -3714,6 +3715,7 @@ def Crack(filename, options):
                 print('%d/%d %s' % (index + 1, total, eta))
             try:
                 file.load_key(password=password)
+                file.decrypt(DataIO())
             except KeyboardInterrupt:
                 raise
             except:
