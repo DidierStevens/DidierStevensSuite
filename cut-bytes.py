@@ -2,8 +2,8 @@
 
 __description__ = 'Cut a section of bytes out of a file'
 __author__ = 'Didier Stevens'
-__version__ = '0.0.8'
-__date__ = '2018/11/07'
+__version__ = '0.0.9'
+__date__ = '2019/02/16'
 
 """
 
@@ -22,6 +22,7 @@ History:
   2017/12/01: 0.0.7 updated FilenameCheckHash to handle empty file: #
   2018/03/05: updated #e# expressions
   2018/11/07: 0.0.8 added options -A, -g, -G and --jsonoutput; added hexadecimal support for offset in cut-expression
+  2019/02/16: 0.0.9 updated cut expression format
 
 Todo:
 """
@@ -63,7 +64,8 @@ termA and termB can be:
 - nothing (an empty string)
 - a positive decimal number; example: 10
 - an hexadecimal number (to be preceded by 0x); example: 0x10
-- a case sensitive string to search for (surrounded by square brackets and single quotes); example: ['MZ']
+- a case sensitive ASCII string to search for (surrounded by square brackets and single quotes); example: ['MZ']
+- a case sensitive UNICODE string to search for (surrounded by square brackets and single quotes prefixed with u); example: [u'User']
 - an hexadecimal string to search for (surrounded by square brackets); example: [d0cf11e0]
 If termA is nothing, then the cut section of bytes starts with the byte at position 0.
 If termA is a number, then the cut section of bytes starts with the byte at the position given by the number (first byte has index 0).
@@ -74,9 +76,9 @@ When termB is a number, it can have suffix letter l. This indicates that the num
 termB can also be a negative number (decimal or hexademical): in that case the position is counted from the end of the file. For example, :-5 selects the complete file except the last 5 bytes.
 If termB is a string to search for, then the cut section of bytes ends with the last byte at the position where the string is first found. If the string is not found, the cut is empty (0 bytes).
 No checks are made to assure that the position specified by termA is lower than the position specified by termB. This is left up to the user.
-Search string expressions (ASCII and hexadecimal) can be followed by an instance (a number equal to 1 or greater) to indicate which instance needs to be taken. For example, ['ABC']2 will search for the second instance of string 'ABC'. If this instance is not found, then nothing is selected.
-Search string expressions (ASCII and hexadecimal) can be followed by an offset (+ or - a number) to add (or substract) an offset to the found instance. This number can be a decimal or hexadecimal (prefix 0x) value. For example, ['ABC']+3 will search for the first instance of string 'ABC' and then select the bytes after ABC (+ 3).
-Finally, search string expressions (ASCII and hexadecimal) can be followed by an instance and an offset.
+Search string expressions (ASCII, UNICODE and hexadecimal) can be followed by an instance (a number equal to 1 or greater) to indicate which instance needs to be taken. For example, ['ABC']2 will search for the second instance of string 'ABC'. If this instance is not found, then nothing is selected.
+Search string expressions (ASCII, UNICODE and hexadecimal) can be followed by an offset (+ or - a number) to add (or substract) an offset to the found instance. This number can be a decimal or hexadecimal (prefix 0x) value. For example, ['ABC']+3 will search for the first instance of string 'ABC' and then select the bytes after ABC (+ 3).
+Finally, search string expressions (ASCII, UNICODE and hexadecimal) can be followed by an instance and an offset.
 Examples:
 This cut-expression can be used to dump the first 256 bytes of a PE file located inside the stream: ['MZ']:0x100l
 This cut-expression can be used to dump the OLE file located inside the stream: [d0cf11e0]:
@@ -311,7 +313,7 @@ def ParseCutTerm(argument):
             value = -value
         return CUTTERM_POSITION, value, argument[len(oMatch.group(0)):]
     if oMatch == None:
-        oMatch = re.match(r"\[\'(.+?)\'\](\d+)?([+-](?:0x[0-9a-f]+|\d+))?", argument)
+        oMatch = re.match(r"\[u?\'(.+?)\'\](\d+)?([+-](?:0x[0-9a-f]+|\d+))?", argument)
     else:
         if len(oMatch.group(1)) % 2 == 1:
             raise Exception("Uneven length hexadecimal string")
@@ -320,7 +322,12 @@ def ParseCutTerm(argument):
     if oMatch == None:
         return None, None, argument
     else:
-        return CUTTERM_FIND, (oMatch.group(1), int(Replace(oMatch.group(2), {None: '1'})), ParseInteger(Replace(oMatch.group(3), {None: '0'}))), argument[len(oMatch.group(0)):]
+        if argument.startswith("[u'"):
+            # convert ascii to unicode 16 byte sequence
+            searchtext = oMatch.group(1).decode('unicode_escape').encode('utf16')[2:]
+        else:
+            searchtext = oMatch.group(1)
+        return CUTTERM_FIND, (searchtext, int(Replace(oMatch.group(2), {None: '1'})), ParseInteger(Replace(oMatch.group(3), {None: '0'}))), argument[len(oMatch.group(0)):]
 
 def ParseCutArgument(argument):
     type, value, remainder = ParseCutTerm(argument.strip())
@@ -354,8 +361,8 @@ def ParseCutArgument(argument):
     else:
         return typeLeft, valueLeft, type, value
 
-def Find(data, value, nth):
-    position = -1
+def Find(data, value, nth, startposition=-1):
+    position = startposition
     while nth > 0:
         position = data.find(value, position + 1)
         if position == -1:
@@ -393,7 +400,7 @@ def CutData(stream, cutArgument):
     elif typeRight == CUTTERM_LENGTH:
         positionEnd = positionBegin + valueRight
     elif typeRight == CUTTERM_FIND:
-        positionEnd = Find(stream, valueRight[0], valueRight[1])
+        positionEnd = Find(stream, valueRight[0], valueRight[1], positionBegin)
         if positionEnd == -1:
             return ['', None, None]
         else:
