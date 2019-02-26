@@ -2,8 +2,8 @@
 
 __description__ = 'pdf-parser, use it to parse a PDF document'
 __author__ = 'Didier Stevens'
-__version__ = '0.6.9'
-__date__ = '2018/10/20'
+__version__ = '0.7.0'
+__date__ = '2019/02/22'
 __minimum_python_version__ = (2, 5, 1)
 __maximum_python_version__ = (3, 6, 3)
 
@@ -63,6 +63,7 @@ History:
   2017/10/29: added # support for option -y
   2018/06/29: V0.6.9 added option --overridingfilters
   2018/10/20: added keywords to statistics
+  2019/02/22: V0.7.0 added option -O --objstm to parse the stream of /ObjStm objects, inspired by a contributor wishing anonymity
 
 Todo:
   - handle printf todo
@@ -119,6 +120,13 @@ def C2BIP3(string):
     else:
         return string
 
+#Convert 2 String If Python 3
+def C2SIP3(bytes):
+    if sys.version_info[0] > 2:
+        return ''.join([chr(byte) for byte in bytes])
+    else:
+        return bytes
+
 # CIC: Call If Callable
 def CIC(expression):
     if callable(expression):
@@ -154,7 +162,7 @@ class cPDFDocument:
     def __init__(self, file):
         self.file = file
         if type(file) != str:
-        	  self.infile = file
+            self.infile = file
         elif file.lower().startswith('http://') or file.lower().startswith('https://'):
             try:
                 if sys.hexversion >= 0x020601F0:
@@ -296,12 +304,13 @@ class cPDFTokenizer:
         self.ungetted.append(byte)
 
 class cPDFParser:
-    def __init__(self, file, verbose=False, extract=None):
+    def __init__(self, file, verbose=False, extract=None, objstm=None):
         self.context = CONTEXT_NONE
         self.content = []
         self.oPDFTokenizer = cPDFTokenizer(file)
         self.verbose = verbose
         self.extract = extract
+        self.objstm = objstm
 
     def GetObject(self):
         while True:
@@ -341,7 +350,7 @@ class cPDFParser:
                 else:
                     if self.context == CONTEXT_OBJ:
                         if self.token[1] == 'endobj':
-                            self.oPDFElementIndirectObject = cPDFElementIndirectObject(self.objectId, self.objectVersion, self.content)
+                            self.oPDFElementIndirectObject = cPDFElementIndirectObject(self.objectId, self.objectVersion, self.content, self.objstm)
                             self.context = CONTEXT_NONE
                             self.content = []
                             return self.oPDFElementIndirectObject
@@ -443,11 +452,12 @@ def IIf(expr, truepart, falsepart):
         return falsepart
 
 class cPDFElementIndirectObject:
-    def __init__(self, id, version, content):
+    def __init__(self, id, version, content, objstm=None):
         self.type = PDF_ELEMENT_INDIRECT_OBJECT
         self.id = id
         self.version = version
         self.content = content
+        self.objstm = objstm
         #fix stream for Ghostscript bug reported by Kurt
         if self.ContainsStream():
             position = len(self.content) - 1
@@ -824,6 +834,8 @@ def PrintOutputObject(object, options):
         return
 
     print('obj %d %d' % (object.id, object.version))
+    if object.objstm != None:
+        print(' Containing /ObjStm: %d %d' % object.objstm)
     print(' Type: %s' % ConditionalCanonicalize(object.GetType(), options.nocanonicalizedoutput))
     print(' Referencing: %s' % ', '.join(map(lambda x: '%s %s %s' % x, object.GetReferences())))
     dataPrecedingStream = object.ContainsStream()
@@ -1260,6 +1272,7 @@ def Main():
     oParser.add_option('-w', '--raw', action='store_true', default=False, help='raw output for data and filters')
     oParser.add_option('-a', '--stats', action='store_true', default=False, help='display stats for pdf document')
     oParser.add_option('-t', '--type', help='type of indirect object to select')
+    oParser.add_option('-O', '--objstm', action='store_true', default=False, help='parse stream of /ObjStm objects')
     oParser.add_option('-v', '--verbose', action='store_true', default=False, help='display malformed PDF elements')
     oParser.add_option('-x', '--extract', help='filename to extract malformed content to')
     oParser.add_option('-H', '--hash', action='store_true', default=False, help='display hash of objects')
@@ -1382,8 +1395,35 @@ def Main():
                 return
             rules = YARACompile(options.yara)
 
+        oPDFParserOBJSTM = None
         while True:
-            object = oPDFParser.GetObject()
+            if oPDFParserOBJSTM == None:
+                object = oPDFParser.GetObject()
+            else:
+                object = oPDFParserOBJSTM.GetObject()
+                if object == None:
+                    oPDFParserOBJSTM = None
+                    object = oPDFParser.GetObject()
+            if options.objstm and hasattr(object, 'GetType') and EqualCanonical(object.GetType(), '/ObjStm') and object.ContainsStream():
+                # parsing objects inside an /ObjStm object by extracting & parsing the stream content to create a synthesized PDF document, that is then parsed by cPDFParser
+                oPDFParseDictionary = cPDFParseDictionary(object.ContainsStream(), options.nocanonicalizedoutput)
+                numberOfObjects = int(oPDFParseDictionary.Get('/N')[0])
+                offsetFirstObject = int(oPDFParseDictionary.Get('/First')[0])
+                indexes = list(map(int, C2SIP3(object.Stream())[:offsetFirstObject].strip().split(' ')))
+                if len(indexes) % 2 != 0 or len(indexes) / 2 != numberOfObjects:
+                    raise Exception('Error in index of /ObjStm stream')
+                streamObject = C2SIP3(object.Stream()[offsetFirstObject:])
+                synthesizedPDF = ''
+                while len(indexes) > 0:
+                    objectNumber = indexes[0]
+                    offset = indexes[1]
+                    indexes = indexes[2:]
+                    if len(indexes) >= 2:
+                        offsetNextObject = indexes[1]
+                    else:
+                        offsetNextObject = len(streamObject)
+                    synthesizedPDF += '%d 0 obj\n%s\nendobj\n' % (objectNumber, streamObject[offset:offsetNextObject])
+                oPDFParserOBJSTM = cPDFParser(StringIO(synthesizedPDF), options.verbose, options.extract, (object.id, object.version))
             if object != None:
                 if options.stats:
                     if object.type == PDF_ELEMENT_COMMENT:

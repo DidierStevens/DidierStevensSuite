@@ -2,8 +2,8 @@
 
 __description__ = 'Translate bytes according to a Python expression'
 __author__ = 'Didier Stevens'
-__version__ = '2.5.4'
-__date__ = '2018/04/27'
+__version__ = '2.5.5'
+__date__ = '2019/02/20'
 
 """
 
@@ -37,6 +37,7 @@ History:
   2018/02/12: 2.5.3 when the Python expression returns None (in stead of a byte value), no byte is written to output.
   2018/03/05: 2.5.4 updated #e# expressions
   2018/04/27: added option literalfilenames
+  2019/02/20: 2.5.5 added ZlibRawD
 
 Todo:
 """
@@ -112,7 +113,7 @@ Output: ABCD
 Option -e (execute) is used to execute Python commands before the command is executed. This can, for example, be used to import modules.
 Here is an example to decompress a Flash file (.swf):
  translate.py -f -e "import zlib" sample.swf "lambda b: zlib.decompress(b[8:])"
-You can use build in function ZlibD too, and GzipD for gzip decompression.
+You can use build in function ZlibD too, and ZlibRawD for inflating without header, and GzipD for gzip decompression.
 
 A second file can be used as input with option -2. The value of the current byte of the second input file is stored in variable byte2 (this too advances byte per byte together with the primary input file).
 
@@ -195,6 +196,9 @@ def GzipD(data):
 
 def ZlibD(data):
     return zlib.decompress(data)
+
+def ZlibRawD(data):
+    return zlib.decompress(data, -8)
 
 # CIC: Call If Callable
 def CIC(expression):

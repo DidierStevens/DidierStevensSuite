@@ -2,8 +2,8 @@
 
 __description__ = 'Tool for displaying PE file info'
 __author__ = 'Didier Stevens'
-__version__ = '0.7.4'
-__date__ = '2018/08/18'
+__version__ = '0.7.5'
+__date__ = '2019/02/26'
 
 """
 
@@ -37,6 +37,8 @@ History:
   2018/02/12: V0.7.2 bug fix Signature()
   2018/05/17: V0.7.3 better error handling for PEiD files
   2018/08/18: V0.7.4 better error handling signatures
+  2019/02/26: V0.7.5 added overlay (o) to option -g; added #x# and #r# to option -y; added option -A
+
 Todo:
 """
 
@@ -155,6 +157,10 @@ def YARACompile(ruledata):
             rule = 'rule string {strings: $a = "%s" ascii wide nocase condition: $a}' % ruledata[3:]
         elif ruledata.startswith('#q#'):
             rule = ruledata[3:].replace("'", '"')
+        elif ruledata.startswith('#x#'):
+            rule = 'rule hexadecimal {strings: $a = { %s } condition: $a}' % ruledata[3:]
+        elif ruledata.startswith('#r#'):
+            rule = 'rule regex {strings: $a = /%s/ ascii wide nocase condition: $a}' % ruledata[3:]
         else:
             rule = ruledata[1:]
         return yara.compile(source=rule)
@@ -332,22 +338,36 @@ class cDump():
             countSpaces += 1
         return hexDump + '  ' + (' ' * countSpaces) + asciiDump
 
-    def HexAsciiDump(self):
+    def HexAsciiDump(self, rle=False):
         oDumpStream = self.cDumpStream(self.prefix)
+        position = ''
         hexDump = ''
         asciiDump = ''
+        previousLine = None
+        countRLE = 0
         for i, b in enumerate(self.data):
             b = self.C2IIP2(b)
             if i % self.dumplinelength == 0:
                 if hexDump != '':
-                    oDumpStream.Addline(self.CombineHexAscii(hexDump, asciiDump))
-                hexDump = '%08X:' % (i + self.offset)
+                    line = self.CombineHexAscii(hexDump, asciiDump)
+                    if not rle or line != previousLine:
+                        if countRLE > 0:
+                            oDumpStream.Addline('* %d 0x%02x' % (countRLE, countRLE * self.dumplinelength))
+                        oDumpStream.Addline(position + line)
+                        countRLE = 0
+                    else:
+                        countRLE += 1
+                    previousLine = line
+                position = '%08X:' % (i + self.offset)
+                hexDump = ''
                 asciiDump = ''
             if i % self.dumplinelength == self.dumplinelength / 2:
                 hexDump += ' '
             hexDump += ' %02X' % b
-            asciiDump += IFF(b >= 32 and b <= 128, chr(b), '.')
-        oDumpStream.Addline(self.CombineHexAscii(hexDump, asciiDump))
+            asciiDump += IFF(b >= 32 and b < 128, chr(b), '.')
+        if countRLE > 0:
+            oDumpStream.Addline('* %d 0x%02x' % (countRLE, countRLE * self.dumplinelength))
+        oDumpStream.Addline(self.CombineHexAscii(position + hexDump, asciiDump))
         return oDumpStream.Content()
 
     def Base64Dump(self, nowhitespace=False):
@@ -382,8 +402,8 @@ class cDump():
 def HexDump(data):
     return cDump(data, dumplinelength=dumplinelength).HexDump()
 
-def HexAsciiDump(data):
-    return cDump(data, dumplinelength=dumplinelength).HexAsciiDump()
+def HexAsciiDump(data, rle=False):
+    return cDump(data, dumplinelength=dumplinelength).HexAsciiDump(rle=rle)
 
 def ExtractStringsASCII(data):
     regex = REGEX_STANDARD + '{%d,}'
@@ -437,6 +457,8 @@ def GetDumpFunction(options):
         DumpFunction = HexAsciiDump
     elif options.strings:
         DumpFunction = DumpFunctionStrings
+    elif options.asciidumprle:
+        DumpFunction = lambda x: HexAsciiDump(x, True)
     else:
         DumpFunction = HexAsciiDump
     return DumpFunction
@@ -677,11 +699,18 @@ def SingleFile(filename, signatures, options):
     elif options.getdata != '':
         pe = GetPEObject(filename)
         DumpFunction = GetDumpFunction(options)
-        parsed = ParseGetData(options.getdata)
-        if parsed == None:
-            print('Error getdata syntax error: %s' % options.getdata)
-            return
-        StdoutWriteChunked(DumpFunction(pe.get_data(parsed[0], parsed[1])))
+        if options.getdata == 'o': # overlay
+            overlayOffset = pe.get_overlay_data_start_offset()
+            if overlayOffset == None:
+                print('No overlay')
+            else:
+                StdoutWriteChunked(DumpFunction(str(pe.write()[overlayOffset:])))
+        else:
+            parsed = ParseGetData(options.getdata)
+            if parsed == None:
+                print('Error getdata syntax error: %s' % options.getdata)
+                return
+            StdoutWriteChunked(DumpFunction(pe.get_data(parsed[0], parsed[1])))
     else:
         SingleFileInfo(filename, signatures, options)
 
@@ -790,6 +819,7 @@ def Main():
     oParser.add_option('-D', '--dump', action='store_true', default=False, help='perform dump')
     oParser.add_option('-x', '--hexdump', action='store_true', default=False, help='perform hex dump')
     oParser.add_option('-a', '--asciidump', action='store_true', default=False, help='perform ascii dump')
+    oParser.add_option('-A', '--asciidumprle', action='store_true', default=False, help='perform ascii dump with RLE')
     oParser.add_option('-S', '--strings', action='store_true', default=False, help='perform strings dump')
     oParser.add_option('-o', '--overview', type=str, default='', help='Accepted value: r for overview of resources, s for sections')
     (options, args) = oParser.parse_args(GetArgumentsUpdatedWithEnvironmentVariable('PECHECK_OPTIONS'))
