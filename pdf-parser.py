@@ -2,8 +2,8 @@
 
 __description__ = 'pdf-parser, use it to parse a PDF document'
 __author__ = 'Didier Stevens'
-__version__ = '0.7.0'
-__date__ = '2019/02/22'
+__version__ = '0.7.1'
+__date__ = '2019/03/01'
 __minimum_python_version__ = (2, 5, 1)
 __maximum_python_version__ = (3, 6, 3)
 
@@ -64,6 +64,7 @@ History:
   2018/06/29: V0.6.9 added option --overridingfilters
   2018/10/20: added keywords to statistics
   2019/02/22: V0.7.0 added option -O --objstm to parse the stream of /ObjStm objects, inspired by a contributor wishing anonymity
+  2019/03/01: V0.7.1 added ContainsName for correct keyword statistics (-a)
 
 Todo:
   - handle printf todo
@@ -515,6 +516,14 @@ class cPDFElementIndirectObject:
             else:
                 data += Canonicalize(self.content[i][1])
         return data.upper().find(keyword.upper()) != -1
+
+    def ContainsName(self, keyword):
+        for token in self.content:
+            if token[1] == 'stream':
+                return False
+            if token[0] == CHAR_DELIMITER and EqualCanonical(token[1], keyword):
+                return True
+        return False
 
     def StreamContains(self, keyword, filter, casesensitive, regex, overridingfilters):
         if not self.ContainsStream():
@@ -1442,7 +1451,7 @@ def Main():
                         else:
                             dicObjectTypes[type1].append(object.id)
                         for keyword in dKeywords.keys():
-                            if object.Contains(keyword):
+                            if object.ContainsName(keyword):
                                 dKeywords[keyword].append(object.id)
                 else:
                     if object.type == PDF_ELEMENT_COMMENT and selectComment:
