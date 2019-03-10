@@ -2,8 +2,8 @@
 
 __description__ = 'Program to search VirusTotal reports with search terms (MD5, SHA1, SHA256) found in the argument file'
 __author__ = 'Didier Stevens'
-__version__ = '0.1.4'
-__date__ = '2016/01/17'
+__version__ = '0.1.5'
+__date__ = '2019/01/07'
 
 """
 
@@ -38,6 +38,7 @@ History:
   2015/04/23: 0.1.2 added CVE (thanks Pieter-Jan Moreels)
   2015/08/11: 0.1.3 added option -s
   2016/01/17: 0.1.4 added support for stdin
+  2019/01/07: 0.1.5 added option -e, -t
 
 Todo:
 """
@@ -69,7 +70,8 @@ VIRUSTOTAL_API2_KEY = ''
 HTTP_PROXY = ''
 HTTPS_PROXY = ''
 
-VIRUSTOTAL_REPORT_URL = "https://www.virustotal.com/vtapi/v2/file/report"
+VIRUSTOTAL_REPORT_URL = {'file': 'https://www.virustotal.com/vtapi/v2/file/report', 'url': 'https://www.virustotal.com/vtapi/v2/url/report'}
+VIRUSTOTAL_REPORT_SEPARATOR = {'file': ',', 'url': '\n'}
 
 PICKLE_FILE = 'virustotal-search.pkl'
 
@@ -176,11 +178,11 @@ class CSVLogger():
         f.write(line + '\n')
         f.close()
 
-def VTHTTPReportRequest(searchTerm):
+def VTHTTPReportRequest(searchTerm, type):
     global VIRUSTOTAL_API2_KEY
 
     statuscode = 0
-    req = urllib2.Request(VIRUSTOTAL_REPORT_URL, urllib.urlencode({'resource': searchTerm, 'apikey': VIRUSTOTAL_API2_KEY}))
+    req = urllib2.Request(VIRUSTOTAL_REPORT_URL[type], urllib.urlencode({'resource': searchTerm, 'apikey': VIRUSTOTAL_API2_KEY}))
     try:
         if sys.hexversion >= 0x020601F0:
             hRequest = urllib2.urlopen(req, timeout=15)
@@ -216,7 +218,7 @@ def ParseSearchterm(searchTerm, withComment):
             searchTerm = searchTerm[:index]
     return (searchTerm, comment)
 
-def LogResult(searchTerm, comment, oResult, issuedRequest, withComment):
+def LogResult(searchTerm, comment, oResult, issuedRequest, withComment, extra):
     global oLogger
 
     if oResult['response_code'] == 1:
@@ -225,7 +227,10 @@ def LogResult(searchTerm, comment, oResult, issuedRequest, withComment):
         reCVE = re.compile(r'(CVE([_-])\d{4}\2\d{4,5})')
         for scan in sorted(oResult['scans']):
             if oResult['scans'][scan]['detected']:
-                scans.append('#'.join(map(CN, (scan, oResult['scans'][scan]['result'], oResult['scans'][scan]['update'], oResult['scans'][scan]['version']))))
+                result = [scan, oResult['scans'][scan]['result']]
+                if type == 'file':
+                    result.extend([oResult['scans'][scan]['update'], oResult['scans'][scan]['version']])
+                scans.append('#'.join(map(CN, result)))
             if oResult['scans'][scan]['result']:
                 cves += [cve[0].upper().replace('_', '-') for cve in reCVE.findall(oResult['scans'][scan]['result'])]
         formats = ('%s', '%d', '%d', '%s', '%d', '%d', '%s', '%s', '%s')
@@ -233,6 +238,9 @@ def LogResult(searchTerm, comment, oResult, issuedRequest, withComment):
         if withComment:
             formats = InsertIntoTuple(formats, 1, '%s')
             parameters = InsertIntoTuple(parameters, 1, comment)
+        for e in extra:
+            formats = formats + ('%s', )
+            parameters = parameters + (oResult[e], )
         oLogger.PrintAndLog(formats, parameters)
     else:
         formats = ('%s', '%d', '%d', '%s')
@@ -242,15 +250,15 @@ def LogResult(searchTerm, comment, oResult, issuedRequest, withComment):
             parameters = InsertIntoTuple(parameters, 1, comment)
         oLogger.PrintAndLog(formats, parameters)
 
-def GetReports(searchTerms, reports, withComment, dNotFound=None):
+def GetReports(searchTerms, reports, withComment, extra, type, dNotFound=None):
     global oLogger
 
     searchTermComments = [ParseSearchterm(searchTerm, withComment) for searchTerm in searchTerms]
 
-    searchTerm = ','.join([searchTermComment[0] for searchTermComment in searchTermComments])
+    searchTerm = VIRUSTOTAL_REPORT_SEPARATOR[type].join([searchTermComment[0] for searchTermComment in searchTermComments])
     if withComment:
-        comments = ','.join([searchTermComment[1] for searchTermComment in searchTermComments])
-    statuscode, jsonResponse = VTHTTPReportRequest(searchTerm)
+        comments = VIRUSTOTAL_REPORT_SEPARATOR[type].join([searchTermComment[1] for searchTermComment in searchTermComments])
+    statuscode, jsonResponse = VTHTTPReportRequest(searchTerm, type)
     if jsonResponse == None or statuscode != 200:
         formats = ('%s', '%s', '%d')
         parameters = (searchTerm, 'Error VTHTTPReportRequest', statuscode)
@@ -279,7 +287,7 @@ def GetReports(searchTerms, reports, withComment, dNotFound=None):
             reports[searchTermComments[iIter][0]] = oResults[iIter]
         elif oResults[iIter]['response_code'] == 0 and dNotFound != None and not searchTermComments[iIter][0] in dNotFound:
             dNotFound[searchTermComments[iIter][0]] = True
-        LogResult(searchTermComments[iIter][0], searchTermComments[iIter][1], oResults[iIter], True, withComment)
+        LogResult(searchTermComments[iIter][0], searchTermComments[iIter][1], oResults[iIter], True, withComment, extra)
     return statuscode
 
 def File2Strings(filename):
@@ -376,6 +384,7 @@ def VirusTotalRefresh(options):
     SetProxiesIfNecessary()
 
     headers = ('Search Term', 'Requested', 'Response', 'Scan Date', 'Detections', 'Total', 'Permalink', 'AVs', 'CVEs')
+    headers = headers + tuple(options.extra)
     if options.output:
         oLogger = CSVLogger(options.output, headers, separator=options.separator, prefixIsFullName=True)
     else:
@@ -392,7 +401,7 @@ def VirusTotalRefresh(options):
         random.shuffle(searchTermsToRequest)
 
     while searchTermsToRequest != []:
-        statuscode = GetReports(searchTermsToRequest[0:4], reports, options.comment)
+        statuscode = GetReports(searchTermsToRequest[0:4], reports, options.comment, options.extra, options.type)
         if statuscode == 204:
             break
         searchTermsToRequest = searchTermsToRequest[4:]
@@ -426,6 +435,7 @@ def VirusTotalSearch(filename, options):
     headers = ('Search Term', 'Requested', 'Response', 'Scan Date', 'Detections', 'Total', 'Permalink', 'AVs', 'CVEs')
     if options.comment:
         headers = InsertIntoTuple(headers, 1, 'Comment')
+    headers = headers + tuple(options.extra)
     if options.output:
         oLogger = CSVLogger(options.output, headers, separator=options.separator, prefixIsFullName=True)
     else:
@@ -444,7 +454,7 @@ def VirusTotalSearch(filename, options):
         for searchTermIter in searchTerms:
             searchTerm, comment = ParseSearchterm(searchTermIter, options.comment)
             if searchTerm in reports:
-                LogResult(searchTerm, comment, reports[searchTerm], False, options.comment)
+                LogResult(searchTerm, comment, reports[searchTerm], False, options.comment, options.extra)
             else:
                 searchTermsToRequest.append(searchTermIter)
         if options.notfound:
@@ -459,12 +469,12 @@ def VirusTotalSearch(filename, options):
             for searchTermIter in searchTerms:
                 searchTerm, comment = ParseSearchterm(searchTermIter, options.comment)
                 if searchTerm in searchtermsNotfound:
-                    LogResult(searchTerm, comment, {'response_code': 0, 'verbose_msg': 'The requested resource is not among the finished, queued or pending scans'}, False, options.comment)
+                    LogResult(searchTerm, comment, {'response_code': 0, 'verbose_msg': 'The requested resource is not among the finished, queued or pending scans'}, False, options.comment, options.extra)
                 else:
                     searchTermsToRequest.append(searchTermIter)
 
     while searchTermsToRequest != []:
-        statuscode = GetReports(searchTermsToRequest[0:4], reports, options.comment, dNotFound)
+        statuscode = GetReports(searchTermsToRequest[0:4], reports, options.comment, options.extra, options.type, dNotFound)
         if statuscode == 204 and not options.waitquota:
             break
         if statuscode == 204:
@@ -497,6 +507,8 @@ def Main():
     oParser.add_option('-i', '--noupdate', action='store_true', default=False, help='do not update the database') # i = immutable
     oParser.add_option('-w', '--waitquota', action='store_true', default=False, help='wait 1 hour when quota exceeded')
     oParser.add_option('-s', '--separator', default=';', help='Separator character (default ;)')
+    oParser.add_option('-e', '--extra', default='', help='Extra fields to include (use , as separator)')
+    oParser.add_option('-t', '--type', default='file', help='Type of resource to query (file, url)')
     (options, args) = oParser.parse_args()
 
     if not (len(args) <= 1 or (options.refresh or options.refreshrandom) and len(args) == 0):
@@ -506,6 +518,10 @@ def Main():
         print('  Use at your own risk')
         print('  https://DidierStevens.com')
         return
+    if options.extra == '':
+        options.extra = []
+    else:
+        options.extra = options.extra.split(',')
     if options.update:
         VirusTotalUpdate(args[0], options)
         return

@@ -2,7 +2,7 @@
 
 __description__ = 'Tool for displaying PE file info'
 __author__ = 'Didier Stevens'
-__version__ = '0.7.5'
+__version__ = '0.7.6'
 __date__ = '2019/02/26'
 
 """
@@ -38,6 +38,7 @@ History:
   2018/05/17: V0.7.3 better error handling for PEiD files
   2018/08/18: V0.7.4 better error handling signatures
   2019/02/26: V0.7.5 added overlay (o) to option -g; added #x# and #r# to option -y; added option -A
+  2019/02/26: V0.7.6 fixed exit bug for pyinstaller
 
 Todo:
 """
@@ -66,7 +67,7 @@ try:
     import peutils
 except ImportError:
     print('Missing pefile and/or peutils Python module, please check if it is installed.')
-    exit()
+    sys.exit()
 
 try:
     import yara
@@ -792,7 +793,7 @@ def ScanFiles(directory, signatures, minimumEntropy):
             pass
         else:
             print(sys.exc_value)
-            exit()
+            sys.exit()
 
 def GetArgumentsUpdatedWithEnvironmentVariable(varname):
     envVar = os.getenv(varname)

@@ -2,8 +2,8 @@
 
 __description__ = "Program to use Python's re.findall on files"
 __author__ = 'Didier Stevens'
-__version__ = '0.0.12'
-__date__ = '2018/07/28'
+__version__ = '0.0.13'
+__date__ = '2019/03/06'
 
 """
 
@@ -36,7 +36,10 @@ History:
   2018/06/25: 0.0.10 added regexs email-domain, url-domain and onion
   2018/06/29: 0.0.11 fixed ProcessFile for Linux/OSX
   2018/06/30: added option -e
-  2018/07/28: added regexes str-e, str-u and str-eu
+  2018/07/28: 0.0.11 added regexes str-e, str-u and str-eu
+  2018/08/28: 0.0.13 added support for user library in the current directory
+  2018/09/19: Updated Quote
+  2019/03/06: changed URL regex
 
 Todo:
   add hostname to header
@@ -65,8 +68,8 @@ REGEX_STANDARD = '[\x09\x20-\x7E]'
 dLibrary = {
             'email': r'[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,6}',
             'email-domain': r'[a-zA-Z0-9._%+-]+@([a-zA-Z0-9.-]+\.[a-zA-Z]{2,6})',
-            'url': r'[a-zA-Z]+://[-a-zA-Z0-9.]+(?:/[-a-zA-Z0-9+&@#/%=~_|!:,.;]*)?(?:\?[a-zA-Z0-9+&@#/%=~_|!:,.;]*)?',
-            'url-domain': r'[a-zA-Z]+://([-a-zA-Z0-9.]+)(?:/[-a-zA-Z0-9+&@#/%=~_|!:,.;]*)?(?:\?[a-zA-Z0-9+&@#/%=~_|!:,.;]*)?',
+            'url': r'[a-zA-Z]+://[-a-zA-Z0-9.]+(?:/[-a-zA-Z0-9+&@#/%=~_|!:,.;]*)?(?:\?[-a-zA-Z0-9+&@#/%=~_|!:,.;]*)?',
+            'url-domain': r'[a-zA-Z]+://([-a-zA-Z0-9.]+)(?:/[-a-zA-Z0-9+&@#/%=~_|!:,.;]*)?(?:\?[-a-zA-Z0-9+&@#/%=~_|!:,.;]*)?',
             'ipv4': r'\b(?:(?:25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9])\.){3}(?:25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9])\b',
             'str': r'"[^"]+"',
             'str-e': r'"[^"]*"',
@@ -76,7 +79,7 @@ dLibrary = {
             'onion': r'[a-zA-Z2-7]{16}\.onion',
            }
 
-excludeRegexesForAll = ['str', 'url-domain', 'email-domain']
+excludeRegexesForAll = ['str', 'str-e', 'str-u', 'str-eu', 'url-domain', 'email-domain']
 
 def ListLibraryNames():
     result = ''
@@ -208,7 +211,7 @@ microsoft.com
 
 Classifying a string as gibberish or not, is done with a set of classes that I developed based on work done by rrenaud at https://github.com/rrenaud/Gibberish-Detector. The training text is a public domain book in the Sherlock Holmes series. This means that English text is used for gibberish classification. You can provide your own trained pickle file with option -s.
 
-You can extend the library of regular expressions used by re-search without changing the program source code. Create a text file named re-search.txt located in the same directory as re-search.py. For each regular expression you want to add to the library, enter a line with format name=regex. Here is an example for MAC addresses:
+You can extend the library of regular expressions used by re-search without changing the program source code. Create a text file named re-search.txt located in the same directory as re-search.py and/or the current directory. For each regular expression you want to add to the library, enter a line with format name=regex. Comments (lines starting with #) are ignored. Here is an example for MAC addresses:
 
 mac=[0-9A-F]{2}([-:]?)(?:[0-9A-F]{2}\1){4}[0-9A-F]{2}
 
@@ -232,6 +235,8 @@ def ToString(value):
 
 def Quote(value, separator, quote):
     value = ToString(value)
+    if value[0] == quote and value[-1] == quote:
+        return value
     if separator in value:
         return quote + value + quote
     else:
@@ -327,17 +332,21 @@ def PrintLibrary():
     for key in sorted(dLibrary.keys()):
         print(' %s: %s' % (key, dLibrary[key]))
 
-def MergeUserLibrary():
+def MergeUserLibrarySub(filename):
     global dLibrary
 
-    lines = File2Strings(os.path.splitext(sys.argv[0])[0] + '.txt')
+    lines = File2Strings(filename)
     if not lines:
         return
     for line in lines:
         if not line.startswith('#'):
-            result = line.split('=')
+            result = line.split('=', 1)
             if len(result) == 2:
                 dLibrary[result[0]] = result[1]
+
+def MergeUserLibrary():
+    MergeUserLibrarySub(os.path.splitext(sys.argv[0])[0] + '.txt')
+    MergeUserLibrarySub(os.path.splitext(os.path.basename(sys.argv[0]))[0] + '.txt')
 
 def Library(name):
     global dLibrary
