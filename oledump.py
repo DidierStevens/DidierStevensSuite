@@ -2,8 +2,8 @@
 
 __description__ = 'Analyze OLE files (Compound Binary Files)'
 __author__ = 'Didier Stevens'
-__version__ = '0.0.41'
-__date__ = '2019/02/16'
+__version__ = '0.0.42'
+__date__ = '2019/03/12'
 
 """
 
@@ -84,6 +84,7 @@ History:
   2018/11/30: added yara #r#; updated ParseCutTerm
   2018/12/18: 0.0.40 added option --password
   2019/02/16: 0.0.41 updated Cut
+  2019/03/12: 0.0.42 added warning for ZIP container without ole file; fixed selectiong warning
 
 Todo:
 """
@@ -1610,6 +1611,7 @@ def OLESub(ole, prefix, rules, options):
     global decoders
 
     returnCode = 1
+    selectionCounter = 0
 
     if options.metadata:
         metadata = ole.get_metadata()
@@ -1629,7 +1631,7 @@ def OLESub(ole, prefix, rules, options):
                     print(' %s: %s %s' % (attribute, value, LookupCodepage(value)))
                 else:
                     print(' %s: %s' % (attribute, value))
-        return returnCode
+        return (returnCode, 0)
 
     if options.jsonoutput:
         object = []
@@ -1638,7 +1640,7 @@ def OLESub(ole, prefix, rules, options):
             object.append({'id': counter, 'name': PrintableName(fname), 'content': binascii.b2a_base64(stream).strip('\n')})
             counter += 1
         print(json.dumps({'version': 2, 'id': 'didierstevens.com', 'type': 'content', 'fields': ['id', 'name', 'content'], 'items': object}))
-        return
+        return (returnCode, 0)
 
     vbadirinfo = ParseVBADIR(ole)
     if len(vbadirinfo) == 3:
@@ -1701,7 +1703,7 @@ def OLESub(ole, prefix, rules, options):
                     print('Error instantiating plugin: %s' % cPlugin.name)
                     if options.verbose:
                         raise e
-                    return returnCode
+                    return (returnCode, 0)
                 if oPlugin != None:
                     result = oPlugin.Analyze()
                     if oPlugin.ran:
@@ -1734,7 +1736,7 @@ def OLESub(ole, prefix, rules, options):
                         print('Error instantiating decoder: %s' % cDecoder.name)
                         if options.verbose:
                             raise e
-                        return returnCode
+                        return (returnCode, 0)
                 for oDecoder in oDecoders:
                     while oDecoder.Available():
                         for result in rules.match(data=oDecoder.Decode(), externals={'streamname': PrintableName(fname), 'VBA': False}):
@@ -1758,7 +1760,7 @@ def OLESub(ole, prefix, rules, options):
     else:
         if len(decoders) > 1:
             print('Error: provide only one decoder when using option select')
-            return returnCode
+            return (returnCode, 0)
         if options.decompress:
             DecompressFunction = HeuristicDecompress
         else:
@@ -1795,7 +1797,6 @@ def OLESub(ole, prefix, rules, options):
             DumpFunction = HexAsciiDump
 
         counter = 1
-        selectionCounter = 0
         if options.select.endswith('c') or options.select.endswith('s'):
             selection = options.select[:-1]
             part = options.select[-1]
@@ -1809,10 +1810,8 @@ def OLESub(ole, prefix, rules, options):
                 if selection != 'a':
                     break
             counter += 1
-        if selectionCounter == 0:
-            print('Warning: no stream was selected with expression %s' % options.select)
 
-    return returnCode
+    return (returnCode, selectionCounter)
 
 def YARACompile(ruledata):
     if ruledata.startswith('#'):
@@ -1847,6 +1846,10 @@ def FilenameInSimulations(filename):
     if dslsimulationdb == None:
         return False
     return filename in dslsimulationdb.dSimulations
+
+def PrintWarningSelection(select, selectionCounter):
+    if select != '' and selectionCounter == 0:
+        print('Warning: no stream was selected with expression %s' % select)
 
 def OLEDump(filename, options):
     returnCode = 0
@@ -1936,14 +1939,20 @@ def OLEDump(filename, options):
     oStringIO.seek(0)
     if magic[0:4] == OLEFILE_MAGIC:
         ole = olefile.OleFileIO(oStringIO)
-        returnCode = OLESub(ole, '', rules, options)
+        returnCode, selectionCounter = OLESub(ole, '', rules, options)
+        PrintWarningSelection(options.select, selectionCounter)
         ole.close()
     elif magic[0:2] == 'PK':
         oZipfile = zipfile.ZipFile(oStringIO, 'r')
         counter = 0
+        selectionCounterTotal = 0
+        oleFileFound = False
+        OPCFound = False
         for info in oZipfile.infolist():
             oZipContent = oZipfile.open(info, 'r')
             content = oZipContent.read()
+            if info.filename == '[Content_Types].xml':
+                OPCFound = True
             if content[0:4] == OLEFILE_MAGIC:
                 letter = chr(ord('A') + counter)
                 counter += 1
@@ -1951,9 +1960,14 @@ def OLEDump(filename, options):
                     if not options.quiet and not options.jsonoutput:
                         print('%s: %s' % (letter, info.filename))
                 ole = olefile.OleFileIO(cStringIO.StringIO(content))
-                returnCode = OLESub(ole, letter, rules, options)
+                returnCode, selectionCounter = OLESub(ole, letter, rules, options)
+                selectionCounterTotal += selectionCounter
+                oleFileFound = True
                 ole.close()
             oZipContent.close()
+        if not oleFileFound:
+            print('Warning: no OLE file was found inside this ZIP container%s' % IFF(OPCFound, ' (OPC)', ''))
+        PrintWarningSelection(options.select, selectionCounterTotal)
         oZipfile.close()
     else:
         data = oStringIO.read()
@@ -1988,13 +2002,15 @@ def OLEDump(filename, options):
                                         break
                                 print('%s: %s' % (letter, nameValue))
                         ole = olefile.OleFileIO(cStringIO.StringIO(content))
-                        returnCode = OLESub(ole, letter, rules, options)
+                        returnCode, selectionCounter = OLESub(ole, letter, rules, options)
+                        PrintWarningSelection(options.select, selectionCounter)
                         ole.close()
         elif data.startswith(ACTIVEMIME_MAGIC):
             content = HeuristicDecompress(data)
             if content[0:4] == OLEFILE_MAGIC:
                 ole = olefile.OleFileIO(cStringIO.StringIO(content))
-                returnCode = OLESub(ole, '', rules, options)
+                returnCode, selectionCounter = OLESub(ole, '', rules, options)
+                PrintWarningSelection(options.select, selectionCounter)
                 ole.close()
         else:
             print('Error: %s is not a valid OLE file.' % filename)
