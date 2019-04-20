@@ -2,8 +2,8 @@
 
 __description__ = 'Translate bytes according to a Python expression'
 __author__ = 'Didier Stevens'
-__version__ = '2.5.5'
-__date__ = '2019/02/20'
+__version__ = '2.5.6'
+__date__ = '2019/02/26'
 
 """
 
@@ -38,6 +38,7 @@ History:
   2018/03/05: 2.5.4 updated #e# expressions
   2018/04/27: added option literalfilenames
   2019/02/20: 2.5.5 added ZlibRawD
+  2019/02/26: 2.5.6 updated help
 
 Todo:
 """
@@ -604,6 +605,7 @@ Extra functions:
   Sani1(byte)
   Sani2(byte)
   ZlibD(bytes)
+  ZlibRawD(bytes)
   GzipD(bytes)
 Variable "position" is an index into the input file, starting at 0
 
