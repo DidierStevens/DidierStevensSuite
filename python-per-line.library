@@ -1,0 +1,7 @@
+# 20190320 start
+
+def DefangURLSub(oMatch):
+    return oMatch.groups()[0].replace('t', 'x').replace('T', 'X') + '://' + oMatch.groups()[1][::-1].replace('.', '].[', 1)[::-1]
+
+def Defang(str):
+    return re.sub(r'([a-zA-Z]+)://([-a-zA-Z0-9.]+)', DefangURLSub, str)

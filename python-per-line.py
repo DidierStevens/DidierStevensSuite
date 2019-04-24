@@ -2,8 +2,8 @@
 
 __description__ = "Program to evaluate a Python expression for each line in the provided text file(s)"
 __author__ = 'Didier Stevens'
-__version__ = '0.0.5'
-__date__ = '2018/07/28'
+__version__ = '0.0.6'
+__date__ = '2019/04/20'
 
 """
 
@@ -25,6 +25,8 @@ History:
   2018/04/22: updated man page with -r option
   2018/07/21: 0.0.5 added options --grep and --grepoptions
   2018/07/28: added options --begingrep, --begingrepoptions, --endgrep, and --endgrepoptions
+  2019/03/20: 0.0.6 added option -n and libraries
+  2019/04/20: added import binascii
 
 Todo:
 """
@@ -38,6 +40,7 @@ import gzip
 import os
 import time
 import re
+import binascii
 
 def PrintManual():
     manual = '''
@@ -103,6 +106,8 @@ The result:
 
 If a line contains more separators than specified by the columns argument, then everything past the last expected separator is considered the last value (this includes the extra separator(s)). We can see this with line "username3:pass:word". The password is pass:word (not pass). SBC returns pass:word.
 If a line contains less separators than specified by the columns argument, then the failvalue is returned. [] makes python-per-line skip an output line, that is why no output is produced for user2.
+
+Option -n is used when you just want to invoke a single Python function taking one argument (i.e. the line of text). Then you just have to provide the name of the Python function, and not a Python expression where this Python function is called with line as argument.
 
 Option -r is used to generated a list of numbers and use that as input, in stead of a file.
 This option accepts 1 to 3 numbers (separeted by a comma (,)), which are used as arguments to Python function xrange.
@@ -181,6 +186,8 @@ Most options can be combined, like #ps# for example.
 
 An extra Python script (for example with custom definitions) can be loaded using option -s.
 
+Custom definitions can also be placed in a file named python-per-line.library in the same directory as the program is located, and/or in the current working directory. When present, these 2 files will be loaded upon each execution of the program.
+
 Option -e (execute) is used to execute Python commands before the command is executed. This can, for example, be used to import modules.
 
 If an error occurs when the Python expression is evaluated, the program will report the error and stop. This behavior can be changed with option -i (ignore): using this option, no errors will be reported when evaluating the Python expression and the program will continue to run.
@@ -189,6 +196,7 @@ If an error occurs when the Python expression is evaluated, the program will rep
         print(textwrap.fill(line))
 
 DEFAULT_SEPARATOR = ';'
+LIBRARY_EXTENSION = '.library'
 
 def File2Strings(filename):
     try:
@@ -539,12 +547,21 @@ def ParseRange(data):
     else:
         return [int(values[0]), int(values[1]), int(values[2])]
 
+def LoadScriptIfExists(filename):
+    if os.path.exists(filename):
+        execfile(filename, globals(), globals())
+
 def PythonPerLine(expression, filenames, options):
+    if options.name:
+        expression += '(line)'
+
     if options.execute != '':
         exec(options.execute, globals())
 
     if options.script != '':
-        execfile(options.script, globals(), globals())
+        LoadScriptIfExists(options.script)
+    LoadScriptIfExists(os.path.splitext(sys.argv[0])[0] + LIBRARY_EXTENSION)
+    LoadScriptIfExists(os.path.splitext(os.path.basename(sys.argv[0]))[0] + LIBRARY_EXTENSION)
 
     oGrep = cGrep(options.grep, options.grepoptions)
     oBeginGrep = cGrep(options.begingrep, options.begingrepoptions)
@@ -588,6 +605,7 @@ https://DidierStevens.com'''
 
     oParser = optparse.OptionParser(usage='usage: %prog [options] expression [[@]file ...]\n' + __description__ + moredesc, version='%prog ' + __version__)
     oParser.add_option('-m', '--man', action='store_true', default=False, help='Print manual')
+    oParser.add_option('-n', '--name', action='store_true', default=False, help='The expression is the name of a Python function to apply on each selected line')
     oParser.add_option('-o', '--output', type=str, default='', help='Output to file (# supported)')
     oParser.add_option('-s', '--script', type=str, default='', help='Script with definitions to include')
     oParser.add_option('-e', '--execute', default='', help='Commands to execute')
