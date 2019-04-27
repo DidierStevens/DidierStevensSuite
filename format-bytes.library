@@ -1,0 +1,2 @@
+#Equation CVE-2017-11882 https://isc.sans.edu/forums/diary/Dissecting+a+CVE201711882+Exploit/24272/
+eqn1=<HIHIIIIIBBBBBBBBBB40sIIBB*:XXXXXXXXXXXXXXXXXX.XXXX 1: size of EQNOLEFILEHDR 9: Start MTEF header 14: Full size record 15: Line record 16: Font record 19: Shellcode/Command (fontname)

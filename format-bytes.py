@@ -2,8 +2,8 @@
 
 __description__ = 'This is essentialy a wrapper for the struct module'
 __author__ = 'Didier Stevens'
-__version__ = '0.0.7'
-__date__ = '2018/11/09'
+__version__ = '0.0.8'
+__date__ = '2019/04/18'
 
 """
 Source code put in public domain by Didier Stevens, no Copyright
@@ -37,6 +37,9 @@ History:
   2018/10/28: 0.0.6 added option -n
   2018/11/09: 0.0.7 added X and S representation for strings; option -A
   2018/12/08: updated ParseCutArgument; added selection warning
+  2019/03/22: 0.0.8 added -F option
+  2019/03/25: added library & -f name= ; added select remainder (-s r)
+  2019/04/18: added FiletimeUTC; added support for annotations to library files
 
 Todo:
 """
@@ -58,6 +61,7 @@ import math
 import time
 import hashlib
 import json
+import datetime
 if sys.version_info[0] >= 3:
     from io import BytesIO as DataIO
 else:
@@ -89,6 +93,7 @@ s:signed u:unsigned l:little-endian b:big-endian m:mixed-endian
 4N: b 187.101.137.52 l 52.137.101.187
 4E: l 1997/12/06 14:48:27 b 2069/08/17 19:34:12
 8I: sl -3535861847371979333 ul 14910882226337572283 sb -4943394157892145458 ub 13503349915817406158
+8T: ul N/A ub N/A
 8F: l -1661678170725283018588028971660576297715302893638508902075603349019820032.000000 b -0.000000
 16G: b BB658934-6218-EECE-3AC3-179F6B7428FB m {348965BB-1862-CEEE-3AC3-179F6B7428FB}
 
@@ -97,6 +102,7 @@ By default, format-bytes.py reads the first 16 bytes (if available) of the file(
  Float: F
  IPv4 address: N
  epoch: E
+ FILETIME: T
  GUID: G
 
 1I is a 8-bit integer, 2I is a 16-bit integer, ...
@@ -133,10 +139,11 @@ Remainder: 9
 4N: b 206.58.195.23 l 23.195.58.206
 4E: l 1982/08/20 05:49:02 b 2079/08/22 19:18:47
 8I: sl 2915073189858196174 ul 2915073189858196174 sb -3586339647020895192 ub 14860404426688656424
+8T: ul N/A ub N/A
 8F: l 0.000000 b -721504228050136948830706706079286975060186906491372824967789492043776.000000
 
 You can also specify how the parsed bytes should be represented. To achieve this, append a double colon character (:) to the format string followed by a representation character for each member.
-Valid representation characters are X (for hexadecimal), I (for integer), E (for epoch) and S (for string with escaped characters).
+Valid representation characters are X (for hexadecimal), I (for integer), E (for epoch), T (for FILETIME) and S (for string with escaped characters).
 Example:
 
 C:\Demo>format-bytes.py -f "<hib*:XEI" random.bin
@@ -154,6 +161,7 @@ Remainder: 9
 4N: b 206.58.195.23 l 23.195.58.206
 4E: l 1982/08/20 05:49:02 b 2079/08/22 19:18:47
 8I: sl 2915073189858196174 ul 2915073189858196174 sb -3586339647020895192 ub 14860404426688656424
+8T: ul N/A ub N/A
 8F: l 0.000000 b -721504228050136948830706706079286975060186906491372824967789492043776.000000
 
 For strings, the output will include string length, ASCII representation of the string (first 10 bytes), hexadecimal representation (first 10 bytes), entropy and MD5 hash.
@@ -164,6 +172,7 @@ File: random.bin
  2:    <type 'str'>         14 .4b...:... 89346218eece3ac3179f 3.807355 e1647bd9711cdfee7959dee4ff956590
 
 Strings can be selected with option -s for dumping. Default is ASCII dump (-a), but run-length encoded ASCII (-A), hexadecimal (-x) and binary (-d) dump is available too.
+The remainder can also be selected: -s r.
 
 Annotations can be added to particular members, using option -n. Like in this example:
 
@@ -182,7 +191,22 @@ Remainder: 9
 4N: b 206.58.195.23 l 23.195.58.206
 4E: l 1982/08/20 05:49:02 b 2079/08/22 19:18:47
 8I: sl 2915073189858196174 ul 2915073189858196174 sb -3586339647020895192 ub 14860404426688656424
+8T: ul N/A ub N/A
 8F: l 0.000000 b -721504228050136948830706706079286975060186906491372824967789492043776.000000
+
+Format strings can be stored inside a library file. A library file has the name of the program (format-bytes) and extension .library. Library files can be placed in the same directory as the program, and/or the current directory.
+A library file is a text file. Each format string has a name and takes one line: name=formatstring.
+
+Example:
+eqn=<HIHIIIIIBBBBBBBBBB40sIIBB*:XXXXXXXXXXXXXXXXXXsXXXX
+
+This defines format string eqn. It can be retrieved with option -f name=eqn.
+This format string can be followed by annotations (use a space character to separate the format string and the annotations):
+
+Example:
+eqn=<HIHIIIIIBBBBBBBBBB40sIIBB*:XXXXXXXXXXXXXXXXXXsXXXX 1: size of EQNOLEFILEHDR 9: Start MTEF header 14: Full size record 15: Line record 16: Font record 19: Shellcode (fontname)
+
+A line in a library file that starts with # is a comment and is ignored.
 
 FYI, Python struct module format characters are:
 
@@ -228,6 +252,7 @@ s:signed u:unsigned l:little-endian b:big-endian m:mixed-endian
 00 4N: b 187.101.137.52 l 52.137.101.187
 00 4E: l 1997/12/06 14:48:27 b 2069/08/17 19:34:12
 00 8I: sl -3535861847371979333 ul 14910882226337572283 sb -4943394157892145458 ub 13503349915817406158
+00 8T: ul N/A ub N/A
 00 8F: l -1661678170725283018588028971660576297715302893638508902075603349019820032.000000 b -0.000000
 00 16G: b BB658934-6218-EECE-3AC3-179F6B7428FB m {348965BB-1862-CEEE-3AC3-179F6B7428FB}
 04 1I: s 98 u 98
@@ -237,8 +262,17 @@ s:signed u:unsigned l:little-endian b:big-endian m:mixed-endian
 04 4N: b 98.24.238.206 l 206.238.24.98
 04 4E: l 2080/01/05 19:58:26 b 2022/02/25 14:59:26
 04 8I: sl -6982898039867434910 ul 11463846033842116706 sb 7068662184674531231 ub 7068662184674531231
+04 8T: ul N/A ub N/A
 04 8F: l -0.000000 b 358946151129582029215291849393230786808315346836706673156033999581834828933214436444158528577134449241373022018959436034143150814561128186558682352782632064229834752.000000
 04 16G: b 6218EECE-3AC3-179F-6B74-28FBEB2AD62A m {CEEE1862-C33A-9F17-6B74-28FBEB2AD62A}
+
+To search for a value inside the provided file(s), use option -F. For the moment, only integers can be searched. Start the option value with #i# followed by the decimal number to search for.
+Example:
+
+format-bytes.py -F #i#6083 random.bin
+File: random.bin
+0x00000009 <h 0xc317
+0x00000009 <H 0xc317
 
 
 As stated at the beginning of this manual, this tool is very versatile when it comes to handling files. This will be explained now.
@@ -386,6 +420,10 @@ This cut-expression can be used to dump the OLE file located inside the file con
 '''
     for line in manual.split('\n'):
         print(textwrap.fill(line, 79))
+
+LIBRARY_EXTENSION = '.library'
+
+dLibrary = {}
 
 #Convert 2 Bytes If Python 3
 def C2BIP3(string):
@@ -1058,6 +1096,12 @@ def TimestampUTC(epoch=None):
     else:
         return Timestamp2StringHuman(time.gmtime(epoch))
 
+def FiletimeUTC(value):
+    try:
+        return datetime.datetime.utcfromtimestamp((value - 116444736000000000) / 10000000).strftime("%Y/%m/%d %H:%M:%S")
+    except ValueError:
+        return 'N/A'
+
 def FormatBytesData(data, position, options):
     if len(data) == 0:
         return
@@ -1084,6 +1128,7 @@ def FormatBytesData(data, position, options):
     if len(data) < 8:
         return
     print(prefix + '8I: sl %d ul %d sb %d ub %d' % (struct.unpack('<q', data[0:8])[0], struct.unpack('<Q', data[0:8])[0], struct.unpack('>q', data[0:8])[0], struct.unpack('>Q', data[0:8])[0]))
+    print(prefix + '8T: ul %s ub %s' % (FiletimeUTC(struct.unpack('<Q', data[0:8])[0]), FiletimeUTC(struct.unpack('>Q', data[0:8])[0])))
     print(prefix + '8F: l %f b %f' % (struct.unpack('<d', data[0:8])[0], struct.unpack('>d', data[0:8])[0]))
 
     if len(data) < 16:
@@ -1344,7 +1389,50 @@ def SearchAndReplaceFormatCallBack(oMatch):
 def SearchAndReplaceFormat(format):
     return re.sub(r'0x([0-9a-fA-F]+)s', SearchAndReplaceFormatCallBack, format)
 
+def MergeUserLibrarySub(filename):
+    global dLibrary
+
+    lines = File2Strings(filename)
+    if not lines:
+        return
+    for line in lines:
+        if not line.startswith('#'):
+            result = line.split('=', 1)
+            if len(result) == 2:
+                values = result[1].split(' ', 1)
+                if len(values) == 2:
+                    dLibrary[result[0]] = values
+                else:
+                    dLibrary[result[0]] = [result[1], '']
+
+def MergeUserLibrary():
+    MergeUserLibrarySub(os.path.splitext(sys.argv[0])[0] + LIBRARY_EXTENSION)
+    MergeUserLibrarySub(os.path.splitext(os.path.basename(sys.argv[0]))[0] + LIBRARY_EXTENSION)
+
+def PrintLibrary():
+    global dLibrary
+
+    print('Valid format library names:')
+    for key in sorted(dLibrary.keys()):
+        print(' %s: %s %s' % (key, dLibrary[key][0], dLibrary[key][1]))
+
+def Library(name):
+    global dLibrary
+
+    MergeUserLibrary()
+
+    try:
+        return dLibrary[name]
+    except KeyError:
+        print('Invalid format library name: %s' % name)
+        print('')
+        PrintLibrary()
+        sys.exit(-1)
+
 def ParseFormat(formatvalue):
+    annotations = ''
+    if formatvalue.startswith('name='):
+        formatvalue, annotations = Library(formatvalue[5:])
     formats = formatvalue.split(':')
     if len(formats) == 2:
         format, representation = formats
@@ -1357,19 +1445,36 @@ def ParseFormat(formatvalue):
     else:
         remainder = False
 
-    return SearchAndReplaceFormat(format), representation, remainder
+    return SearchAndReplaceFormat(format), representation, annotations, remainder
+
+def FindAll(data, sub):
+    result = []
+    start = 0
+    while True:
+        position = data.find(sub, start)
+        if position == -1:
+            return result
+        result.append(position)
+        start = position + 1
+
+def ParseAnnotations(annotations, dAnnotations):
+    index = None
+    for token in re.split(r'(\d+:)', annotations):
+        if token.endswith(':'):
+            index = int(token[:-1])
+        elif index != None:
+            dAnnotations[index] = token.strip()
 
 def FormatBytesSingle(filename, cutexpression, content, options):
-    format, representation, remainder = ParseFormat(options.format)
+    MergeUserLibrary()
+
+    format, representation, annotations, remainder = ParseFormat(options.format)
 
     dAnnotations = {}
     if options.annotations != '':
-        index = None
-        for token in re.split(r'(\d+:)', options.annotations):
-            if token.endswith(':'):
-                index = int(token[:-1])
-            elif index != None:
-                dAnnotations[index] = token.strip()
+        ParseAnnotations(options.annotations, dAnnotations)
+    elif annotations != '':
+        ParseAnnotations(annotations, dAnnotations)
 
     oBinaryFile = cBinaryFile(filename, C2BIP3(options.password), options.noextraction, options.literalfilenames, content)
     if cutexpression == '':
@@ -1378,6 +1483,8 @@ def FormatBytesSingle(filename, cutexpression, content, options):
                 data = oBinaryFile.read()
             else:
                 data = oBinaryFile.read(struct.calcsize(format))
+        elif options.find != '':
+            data = oBinaryFile.read()
         else:
             data = oBinaryFile.read(options.count * options.step + 16)
     else:
@@ -1386,7 +1493,7 @@ def FormatBytesSingle(filename, cutexpression, content, options):
 
     if filename != '' and options.select == '':
         print('File: %s%s' % (filename, IFF(oBinaryFile.extracted, ' (extracted)', '')))
-    if format == '':
+    if format == '' and options.find == '':
         print('s:signed u:unsigned l:little-endian b:big-endian m:mixed-endian')
     if format != '':
         if options.select != '':
@@ -1405,7 +1512,7 @@ def FormatBytesSingle(filename, cutexpression, content, options):
         for index, element in enumerate(struct.unpack(format, data[0:size])):
             index += 1
             if options.select != '':
-                if int(options.select) == index and (isinstance(element, str) or isinstance(element, bytes)):
+                if options.select != 'r' and int(options.select) == index and (isinstance(element, str) or isinstance(element, bytes)):
                     StdoutWriteChunked(DumpFunction(element))
                     selectionCounter += 1
             else:
@@ -1418,6 +1525,8 @@ def FormatBytesSingle(filename, cutexpression, content, options):
                         line = '%2d: %15s %10d' % (index, type(element), element)
                     elif representation[index - 1] == 'E':
                         line = '%2d: %15s %s' % (index, type(element), IFF(element < 0, '', lambda: TimestampUTC(element)))
+                    elif representation[index - 1] == 'T':
+                        line = '%2d: %15s %s' % (index, type(element), IFF(element < 0, '', lambda: FiletimeUTC(element)))
                 elif isinstance(element, str):
                     if representation != '' and representation[index - 1] == 'S':
                         line = '%2d: %15s %s' % (index, type(element), RIN(element))
@@ -1430,6 +1539,9 @@ def FormatBytesSingle(filename, cutexpression, content, options):
                 else:
                     line = '%2d: %15s %s' % (index, type(element), str(element))
                 print('%s %s' % (line, dAnnotations.get(index, '')))
+        if options.select == 'r' and remainder:
+            StdoutWriteChunked(DumpFunction(data[size:]))
+            selectionCounter += 1
         if options.select != '' and selectionCounter == 0:
             print('Warning: no item was selected with expression %s' % options.select)
         if options.select == '' and remainder:
@@ -1439,6 +1551,20 @@ def FormatBytesSingle(filename, cutexpression, content, options):
                 oDump = cDump(remainderx100)
                 print(oDump.HexAsciiDump())
                 FormatBytesData(remainderx100, -1, options)
+    elif options.find != '':
+        if not options.find.startswith('#i#'):
+            raise Exception('Unknown find option format: %s' % options.find)
+        searches = []
+        for c in 'bBhHiIqQ':
+            for e in '<>':
+                format = e + c
+                try:
+                    searches.append([format, struct.pack(format, int(options.find[3:]))])
+                except struct.error:
+                    pass
+        for search in searches:
+            for position in FindAll(data, search[1]):
+                print('0x%08x %s 0x%s' % (position, search[0], binascii.b2a_hex(search[1])))
     elif options.count == 1:
         FormatBytesData(data, -1, options)
     else:
@@ -1462,7 +1588,8 @@ https://DidierStevens.com'''
     oParser.add_option('-m', '--man', action='store_true', default=False, help='Print manual')
     oParser.add_option('-f', '--format', default='', help='Struct format string to use')
     oParser.add_option('-n', '--annotations', default='', help='Annotations')
-    oParser.add_option('-s', '--select', default='', help='Select item nr for dumping')
+    oParser.add_option('-s', '--select', default='', help='Select item nr for dumping or r for remainder')
+    oParser.add_option('-F', '--find', default='', help='Find value')
     oParser.add_option('-d', '--dump', action='store_true', default=False, help='perform dump')
     oParser.add_option('-x', '--hexdump', action='store_true', default=False, help='perform hex dump')
     oParser.add_option('-a', '--asciidump', action='store_true', default=False, help='perform ascii dump')
