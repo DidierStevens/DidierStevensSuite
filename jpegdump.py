@@ -2,8 +2,8 @@
 
 __description__ = 'JPEG file analysis tool'
 __author__ = 'Didier Stevens'
-__version__ = '0.0.6'
-__date__ = '2018/06/17'
+__version__ = '0.0.7'
+__date__ = '2019/04/27'
 
 """
 Source code put in public domain by Didier Stevens, no Copyright
@@ -23,6 +23,8 @@ History:
   2018/03/05: 0.0.5 updated #e# expressions
   2018/06/12: man updated
   2018/06/17: 0.0.6 added property extracted to cBinaryFile
+  2019/04/20: 0.0.7 added option -t
+  2019/04/27: CutData UNICODE & Find; added option -A
 
 Todo:
 """
@@ -107,6 +109,7 @@ A SOS segment's data is followed by the image data. The statistics of the image 
 
 If the last segment is incomplete, a *warning* line will be displayed.
 If the last segment is followed by extra bytes, a *trailing* line will be displayed.
+Use option -t if you want to consider all bytes after the first EOI marker as trailing (e.g. without being parsed).
 
 Segments can be selected to inspect their data. This can be done with option -s and the index number.
 Example:
@@ -148,8 +151,9 @@ jpegdump.py -s 6i j.jpg
       00010055: 2C 4B 7A F1 C7 6A 85 6D  DA D1 91 F0 09 FE EB 8E  ,Kz..j.m........
       00010065: A2 AE 32 26 50 08 ED 05  CD C2 8D DB 55 9B 90 2A  ..2&P.......U..*
 
-By default, and hexadecimal/ascii dump of the data dis produced (option -x).
+By default, and hexadecimal/ascii dump of the data dis produced (option -a).
 Use option -x for an hexadecimal dump.
+Option -A does an ASCII dump (like option -a), but with duplicate lines removed.
 Use option -d for a binary dump, and option -u for a binary dump with byte unstuffing (replacing 0xFF00 with 0xFF).
 
 By default, jpegdump will start to analyze the first marker it finds, regardless of its type.
@@ -311,7 +315,8 @@ termA and termB can be:
 - nothing (an empty string)
 - a positive decimal number; example: 10
 - an hexadecimal number (to be preceded by 0x); example: 0x10
-- a case sensitive string to search for (surrounded by square brackets and single quotes); example: ['MZ']
+- a case sensitive ASCII string to search for (surrounded by square brackets and single quotes); example: ['MZ']
+- a case sensitive UNICODE string to search for (surrounded by square brackets and single quotes prefixed with u); example: [u'User']
 - an hexadecimal string to search for (surrounded by square brackets); example: [d0cf11e0]
 If termA is nothing, then the cut section of bytes starts with the byte at position 0.
 If termA is a number, then the cut section of bytes starts with the byte at the position given by the number (first byte has index 0).
@@ -322,9 +327,9 @@ When termB is a number, it can have suffix letter l. This indicates that the num
 termB can also be a negative number (decimal or hexademical): in that case the position is counted from the end of the file. For example, :-5 selects the complete file except the last 5 bytes.
 If termB is a string to search for, then the cut section of bytes ends with the last byte at the position where the string is first found. If the string is not found, the cut is empty (0 bytes).
 No checks are made to assure that the position specified by termA is lower than the position specified by termB. This is left up to the user.
-Search string expressions (ASCII and hexadecimal) can be followed by an instance (a number equal to 1 or greater) to indicate which instance needs to be taken. For example, ['ABC']2 will search for the second instance of string 'ABC'. If this instance is not found, then nothing is selected.
-Search string expressions (ASCII and hexadecimal) can be followed by an offset (+ or - a number) to add (or substract) an offset to the found instance. For example, ['ABC']+3 will search for the first instance of string 'ABC' and then select the bytes after ABC (+ 3).
-Finally, search string expressions (ASCII and hexadecimal) can be followed by an instance and an offset.
+Search string expressions (ASCII, UNICODE and hexadecimal) can be followed by an instance (a number equal to 1 or greater) to indicate which instance needs to be taken. For example, ['ABC']2 will search for the second instance of string 'ABC'. If this instance is not found, then nothing is selected.
+Search string expressions (ASCII, UNICODE and hexadecimal) can be followed by an offset (+ or - a number) to add (or substract) an offset to the found instance. This number can be a decimal or hexadecimal (prefix 0x) value. For example, ['ABC']+3 will search for the first instance of string 'ABC' and then select the bytes after ABC (+ 3).
+Finally, search string expressions (ASCII, UNICODE and hexadecimal) can be followed by an instance and an offset.
 Examples:
 This cut-expression can be used to dump the first 256 bytes of a PE file located inside the file content: ['MZ']:0x100l
 This cut-expression can be used to dump the OLE file located inside the file content: [d0cf11e0]:
@@ -766,6 +771,18 @@ def Replace(string, dReplacements):
     else:
         return string
 
+def ParseInteger(argument):
+    sign = 1
+    if argument.startswith('+'):
+        argument = argument[1:]
+    elif argument.startswith('-'):
+        argument = argument[1:]
+        sign = -1
+    if argument.startswith('0x'):
+        return sign * int(argument[2:], 16)
+    else:
+        return sign * int(argument)
+
 def ParseCutTerm(argument):
     if argument == '':
         return CUTTERM_NOTHING, None, ''
@@ -778,23 +795,28 @@ def ParseCutTerm(argument):
             value = -value
         return CUTTERM_POSITION, value, argument[len(oMatch.group(0)):]
     if oMatch == None:
-        oMatch = re.match(r'\[([0-9a-f]+)\](\d+)?([+-]\d+)?', argument, re.I)
+        oMatch = re.match(r'\[([0-9a-f]+)\](\d+)?([+-](?:0x[0-9a-f]+|\d+))?', argument, re.I)
     else:
         value = int(oMatch.group(1))
         if argument.startswith('-'):
             value = -value
         return CUTTERM_POSITION, value, argument[len(oMatch.group(0)):]
     if oMatch == None:
-        oMatch = re.match(r"\[\'(.+?)\'\](\d+)?([+-]\d+)?", argument)
+        oMatch = re.match(r"\[u?\'(.+?)\'\](\d+)?([+-](?:0x[0-9a-f]+|\d+))?", argument)
     else:
         if len(oMatch.group(1)) % 2 == 1:
             raise Exception("Uneven length hexadecimal string")
         else:
-            return CUTTERM_FIND, (binascii.a2b_hex(oMatch.group(1)), int(Replace(oMatch.group(2), {None: '1'})), int(Replace(oMatch.group(3), {None: '0'}))), argument[len(oMatch.group(0)):]
+            return CUTTERM_FIND, (binascii.a2b_hex(oMatch.group(1)), int(Replace(oMatch.group(2), {None: '1'})), ParseInteger(Replace(oMatch.group(3), {None: '0'}))), argument[len(oMatch.group(0)):]
     if oMatch == None:
         return None, None, argument
     else:
-        return CUTTERM_FIND, (oMatch.group(1), int(Replace(oMatch.group(2), {None: '1'})), int(Replace(oMatch.group(3), {None: '0'}))), argument[len(oMatch.group(0)):]
+        if argument.startswith("[u'"):
+            # convert ascii to unicode 16 byte sequence
+            searchtext = oMatch.group(1).decode('unicode_escape').encode('utf16')[2:]
+        else:
+            searchtext = oMatch.group(1)
+        return CUTTERM_FIND, (searchtext, int(Replace(oMatch.group(2), {None: '1'})), ParseInteger(Replace(oMatch.group(3), {None: '0'}))), argument[len(oMatch.group(0)):]
 
 def ParseCutArgument(argument):
     type, value, remainder = ParseCutTerm(argument.strip())
@@ -828,8 +850,8 @@ def ParseCutArgument(argument):
     else:
         return typeLeft, valueLeft, type, value
 
-def Find(data, value, nth):
-    position = -1
+def Find(data, value, nth, startposition=-1):
+    position = startposition
     while nth > 0:
         position = data.find(value, position + 1)
         if position == -1:
@@ -839,12 +861,12 @@ def Find(data, value, nth):
 
 def CutData(stream, cutArgument):
     if cutArgument == '':
-        return stream
+        return [stream, None, None]
 
     typeLeft, valueLeft, typeRight, valueRight = ParseCutArgument(cutArgument)
 
     if typeLeft == None:
-        return stream
+        return [stream, None, None]
 
     if typeLeft == CUTTERM_NOTHING:
         positionBegin = 0
@@ -853,7 +875,7 @@ def CutData(stream, cutArgument):
     elif typeLeft == CUTTERM_FIND:
         positionBegin = Find(stream, valueLeft[0], valueLeft[1])
         if positionBegin == -1:
-            return ''
+            return ['', None, None]
         positionBegin += valueLeft[2]
     else:
         raise Exception("Unknown value typeLeft")
@@ -867,16 +889,16 @@ def CutData(stream, cutArgument):
     elif typeRight == CUTTERM_LENGTH:
         positionEnd = positionBegin + valueRight
     elif typeRight == CUTTERM_FIND:
-        positionEnd = Find(stream, valueRight[0], valueRight[1])
+        positionEnd = Find(stream, valueRight[0], valueRight[1], positionBegin)
         if positionEnd == -1:
-            return ''
+            return ['', None, None]
         else:
             positionEnd += len(valueRight[0])
         positionEnd += valueRight[2]
     else:
         raise Exception("Unknown value typeRight")
 
-    return stream[positionBegin:positionEnd]
+    return [stream[positionBegin:positionEnd], positionBegin, positionEnd]
 
 class cDump():
     def __init__(self, data, prefix='', offset=0, dumplinelength=16):
@@ -904,28 +926,43 @@ class cDump():
             countSpaces += 1
         return hexDump + '  ' + (' ' * countSpaces) + asciiDump
 
-    def HexAsciiDump(self):
+    def HexAsciiDump(self, rle=False):
         oDumpStream = self.cDumpStream(self.prefix)
+        position = ''
         hexDump = ''
         asciiDump = ''
+        previousLine = None
+        countRLE = 0
         for i, b in enumerate(self.data):
             b = self.C2IIP2(b)
             if i % self.dumplinelength == 0:
                 if hexDump != '':
-                    oDumpStream.Addline(self.CombineHexAscii(hexDump, asciiDump))
-                hexDump = '%08X:' % (i + self.offset)
+                    line = self.CombineHexAscii(hexDump, asciiDump)
+                    if not rle or line != previousLine:
+                        if countRLE > 0:
+                            oDumpStream.Addline('* %d 0x%02x' % (countRLE, countRLE * self.dumplinelength))
+                        oDumpStream.Addline(position + line)
+                        countRLE = 0
+                    else:
+                        countRLE += 1
+                    previousLine = line
+                position = '%08X:' % (i + self.offset)
+                hexDump = ''
                 asciiDump = ''
             if i % self.dumplinelength == self.dumplinelength / 2:
                 hexDump += ' '
             hexDump += ' %02X' % b
             asciiDump += IFF(b >= 32 and b < 128, chr(b), '.')
-        oDumpStream.Addline(self.CombineHexAscii(hexDump, asciiDump))
+        if countRLE > 0:
+            oDumpStream.Addline('* %d 0x%02x' % (countRLE, countRLE * self.dumplinelength))
+        oDumpStream.Addline(self.CombineHexAscii(position + hexDump, asciiDump))
         return oDumpStream.Content()
 
     def Base64Dump(self, nowhitespace=False):
         encoded = binascii.b2a_base64(self.data)
         if nowhitespace:
             return encoded
+        encoded = encoded.strip()
         oDumpStream = self.cDumpStream(self.prefix)
         length = 64
         for i in range(0, len(encoded), length):
@@ -1064,18 +1101,24 @@ def GetDelta(found, endOfPrevious, noPrevious):
     else:
         return 'd=%d' % (found - endOfPrevious)
 
+def PrintWarningSelection(select, selectionCounter):
+    if select != '' and selectionCounter == 0:
+        print('Warning: no segment was selected with expression %s' % select)
+
 def ProcessJPEGFileSub(data, options, startposition=0):
     oOutput = cOutput(options)
     counter = 1
+    selectionCounterTotal = 0
     position = startposition
     ff00Counter = 0
     ffdaFlag = False
     endOfPrevious = startposition
     noPrevious = True
     positionSOI = None
+    positionEOI = None
     while True:
         found = data.find(C2BIP3('\xFF'), position)
-        if found == -1:
+        if found == -1 or positionEOI != None and options.trailing:
             break
         marker = data[found:found+4]
         markerType = struct.unpack('xB', marker[0:2])[0]
@@ -1093,6 +1136,7 @@ def ProcessJPEGFileSub(data, options, startposition=0):
                 oOutput.PrintC('                                  entropy-coded data: l=%d e=%f a=%f #ff00=%d' % ((found - endOfPrevious), stats[1], ConvertNone(stats[10], 0.0), ff00Counter))
                 ff00Counter = 0
                 if options.select == '%di' % (counter - 1):
+                    selectionCounterTotal += 1
                     if options.dump:
                         IfWIN32SetBinary(sys.stdout)
                         StdoutWriteChunked(data[endOfPrevious:found])
@@ -1101,6 +1145,8 @@ def ProcessJPEGFileSub(data, options, startposition=0):
                         StdoutWriteChunked(data[endOfPrevious:found].replace(C2BIP3('\xFF\x00'), C2BIP3('\xFF')))
                     elif options.hexdump:
                         oOutput.Print(cDump(data[endOfPrevious:found], '      ', endOfPrevious).HexDump()[:-1])
+                    elif options.asciidumprle:
+                        oOutput.Print(cDump(data[endOfPrevious:found], '      ', endOfPrevious).HexAsciiDump(True)[:-1])
                     else:
                         oOutput.Print(cDump(data[endOfPrevious:found], '      ', endOfPrevious).HexAsciiDump()[:-1])
                 endOfPrevious = found
@@ -1114,6 +1160,8 @@ def ProcessJPEGFileSub(data, options, startposition=0):
             if markerType >= 0xD0 and markerType <= 0xD9:
                 if positionSOI == None and markerType == 0xD8:
                     positionSOI = found
+                if positionEOI == None and markerType == 0xD9:
+                    positionEOI = found
                 oOutput.PrintC('%3d p=0x%08x %s: m=%02x%02x %s' % (counter, found, GetDelta(found, endOfPrevious, noPrevious), struct.unpack('Bx', marker[0:2])[0], markerType, markerName))
                 if options.findsoi and options.compliant and markerType == 0xD9:
                     return oOutput, positionSOI, found
@@ -1136,11 +1184,14 @@ def ProcessJPEGFileSub(data, options, startposition=0):
                     line += ' remark: c=%d' % info
                 oOutput.PrintC(line)
                 if options.select == str(counter):
+                    selectionCounterTotal += 1
                     if options.dump:
                         IfWIN32SetBinary(sys.stdout)
                         StdoutWriteChunked(data[found+4:found+2+size])
                     elif options.hexdump:
                         oOutput.Print(cDump(data[found+4:found+2+size], '', found + 4).HexDump()[:-1])
+                    elif options.asciidumprle:
+                        oOutput.Print(cDump(data[found+4:found+2+size], '', found + 4).HexAsciiDump(True)[:-1])
                     else:
                         oOutput.Print(cDump(data[found+4:found+2+size], '', found + 4).HexAsciiDump()[:-1])
                 position = found + 2 + size
@@ -1158,20 +1209,24 @@ def ProcessJPEGFileSub(data, options, startposition=0):
         stats = CalculateByteStatistics(data=data[position:])
         oOutput.PrintC('%3d p=0x%08x    : *trailing*  l=%5d e=%f' % (counter, position, len(data) - position, stats[1]))
         if options.select == str(counter):
+            selectionCounterTotal += 1
             if options.dump:
                 IfWIN32SetBinary(sys.stdout)
                 StdoutWriteChunked(data[position:])
             elif options.hexdump:
                 oOutput.Print(cDump(data[position:], '', position).HexDump()[:-1])
+            elif options.asciidumprle:
+                oOutput.Print(cDump(data[position:], '', position).HexAsciiDump(True)[:-1])
             else:
                 oOutput.Print(cDump(data[position:], '', position).HexAsciiDump()[:-1])
     elif trailing < 0:
         oOutput.PrintC('                                   *warning* %d byte(s) missing' % -trailing)
+    PrintWarningSelection(options.select, selectionCounterTotal)
     return oOutput, None, None
 
 def ProcessJPEGFile(filename, cutexpression, options):
     oBinaryFile = cBinaryFile(filename, C2BIP3(options.password), options.noextraction, options.literalfilenames)
-    data = CutData(oBinaryFile.Data(), cutexpression)
+    data = CutData(oBinaryFile.Data(), cutexpression)[0]
     Print('File: %s%s' % (filename, IFF(oBinaryFile.extracted, ' (extracted)', '')), options)
     if options.findsoi:
         position = 0
@@ -1211,10 +1266,12 @@ https://DidierStevens.com'''
     oParser.add_option('-d', '--dump', action='store_true', default=False, help='Perform dump')
     oParser.add_option('-u', '--unstuffeddump', action='store_true', default=False, help='Perform unstuffed dump')
     oParser.add_option('-a', '--asciidump', action='store_true', default=False, help='Perform HEX/ASCII dump')
+    oParser.add_option('-A', '--asciidumprle', action='store_true', default=False, help='perform ascii dump with RLE')
     oParser.add_option('-x', '--hexdump', action='store_true', default=False, help='Perform HEX dump')
     oParser.add_option('-f', '--findsoi', action='store_true', default=False, help='Find SOI markers')
     oParser.add_option('-c', '--compliant', action='store_true', default=False, help='Combined with --findsoi, report compliant images only')
     oParser.add_option('-e', '--extract', action='store_true', default=False, help='Combined with --findsoi, extract images to disk')
+    oParser.add_option('-t', '--trailing', action='store_true', default=False, help='Consider everything after the first EOI as trailing')
     (options, args) = oParser.parse_args()
 
     if options.man:
