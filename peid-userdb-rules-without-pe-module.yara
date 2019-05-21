@@ -1683,6 +1683,7 @@ rule PEiD_00152_Armadillo_v1_9x_
         $a
 }
 
+/* false positive - https://www.zscaler.com/blogs/research/your-windows-8-packed
 rule PEiD_00153_Armadillo_v1_xx___v2_xx_
 {
     meta:
@@ -1693,6 +1694,7 @@ rule PEiD_00153_Armadillo_v1_xx___v2_xx_
     condition:
         $a
 }
+*/
 
 rule PEiD_00154_Armadillo_v2_00_
 {
