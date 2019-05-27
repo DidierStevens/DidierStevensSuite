@@ -2,8 +2,8 @@
 
 __description__ = 'ZIP dump utility'
 __author__ = 'Didier Stevens'
-__version__ = '0.0.14'
-__date__ = '2018/07/07'
+__version__ = '0.0.15'
+__date__ = '2018/12/15'
 
 """
 
@@ -43,6 +43,7 @@ History:
   2018/06/25: 0.0.12: added option -t
   2018/07/01: 0.0.13: added option --jsonoutput
   2018/07/07: 0.0.14: updated to version 2 of jsonoutput
+  2018/12/15: 0.0.15: updated help
 
 Todo:
 """
@@ -4659,8 +4660,8 @@ def Main():
     oParser.add_option('-t', '--translate', type=str, default='', help='string translation, like utf16 or .decode("utf8")')
     oParser.add_option('-e', '--extended', action='store_true', default=False, help='report extended information')
     oParser.add_option('-p', '--password', default='infected', help='The ZIP password to be used (default infected)')
-    oParser.add_option('-P', '--passwordfile', default='', help='A file with ZIP passwords to be used in a dictionary attack')
-    oParser.add_option('--passwordfilestop', default='', help='A file with ZIP passwords to be used in a dictionary attack, stop after the attack')
+    oParser.add_option('-P', '--passwordfile', default='', help='A file with ZIP passwords to be used in a dictionary attack; use . to use build-in list')
+    oParser.add_option('--passwordfilestop', default='', help='A file with ZIP passwords to be used in a dictionary attack, stop after the attack; use . to use build-in list')
     oParser.add_option('-y', '--yara', help="YARA rule file (or directory or @file) to check files (YARA search doesn't work with -s option)")
     oParser.add_option('--yarastrings', action='store_true', default=False, help='Print YARA strings')
     oParser.add_option('--yarastringsraw', action='store_true', default=False, help='Print only YARA strings')
