@@ -2,8 +2,8 @@
 
 __description__ = 'This is essentialy a wrapper for the struct module'
 __author__ = 'Didier Stevens'
-__version__ = '0.0.8'
-__date__ = '2019/04/18'
+__version__ = '0.0.9'
+__date__ = '2019/07/15'
 
 """
 Source code put in public domain by Didier Stevens, no Copyright
@@ -40,6 +40,7 @@ History:
   2019/03/22: 0.0.8 added -F option
   2019/03/25: added library & -f name= ; added select remainder (-s r)
   2019/04/18: added FiletimeUTC; added support for annotations to library files
+  2019/07/15: 0.0.9 added tlv format parsing
 
 Todo:
 """
@@ -193,6 +194,22 @@ Remainder: 9
 8I: sl 2915073189858196174 ul 2915073189858196174 sb -3586339647020895192 ub 14860404426688656424
 8T: ul N/A ub N/A
 8F: l 0.000000 b -721504228050136948830706706079286975060186906491372824967789492043776.000000
+
+This tool can also parse TLV records (Type, Length Value). To achieve this, start the format specifier with tlv= and provide values for format (f:), type (t:) and length (l:) separated by a comma (,).
+Like this example:
+
+C:\Demo>format-bytes.py -f "tlv=f:<III,t:0,l:2" registry.blob.bin
+File: registry.blob.bin
+ 1:     0x59    18 'R\x00S\x00A\x00/\x00S\x00H\x00A\x001\x0
+ 2:     0x0f    20 'N\x94\xf8r\xf8\x02D\x1e-\x1c\x86\xc4\x0
+ 3:     0x14    20 'F\xcc\x93\x96\xe7\x14k\xaaW\xc7\xc3\r8\
+ 4:     0x02   188 '\x1c\x00\x00\x00\\\x00\x00\x00\x0c\x00\
+ 5:     0x03    20 "\x1c\x9c\xa83\x865\xf1}B\xe4\x1b\x90RH'
+ 6:     0x04    16 "\x86\xae\xa6J'\x19\xc5\xa0\x05\x8a7\x93
+ 7:     0x19    16 "\xa5\x9d~\x05\x03';\x01\x90\xd7fF\xbdd\
+ 8:     0x20   735 '0\x82\x02\xdb0\x82\x01\xc3\xa0\x03\x02\
+
+This command parses the binary blob of a certificate found inside the Windows registry. Each record consists of 3 little-endian 32-bit integers (<III) followed by data. The first integer (index 0), the PropID, is the type (t:0) and the third integer (index 2) is the length (l:2). This is the length of the value (data).
 
 Format strings can be stored inside a library file. A library file has the name of the program (format-bytes) and extension .library. Library files can be placed in the same directory as the program, and/or the current directory.
 A library file is a text file. Each format string has a name and takes one line: name=formatstring.
@@ -1098,7 +1115,7 @@ def TimestampUTC(epoch=None):
 
 def FiletimeUTC(value):
     try:
-        return datetime.datetime.utcfromtimestamp((value - 116444736000000000) / 10000000).strftime("%Y/%m/%d %H:%M:%S")
+        return '%s.%07d' % (datetime.datetime.utcfromtimestamp((value - 116444736000000000) / 10000000).strftime("%Y/%m/%d %H:%M:%S"), (value - 116444736000000000) % 10000000)
     except ValueError:
         return 'N/A'
 
@@ -1373,6 +1390,8 @@ def IfWIN32SetBinary(io):
 #Fix for http://bugs.python.org/issue11395
 def StdoutWriteChunked(data):
     if sys.version_info[0] > 2:
+        if isinstance(data, str):
+            data = bytes(data, 'utf-8', 'backslashreplace')
         sys.stdout.buffer.write(data)
     else:
         while data != '':
@@ -1405,6 +1424,12 @@ def MergeUserLibrarySub(filename):
                 else:
                     dLibrary[result[0]] = [result[1], '']
 
+def NumberToHex(number):
+    result = hex(number)
+    if len(result) % 2 == 1:
+        result = '0x0' + result[2:]
+    return result
+
 def MergeUserLibrary():
     MergeUserLibrarySub(os.path.splitext(sys.argv[0])[0] + LIBRARY_EXTENSION)
     MergeUserLibrarySub(os.path.splitext(os.path.basename(sys.argv[0]))[0] + LIBRARY_EXTENSION)
@@ -1431,21 +1456,33 @@ def Library(name):
 
 def ParseFormat(formatvalue):
     annotations = ''
+    representation = ''
+    remainder = False
+    tlv = None
     if formatvalue.startswith('name='):
         formatvalue, annotations = Library(formatvalue[5:])
-    formats = formatvalue.split(':')
-    if len(formats) == 2:
-        format, representation = formats
+    if formatvalue.startswith('tlv='):
+        tlv = {}
+        for element in formatvalue[4:].split(','):
+            if element.startswith('f:'):
+                format = element[2:]
+            elif element.startswith('t:'):
+                tlv['type'] = int(element[2:])
+            elif element.startswith('l:'):
+                tlv['length'] = int(element[2:])
+            else:
+                raise
     else:
-        format = formats[0]
-        representation = ''
-    if format.endswith('*'):
-        format = format[:-1]
-        remainder = True
-    else:
-        remainder = False
+        formats = formatvalue.split(':')
+        if len(formats) == 2:
+            format, representation = formats
+        else:
+            format = formats[0]
+        if format.endswith('*'):
+            format = format[:-1]
+            remainder = True
 
-    return SearchAndReplaceFormat(format), representation, annotations, remainder
+    return SearchAndReplaceFormat(format), representation, annotations, remainder, tlv
 
 def FindAll(data, sub):
     result = []
@@ -1468,7 +1505,7 @@ def ParseAnnotations(annotations, dAnnotations):
 def FormatBytesSingle(filename, cutexpression, content, options):
     MergeUserLibrary()
 
-    format, representation, annotations, remainder = ParseFormat(options.format)
+    format, representation, annotations, remainder, tlv = ParseFormat(options.format)
 
     dAnnotations = {}
     if options.annotations != '':
@@ -1479,7 +1516,7 @@ def FormatBytesSingle(filename, cutexpression, content, options):
     oBinaryFile = cBinaryFile(filename, C2BIP3(options.password), options.noextraction, options.literalfilenames, content)
     if cutexpression == '':
         if format != '':
-            if remainder:
+            if remainder or tlv != None:
                 data = oBinaryFile.read()
             else:
                 data = oBinaryFile.read(struct.calcsize(format))
@@ -1508,49 +1545,77 @@ def FormatBytesSingle(filename, cutexpression, content, options):
                 DumpFunction = HexAsciiDump
 
         selectionCounter = 0
-        size = struct.calcsize(format)
-        for index, element in enumerate(struct.unpack(format, data[0:size])):
-            index += 1
-            if options.select != '':
-                if options.select != 'r' and int(options.select) == index and (isinstance(element, str) or isinstance(element, bytes)):
-                    StdoutWriteChunked(DumpFunction(element))
-                    selectionCounter += 1
-            else:
-                if isinstance(element, int) or isinstance(element, long):
-                    if representation == '':
-                        line = '%2d: %15s %10d %10x  %s' % (index, type(element), element, element, IFF(element < 0, '', lambda: TimestampUTC(element)))
-                    elif representation[index - 1] == 'X':
-                        line = '%2d: %15s %10x' % (index, type(element), element)
-                    elif representation[index - 1] == 'I':
-                        line = '%2d: %15s %10d' % (index, type(element), element)
-                    elif representation[index - 1] == 'E':
-                        line = '%2d: %15s %s' % (index, type(element), IFF(element < 0, '', lambda: TimestampUTC(element)))
-                    elif representation[index - 1] == 'T':
-                        line = '%2d: %15s %s' % (index, type(element), IFF(element < 0, '', lambda: FiletimeUTC(element)))
-                elif isinstance(element, str):
-                    if representation != '' and representation[index - 1] == 'S':
-                        line = '%2d: %15s %s' % (index, type(element), RIN(element))
-                    elif representation != '' and representation[index - 1] == 'X':
-                        line = '%2d: %15s %s' % (index, type(element), binascii.b2a_hex(element))
-                    else:
-                        line = '%2d: %15s %10d %s %s %s %s' % (index, type(element), len(element), ExtraInfoHEADASCII(element[:10]), ExtraInfoHEADHEX(element[:10]), ExtraInfoENTROPY(element), ExtraInfoMD5(element))
-                elif isinstance(element, bytes):
-                    line = '%2d: %15s %10d %s %s %s %s' % (index, type(element), len(element), ExtraInfoHEADASCII3(element[:10]), ExtraInfoHEADHEX(element[:10]), ExtraInfoENTROPY(element), ExtraInfoMD5(element))
+        if tlv == None:
+            size = struct.calcsize(format)
+            for index, element in enumerate(struct.unpack(format, data[0:size])):
+                index += 1
+                if options.select != '':
+                    if options.select != 'r' and int(options.select) == index and (isinstance(element, str) or isinstance(element, bytes)):
+                        StdoutWriteChunked(DumpFunction(element))
+                        selectionCounter += 1
                 else:
-                    line = '%2d: %15s %s' % (index, type(element), str(element))
-                print('%s %s' % (line, dAnnotations.get(index, '')))
-        if options.select == 'r' and remainder:
-            StdoutWriteChunked(DumpFunction(data[size:]))
-            selectionCounter += 1
+                    if isinstance(element, int) or isinstance(element, long):
+                        if representation == '':
+                            line = '%2d: %15s %10d %10x  %s' % (index, type(element), element, element, IFF(element < 0, '', lambda: TimestampUTC(element)))
+                        elif representation[index - 1] == 'X':
+                            line = '%2d: %15s %10x' % (index, type(element), element)
+                        elif representation[index - 1] == 'I':
+                            line = '%2d: %15s %10d' % (index, type(element), element)
+                        elif representation[index - 1] == 'E':
+                            line = '%2d: %15s %s' % (index, type(element), IFF(element < 0, '', lambda: TimestampUTC(element)))
+                        elif representation[index - 1] == 'T':
+                            line = '%2d: %15s %s' % (index, type(element), IFF(element < 0, '', lambda: FiletimeUTC(element)))
+                    elif isinstance(element, str):
+                        if representation != '' and representation[index - 1] == 'S':
+                            line = '%2d: %15s %s' % (index, type(element), RIN(element))
+                        elif representation != '' and representation[index - 1] == 'X':
+                            line = '%2d: %15s %s' % (index, type(element), binascii.b2a_hex(element))
+                        else:
+                            line = '%2d: %15s %10d %s %s %s %s' % (index, type(element), len(element), ExtraInfoHEADASCII(element[:10]), ExtraInfoHEADHEX(element[:10]), ExtraInfoENTROPY(element), ExtraInfoMD5(element))
+                    elif isinstance(element, bytes):
+                        line = '%2d: %15s %10d %s %s %s %s' % (index, type(element), len(element), ExtraInfoHEADASCII3(element[:10]), ExtraInfoHEADHEX(element[:10]), ExtraInfoENTROPY(element), ExtraInfoMD5(element))
+                    else:
+                        line = '%2d: %15s %s' % (index, type(element), str(element))
+                    print('%s %s' % (line, dAnnotations.get(index, '')))
+            if options.select == 'r' and remainder:
+                StdoutWriteChunked(DumpFunction(data[size:]))
+                selectionCounter += 1
+            if options.select == '' and remainder:
+                print('Remainder: %d' % (len(data) - size))
+                remainderx100 = data[size:size + 0x100]
+                if len(remainderx100) > 0:
+                    oDump = cDump(remainderx100)
+                    print(oDump.HexAsciiDump())
+                    FormatBytesData(remainderx100, -1, options)
+        else:
+            size = struct.calcsize(format)
+            index = 0
+            while len(data) >= size:
+                index += 1
+                fields = struct.unpack(format, data[0:size])
+                data = data[size:]
+                value = data[:fields[tlv['length']]]
+                data = data[fields[tlv['length']]:]
+                if options.select != '':
+                    if options.select != 'r' and int(options.select) == index:
+                        StdoutWriteChunked(DumpFunction(value))
+                        selectionCounter += 1
+                else:
+		                line = '%2d: %8s %5d %s' % (index, NumberToHex(fields[tlv['type']]), fields[tlv['length']], repr(value)[0:40])
+		                print(line)
+            if options.select == 'r' and len(data) > 0:
+                StdoutWriteChunked(DumpFunction(data))
+                selectionCounter += 1
+            if options.select == '' and len(data) > 0:
+                print('Remainder: %d' % (len(data)))
+                remainderx100 = data[:0x100]
+                if len(remainderx100) > 0:
+                    oDump = cDump(remainderx100)
+                    print(oDump.HexAsciiDump())
+                    FormatBytesData(remainderx100, -1, options)
+
         if options.select != '' and selectionCounter == 0:
             print('Warning: no item was selected with expression %s' % options.select)
-        if options.select == '' and remainder:
-            print('Remainder: %d' % (len(data) - size))
-            remainderx100 = data[size:size + 0x100]
-            if len(remainderx100) > 0:
-                oDump = cDump(remainderx100)
-                print(oDump.HexAsciiDump())
-                FormatBytesData(remainderx100, -1, options)
     elif options.find != '':
         if not options.find.startswith('#i#'):
             raise Exception('Unknown find option format: %s' % options.find)
