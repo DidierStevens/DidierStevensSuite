@@ -2,8 +2,8 @@
 
 __description__ = 'pdf-parser, use it to parse a PDF document'
 __author__ = 'Didier Stevens'
-__version__ = '0.7.1'
-__date__ = '2019/03/01'
+__version__ = '0.7.2'
+__date__ = '2019/07/30'
 __minimum_python_version__ = (2, 5, 1)
 __maximum_python_version__ = (3, 6, 3)
 
@@ -65,6 +65,8 @@ History:
   2018/10/20: added keywords to statistics
   2019/02/22: V0.7.0 added option -O --objstm to parse the stream of /ObjStm objects, inspired by a contributor wishing anonymity
   2019/03/01: V0.7.1 added ContainsName for correct keyword statistics (-a)
+  2019/04/12: V0.7.2 Python 2.6.6 compatibility fix
+  2019/07/30: bug fixes (including fixes Josef Hinteregger)
 
 Todo:
   - handle printf todo
@@ -117,7 +119,10 @@ dumplinelength = 16
 #Convert 2 Bytes If Python 3
 def C2BIP3(string):
     if sys.version_info[0] > 2:
-        return bytes([ord(x) for x in string])
+        if type(string) == bytes:
+            return string
+        else:
+            return bytes([ord(x) for x in string])
     else:
         return string
 
@@ -745,9 +750,18 @@ class cPDFParseDictionary:
                         value.append(tokens[0][1])
                 elif value != [] and value[0] == '(' and tokens[0][1] == ')':
                     value.append(tokens[0][1])
-                    dictionary.append((key, value))
-                    value = []
-                    state = 1
+                    balanced = 0
+                    for item in value:
+                        if item == '(':
+                            balanced += 1
+                        elif item == ')':
+                            balanced -= 1
+                    if balanced < 0 and self.verbose:
+                        print('todo 11: ' + repr(value))
+                    if balanced < 1:
+                        dictionary.append((key, value))
+                        value = []
+                        state = 1
                 elif value != [] and tokens[0][1][0] == '/':
                     dictionary.append((key, value))
                     key = ConditionalCanonicalize(tokens[0][1], self.nocanonicalizedoutput)
@@ -812,6 +826,8 @@ def FormatOutput(data, raw):
             return ''.join(map(lambda x: x[1], data))
         else:
             return data
+    elif sys.version_info[0] > 2:
+        return ascii(data)
     else:
         return repr(data)
 
@@ -1326,7 +1342,12 @@ def Main():
         for extrakeyword in ParseINIFile():
             if not extrakeyword in keywords:
                 keywords.append(extrakeyword)
-        dKeywords = {keyword: [] for keyword in keywords}
+
+#        dKeywords = {keyword: [] for keyword in keywords}
+# Done for compatibility with 2.6.6
+        dKeywords = {}
+        for keyword in keywords:
+            dKeywords[keyword] = []
 
         selectComment = False
         selectXref = False
