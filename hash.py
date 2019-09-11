@@ -2,8 +2,8 @@
 
 __description__ = 'This is essentialy a wrapper for the hashlib module'
 __author__ = 'Didier Stevens'
-__version__ = '0.0.6'
-__date__ = '2018/09/18'
+__version__ = '0.0.7'
+__date__ = '2019/08/27'
 
 """
 Source code put in public domain by Didier Stevens, no Copyright
@@ -20,6 +20,7 @@ History:
   2018/06/12: 0.0.4 cosmetic change
   2018/06/17: 0.0.5 added option -v
   2018/09/18: 0.0.6 added option -C
+  2019/08/27: 0.0.7 added crc32
 
 Todo:
 """
@@ -40,6 +41,7 @@ import string
 import math
 import hashlib
 import fnmatch
+import zlib
 if sys.version_info[0] >= 3:
     from io import BytesIO as DataIO
 else:
@@ -110,7 +112,7 @@ File: c:\Windows\write.exe
 If you always want to use the same set of hash algorithms, you can set environment variable HASH_ALGORITHMS with the list of your preferred hash algorithms and export it.
 
 The list of hash algorithms supported by the Python version this script is running on, is:
-''' + ' '.join(name for name in hashlib.algorithms_available) + r'''
+''' + ' '.join(name for name in list(hashlib.algorithms_available) + ['crc32']) + r'''
 
 The Python hashlib module methods produce hexadecimal hash values with lowercase letters. To get uppercase letters with this tool, use option -u:
 
@@ -965,7 +967,19 @@ def CutData(stream, cutArgument):
 
     return stream[positionBegin:positionEnd]
 
+class cHashCRC32():
+    def __init__(self):
+        self.crc32 = None
+
+    def update(self, data):
+        self.crc32 = zlib.crc32(data)
+
+    def hexdigest(self):
+        return '%08x' % (self.crc32 & 0xffffffff)
+
 def GetHashObjects(algorithms):
+    dHashes = {}
+
     if algorithms == '':
         algorithms = os.getenv('HASH_ALGORITHMS', 'md5;sha1;sha256')
     if ',' in algorithms:
@@ -973,11 +987,16 @@ def GetHashObjects(algorithms):
     else:
         hashes = algorithms.split(';')
     for name in hashes:
-        if not name in hashlib.algorithms_available:
+        if name != 'crc32' and not name in hashlib.algorithms_available:
             print('Error: unknown hash algorithm: %s' % name)
-            print('Available hash algorithms: ' + ' '.join(name for name in hashlib.algorithms_available))
+            print('Available hash algorithms: ' + ' '.join(name for name in list(hashlib.algorithms_available) + ['crc32']))
             return [], {}
-    return hashes, {h: hashlib.new(h) for h in hashes}
+        elif name == 'crc32':
+            dHashes[name] = cHashCRC32()
+        else:
+            dHashes[name] = hashlib.new(name)
+
+    return hashes, dHashes
 
 def ParseHashList(data):
     separator = ','
@@ -1106,9 +1125,9 @@ def HashFiles(filenames, options):
                         for filename in uniques:
                             print('  %s' % filename)
                 if len(dHashes) == 1:
-                    print(' All %s hashes are identical' % name)                
+                    print(' All %s hashes are identical' % name)
                 else:
-                    print(' There are %d different %s hashes' % (len(dHashes), name))                
+                    print(' There are %d different %s hashes' % (len(dHashes), name))
 
 def Main():
     moredesc = '''

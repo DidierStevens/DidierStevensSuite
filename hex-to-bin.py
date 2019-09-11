@@ -2,8 +2,8 @@
 
 __description__ = 'Hex to bin'
 __author__ = 'Didier Stevens'
-__version__ = '0.0.2'
-__date__ = '2019/05/11'
+__version__ = '0.0.3'
+__date__ = '2019/09/11'
 
 """
 
@@ -17,8 +17,11 @@ History:
   2016/01/06: changed name from hex2bin.py to hex-to-bin.py; added man
   2019/05/07: added option -a
   2019/05/11: added option -l and -s
+  2019/08/31: 0.0.3 added option -x
+  2019/09/11: updated man; Python3 kludge
 
 Todo:
+  Get rid of Python2/Python3 conversion kludge
 """
 
 import optparse
@@ -27,6 +30,7 @@ import sys
 import os
 import signal
 import textwrap
+import codecs
 
 def PrintManual():
     manual = '''
@@ -48,10 +52,37 @@ Option -s can be used to select another hexadecimal/ASCII dump than the first on
 
 Option -l (list) can be used to produce an overview of all hexadecimal/ASCII dumps found in the input, together with an index number to be used with option -s.
 
+Using option -x, this tool will look for the first generic hexadecimal dump produced by other tools NOT developed by Didier Stevens (like registry export), and extract the contained hexadecimal data to convert to binary data.
+An hexadecimal dump needs to start with at least 16 hexadecimal bytes (not interrupted by other letters or digits) to be recognized.
+Options -l and -s can be used together with option -x.
+
+hex-to-bin expects text input (ASCII). When the input is UNICODE, option -t can be used to translate the input text before it is parsed.
+For example, -t utf16 will convert the input text from UTF16.
+
 The binary data is written to standard output.
 '''
     for line in manual.split('\n'):
         print(textwrap.fill(line))
+
+#Convert 2 Bytes If Python 3
+def C2BIP3(string):
+    if sys.version_info[0] > 2:
+        return bytes([ord(x) for x in string])
+    else:
+        return string
+
+#Convert 2 Integer If Python 2
+def C2IIP2(data):
+    if sys.version_info[0] > 2:
+        return data
+    else:
+        return ord(data)
+#Convert 2 Chr If Python 3
+def C2CIP3(data):
+    if sys.version_info[0] > 2:
+        return chr(data)
+    else:
+        return data
 
 # CIC: Call If Callable
 def CIC(expression):
@@ -86,17 +117,24 @@ def FixPipe():
         pass
 
 #Fix for http://bugs.python.org/issue11395
+#Fix for http://bugs.python.org/issue11395
 def StdoutWriteChunked(data):
-    while data != '':
-        sys.stdout.write(data[0:10000])
-        sys.stdout.flush()
-        data = data[10000:]
+    if sys.version_info[0] > 2:
+        sys.stdout.buffer.write(data)
+    else:
+        while data != '':
+            sys.stdout.write(data[0:10000])
+            try:
+                sys.stdout.flush()
+            except IOError:
+                return
+            data = data[10000:]
 
 def FindBeginHEXASCIIDump(data):
     positions = []
     position = 0
     while position != -1:
-        position = data.find('00000000: ', position)
+        position = data.find(C2BIP3('00000000: '), position)
         if position != -1:
             if position == 0 or data[position - 1] == '\x0A':
                 positions.append(position)
@@ -109,43 +147,108 @@ def ExtractHEXASCIIDump(data, select):
     positions = FindBeginHEXASCIIDump(data)
     if positions == []:
         return ''
-    result = ''
-    for line in data[positions[select - 1]:].split('\n'):
+    result = C2BIP3('')
+    for line in data[positions[select - 1]:].split(C2BIP3('\n')):
         line = line.strip()
         if len(line) <= positionColon:
             break
-        if line[positionColon] == ':':
-            result += line[positionColon + 2:positionColon + 2 + lengthHexadecimal] + '\n'
+        if line[positionColon] == ':' or line[positionColon] == 0x3A:
+            result += line[positionColon + 2:positionColon + 2 + lengthHexadecimal] + C2BIP3('\n')
         else:
             break
     return result
+
+def IsRelevant(item):
+    if item == '':
+        return False
+    for char in item:
+        if C2CIP3(char).lower() in 'abcdefghijklmnopqrstuvwxyz' or C2CIP3(char) in '0123456789':
+            return True
+    return False
+
+def IsHexByte(item):
+    if len(item) != 2:
+        return False
+    for char in item:
+        if not C2CIP3(char).lower() in '0123456789abcdef':
+            return False
+    return True
+
+def ExtractContiguousHexBytes(line):
+    line = line.rstrip(C2BIP3('\r\n'))
+    items = [item for item in line.replace(C2BIP3('\t'), C2BIP3(' ')).replace(C2BIP3(','), C2BIP3(' ')).replace(C2BIP3(':'), C2BIP3(' ')).split(C2BIP3(' ')) if IsRelevant(item)]
+    result = []
+    for item in items:
+        if IsHexByte(item):
+            result.append(item)
+        elif len(result) != 0:
+            return result
+    return result
+
+def HEXDumpExtractOrProduceList(data, select, produceList):
+    hexdump = C2BIP3('')
+    counter = 0
+    for line in data.split(C2BIP3('\n')):
+        result = ExtractContiguousHexBytes(line)
+        if hexdump != C2BIP3(''):
+            if len(result) == 0:
+                if counter == select and not produceList:
+                    return hexdump
+                else:
+                    hexdump = C2BIP3('')
+            else:
+                hexdump += C2BIP3('').join(result)
+        elif len(result) >= 16:
+            counter += 1
+            if produceList:
+                print('%d: %s' % (counter, line))
+            hexdump = C2BIP3('').join(result)
+    return hexdump
 
 def ListHEXASCIIDumps(data):
     for index, position in enumerate(FindBeginHEXASCIIDump(data)):
         print('%d: %s' % (index + 1, data[position:].split('\n')[0]))
 
+def Translate(expression):
+    try:
+        codecs.lookup(expression)
+        command = '.decode("%s")' % expression
+    except LookupError:
+        command = expression
+    return lambda x: eval('x' + command)
+
 def Hex2Bin(filename, options):
     FixPipe()
     if filename == '':
-        content = sys.stdin.read()
+        content = C2BIP3(sys.stdin.read())
     else:
         content = File2String(filename)
+    if options.translate != '':
+        content = C2BIP3(Translate(options.translate)(content))
+    if options.list:
+        if options.hexdump:
+            HEXDumpExtractOrProduceList(content, int(options.select), True)
+        else:
+            ListHEXASCIIDumps(content)
+        return
     if options.asciidump:
         content = ExtractHEXASCIIDump(content, int(options.select))
-    elif options.list:
-        ListHEXASCIIDumps(content)
-        return
+    elif options.hexdump:
+        content = HEXDumpExtractOrProduceList(content, int(options.select), False)
     if sys.platform == 'win32':
         import msvcrt
         msvcrt.setmode(sys.stdout.fileno(), os.O_BINARY)
-    StdoutWriteChunked(binascii.unhexlify(content.replace(' ', '').replace('\t', '').replace('\r', '').replace('\n', '')))
+    y = content.replace(C2BIP3(' '), C2BIP3('')).replace(C2BIP3('\t'), C2BIP3('')).replace(C2BIP3('\r'), C2BIP3('')).replace(C2BIP3('\n'), C2BIP3(''))
+    StdoutWriteChunked(binascii.unhexlify(y))
 
 def Main():
     oParser = optparse.OptionParser(usage='usage: %prog [options] [file]\n' + __description__, version='%prog ' + __version__)
     oParser.add_option('-m', '--man', action='store_true', default=False, help='Print manual')
     oParser.add_option('-a', '--asciidump', action='store_true', default=False, help='Extract Hex/ASCII dump from other tools')
     oParser.add_option('-l', '--list', action='store_true', default=False, help='List all Hex/ASCII dumps')
-    oParser.add_option('-s', '--select', default='1', help='select dump nr for extraction (default first dump)')
+    oParser.add_option('-x', '--hexdump', action='store_true', default=False, help='Extract Hex dumps')
+    oParser.add_option('-s', '--select', default='1', help='Select dump nr for extraction (default first dump)')
+    oParser.add_option('-t', '--translate', type=str, default='', help='String translation, like utf16 or .decode("utf8")')
     (options, args) = oParser.parse_args()
 
     if options.man:
