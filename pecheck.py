@@ -2,8 +2,8 @@
 
 __description__ = 'Tool for displaying PE file info'
 __author__ = 'Didier Stevens'
-__version__ = '0.7.6'
-__date__ = '2019/02/26'
+__version__ = '0.7.7'
+__date__ = '2019/09/17'
 
 """
 
@@ -39,6 +39,9 @@ History:
   2018/08/18: V0.7.4 better error handling signatures
   2019/02/26: V0.7.5 added overlay (o) to option -g; added #x# and #r# to option -y; added option -A
   2019/02/26: V0.7.6 fixed exit bug for pyinstaller
+  2019/09/13: V0.7.7 added strip (s) to option -g; added option -l
+  2019/09/16: continued -l P
+  2019/09/17: continue; added option -m
 
 Todo:
 """
@@ -54,6 +57,8 @@ import binascii
 import shlex
 import os
 import re
+import struct
+import textwrap
 if sys.version_info[0] >= 3:
     from io import StringIO
 else:
@@ -73,6 +78,29 @@ try:
     import yara
 except:
     pass
+
+def PrintManual():
+    manual = '''
+Manual:
+
+This manual is a work in progress.
+
+Use option -l to locate and select PE files embedded inside the provided file.
+Use -l P to get an overview of all embedded PE files, like this:
+
+C:\Demo>pecheck.py -l P sample.png.vir
+1: 0x00002ebb DLL 32-bit 0x00016eba 0x000270ba (EOF)
+2: 0x00016ebb DLL 64-bit 0x000270ba 0x000270ba (EOF)
+
+Then select an embedded PE file for further analysis, like this:
+
+C:\Demo>pecheck.py -l 2 sample.png.vir
+
+Use option -g o (o = overlay) to extract the overlay, and -g s (s = stripped) to extract the PE file without overlay.
+
+'''
+    for line in manual.split('\n'):
+        print(textwrap.fill(line))
 
 # CIC: Call If Callable
 def CIC(expression):
@@ -117,6 +145,34 @@ def C2BIP3(string):
     else:
         return string
 
+def File2Strings(filename):
+    try:
+        if filename == '':
+            f = sys.stdin
+        else:
+            f = open(filename, 'r')
+    except:
+        return None
+    try:
+        return map(lambda line:line.rstrip('\n'), f.readlines())
+    except:
+        return None
+    finally:
+        if f != sys.stdin:
+            f.close()
+
+def File2String(filename):
+    try:
+        f = open(filename, 'rb')
+    except:
+        return None
+    try:
+        return f.read()
+    except:
+        return None
+    finally:
+        f.close()
+
 def ProcessAt(argument):
     if argument.startswith('@'):
         strings = File2Strings(argument[1:])
@@ -127,7 +183,7 @@ def ProcessAt(argument):
     else:
         return [argument]
 
-def GetPEObject(filename):
+def ReadFile(filename):
     if filename.lower().endswith('.zip'):
         try:
             oZipfile = zipfile.ZipFile(filename, 'r')
@@ -136,17 +192,17 @@ def GetPEObject(filename):
             print('Error opening file %s' % filename)
             print(sys.exc_info()[1])
             sys.exit()
-        oPE = pefile.PE(data=file.read())
+        data = file.read()
         file.close()
         oZipfile.close()
     elif filename == '':
         if sys.platform == "win32":
             import msvcrt
             msvcrt.setmode(sys.stdin.fileno(), os.O_BINARY)
-        oPE = pefile.PE(data=sys.stdin.read())
+        data = sys.stdin.read()
     else:
-        oPE = pefile.PE(filename)
-    return oPE
+        data = File2String(filename)
+    return data
 
 def YARACompile(ruledata):
     if ruledata.startswith('#'):
@@ -241,8 +297,8 @@ def Signature(pe):
 #        print(content.getNameByPosition(idx))
 #        print(content.getNameByPosition(idx), content.getComponentByPosition(idx))
 
-def SingleFileInfo(filename, signatures, options):
-    pe = GetPEObject(filename)
+def SingleFileInfo(filename, data, signatures, options):
+    pe = pefile.PE(data=data)
     raw = pe.write()
     print("PE check for '%s':" % filename)
     print('Entropy: %f (Min=0.0, Max=8.0)' % pe.sections[0].entropy_H(raw))
@@ -272,12 +328,12 @@ def SingleFileInfo(filename, signatures, options):
     print('Entry point:')
     ep = pe.OPTIONAL_HEADER.AddressOfEntryPoint
     ep_ava = ep + pe.OPTIONAL_HEADER.ImageBase
-    print 'ep:          0x%08x' % ep
-    print 'ep address:  0x%08x' % ep_ava
+    print('ep:          0x%08x' % ep)
+    print('ep address:  0x%08x' % ep_ava)
     for section in pe.sections:
         if section.VirtualAddress <= ep and section.VirtualAddress + section.SizeOfRawData >= ep:
-            print 'Section:     %s' % ''.join(filter(lambda c:c != '\0', str(section.Name)))
-            print 'ep offset:   0x%08x' % (section.PointerToRawData + ep - section.VirtualAddress)
+            print('Section:     %s' % ''.join(filter(lambda c:c != '\0', str(section.Name))))
+            print('ep offset:   0x%08x' % (section.PointerToRawData + ep - section.VirtualAddress))
 
     print('')
     print('Overlay:')
@@ -464,9 +520,9 @@ def GetDumpFunction(options):
         DumpFunction = HexAsciiDump
     return DumpFunction
 
-def Resources(filename, options):
+def Resources(data, options):
     counter = 1
-    pe = GetPEObject(filename)
+    pe = pefile.PE(data=data)
     DumpFunction = GetDumpFunction(options)
 
     if hasattr(pe, 'DIRECTORY_ENTRY_RESOURCE'):
@@ -500,9 +556,9 @@ def Resources(filename, options):
                     print('%4d: %-20s' % (counter, column1))
                 counter += 1
 
-def Sections(filename, options):
+def Sections(data, options):
     counter = 1
-    pe = GetPEObject(filename)
+    pe = pefile.PE(data=data)
     DumpFunction = GetDumpFunction(options)
 
     #http://www.hexacorn.com/blog/2016/12/15/pe-section-names-re-visited/
@@ -692,13 +748,84 @@ def Sections(filename, options):
             StdoutWriteChunked(DumpFunction(section.get_data()))
         counter += 1
 
+def FindAll(data, sub):
+    result = []
+    start = 0
+    while True:
+        position = data.find(sub, start)
+        if position == -1:
+            return result
+        result.append(position)
+        start = position + 1
+
+def FindAllPEFiles(data):
+    result = []
+    for position in FindAll(data, 'MZ'):
+        if len(data[position:]) > 0x40:
+            offset = struct.unpack('<I', (data[position + 0x3C:position + 0x40]))[0]
+            if data[position + offset:position + offset + 2] == 'PE':
+                result.append(position)
+    return result
+
+def PrefixIfNeeded(string, prefix=' '):
+    if string == '':
+        return string
+    else:
+        return prefix + string
+
+def GetInfoCarvedFile(data, position):
+    try:
+        info = ''
+        oPEtemp = pefile.PE(data=data[position:])
+        if oPEtemp.is_dll():
+            info = 'DLL'
+        elif oPEtemp.is_exe():
+            info = 'EXE'
+        elif oPEtemp.is_driver():
+            info = 'DRV'
+        if oPEtemp.FILE_HEADER.IMAGE_FILE_LARGE_ADDRESS_AWARE:
+            info += ' 64-bit'
+        else:
+            info += ' 32-bit'
+        overlayOffset = oPEtemp.get_overlay_data_start_offset()
+        dataPEFile = oPEtemp.write()
+        if overlayOffset == None:
+            lengthStripped = len(dataPEFile)
+            lengthWithOverlay = len(dataPEFile)
+        else:
+            lengthStripped = len(dataPEFile[:overlayOffset])
+            lengthWithOverlay = len(dataPEFile)
+        info += ' 0x%08x 0x%08x' % (position + lengthStripped - 1, position + lengthWithOverlay - 1)
+        if position + lengthWithOverlay == len(data):
+            info += ' (EOF)'
+    except:
+        info += ' parsing error'
+    return info
+
 def SingleFile(filename, signatures, options):
+    data = ReadFile(filename)
+    if options.locate == 'P':
+        for index, position in enumerate(FindAllPEFiles(data)):
+            print('%d: 0x%08x%s' % (index + 1, position, PrefixIfNeeded(GetInfoCarvedFile(data, position))))
+        return
+    elif options.locate != '':
+        try:
+            index = int(options.locate)
+        except:
+            print('Error with option locate: %s' % options.locate)
+            return
+        index -= 1
+        locations = FindAllPEFiles(data)
+        if index < 0 or index >= len(locations):
+            print('Error with index option locate: %s' % options.locate)
+            return
+        data = data[locations[index]:]
     if options.overview == 'r':
-        Resources(filename, options)
+        Resources(data, options)
     elif options.overview == 's':
-        Sections(filename, options)
+        Sections(data, options)
     elif options.getdata != '':
-        pe = GetPEObject(filename)
+        pe = pefile.PE(data=data)
         DumpFunction = GetDumpFunction(options)
         if options.getdata == 'o': # overlay
             overlayOffset = pe.get_overlay_data_start_offset()
@@ -706,6 +833,12 @@ def SingleFile(filename, signatures, options):
                 print('No overlay')
             else:
                 StdoutWriteChunked(DumpFunction(str(pe.write()[overlayOffset:])))
+        elif options.getdata == 's': # strip
+            overlayOffset = pe.get_overlay_data_start_offset()
+            if overlayOffset == None:
+                StdoutWriteChunked(DumpFunction(str(pe.write())))
+            else:
+                StdoutWriteChunked(DumpFunction(str(pe.write()[:overlayOffset])))
         else:
             parsed = ParseGetData(options.getdata)
             if parsed == None:
@@ -713,7 +846,7 @@ def SingleFile(filename, signatures, options):
                 return
             StdoutWriteChunked(DumpFunction(pe.get_data(parsed[0], parsed[1])))
     else:
-        SingleFileInfo(filename, signatures, options)
+        SingleFileInfo(filename, data, signatures, options)
 
 def FileContentsStartsWithMZ(filename):
     try:
@@ -755,7 +888,7 @@ def ScanFile(filename, signatures, minimumEntropy):
     if not FileContentsStartsWithMZ(filename):
         return
     try:
-        pe = GetPEObject(filename)
+        pe = pefile.PE(data=ReadFile(filename))
     except pefile.PEFormatError:
         oLogger.PrintAndLog(('%s', '%s'), (filename, 'PEFormatError'))
         return
@@ -811,6 +944,7 @@ def Main():
         pass
 
     oParser = optparse.OptionParser(usage='usage: %prog [options] [file/directory]\nEnvironment variable for options: PECHECK_OPTIONS\n' + __description__, version='%prog ' + __version__)
+    oParser.add_option('-m', '--man', action='store_true', default=False, help='Print manual')
     oParser.add_option('-d', '--db', default='', help='the PeID user db file, default userdb.txt in same directory as pecheck')
     oParser.add_option('-s', '--scan', action='store_true', default=False, help='scan folder')
     oParser.add_option('-e', '--entropy', type=float, default=7.0, help='the minimum entropy value for a file to be listed in scan mode (default 7.0)')
@@ -823,7 +957,13 @@ def Main():
     oParser.add_option('-A', '--asciidumprle', action='store_true', default=False, help='perform ascii dump with RLE')
     oParser.add_option('-S', '--strings', action='store_true', default=False, help='perform strings dump')
     oParser.add_option('-o', '--overview', type=str, default='', help='Accepted value: r for overview of resources, s for sections')
+    oParser.add_option('-l', '--locate', type=str, default='', help='Locate PE files inside binary data (P for list of MZ/PE headers)')
     (options, args) = oParser.parse_args(GetArgumentsUpdatedWithEnvironmentVariable('PECHECK_OPTIONS'))
+
+    if options.man:
+        oParser.print_help()
+        PrintManual()
+        return 0
 
     if len(args) > 1 or options.overview != '' and options.overview != 'r' and options.overview != 's':
         oParser.print_help()
