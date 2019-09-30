@@ -2,8 +2,8 @@
 
 __description__ = 'Tool to test a PDF file'
 __author__ = 'Didier Stevens'
-__version__ = '0.2.5'
-__date__ = '2018/07/05'
+__version__ = '0.2.6'
+__date__ = '2019/09/30'
 
 """
 
@@ -54,6 +54,7 @@ History:
   2018/01/15: bugfix ConfigParser privately reported
   2018/01/29: bugfix oPDFEOF.cntCharsAfterLastEOF when no %%EOF
   2018/07/05: V0.2.5 introduced cExpandFilenameArguments; renamed option literal to literalfilenames
+  2019/09/30: V0.2.6 color bugfix, thanks to Leo
 
 Todo:
   - update XML example (entropy, EOF)
@@ -353,7 +354,7 @@ class cCVE_2009_3459:
         self.count = 0
 
     def Check(self, lastName, word):
-        if (lastName == '/Colors' and word.isdigit() and int(word) > 2^24): # decided to alert when the number of colors is expressed with more than 3 bytes
+        if (lastName == '/Colors' and word.isdigit() and int(word) > 2**24): # decided to alert when the number of colors is expressed with more than 3 bytes
             self.count += 1
 
 def XMLAddAttribute(xmlDoc, name, value=None):

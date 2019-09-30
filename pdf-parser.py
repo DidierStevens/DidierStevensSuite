@@ -2,8 +2,8 @@
 
 __description__ = 'pdf-parser, use it to parse a PDF document'
 __author__ = 'Didier Stevens'
-__version__ = '0.7.2'
-__date__ = '2019/07/30'
+__version__ = '0.7.3'
+__date__ = '2019/09/26'
 __minimum_python_version__ = (2, 5, 1)
 __maximum_python_version__ = (3, 6, 3)
 
@@ -67,6 +67,7 @@ History:
   2019/03/01: V0.7.1 added ContainsName for correct keyword statistics (-a)
   2019/04/12: V0.7.2 Python 2.6.6 compatibility fix
   2019/07/30: bug fixes (including fixes Josef Hinteregger)
+  2019/09/26: V0.7.3 added multiple id selection to option -o; added man page (-m); added environment variable PDFPARSER_OPTIONS; bug fixes
 
 Todo:
   - handle printf todo
@@ -83,6 +84,7 @@ import sys
 import zipfile
 import time
 import os
+import textwrap
 if sys.version_info[0] >= 3:
     from io import StringIO
     import urllib.request
@@ -115,6 +117,27 @@ PDF_ELEMENT_STARTXREF = 5
 PDF_ELEMENT_MALFORMED = 6
 
 dumplinelength = 16
+
+def PrintManual():
+    manual = '''
+Manual:
+
+This manual is a work in progress.
+
+There is a free PDF analysis book:
+https://blog.didierstevens.com/2010/09/26/free-malicious-pdf-analysis-e-book/
+
+Option -o is used to select objects by id. Provide a single id or multiple ids separated by a comma (,).
+
+When environment variable PDFPARSER_OPTIONS is defined, the options it defines are added implicitely to the command line arguments.
+Use this to define options you want included with each use of pdf-parser.py.
+Like option -O, to parse stream objects (/ObjStm).
+By defining PDFPARSER_OPTIONS=-O, pdf-parser will always parse stream objects (when found).
+PS: this feature is experimental.
+
+'''
+    for line in manual.split('\n'):
+        print(textwrap.fill(line))
 
 #Convert 2 Bytes If Python 3
 def C2BIP3(string):
@@ -1282,6 +1305,16 @@ def ParseINIFile():
                 keywords.append(key)
     return keywords
 
+def MatchObjectID(id, selection):
+    return str(id) in selection.split(',')
+
+def GetArguments():
+    arguments = sys.argv[1:]
+    envvar = os.getenv('PDFPARSER_OPTIONS')
+    if envvar == None:
+        return arguments
+    return envvar.split(' ') + arguments
+
 def Main():
     """pdf-parser, use it to parse a PDF document
     """
@@ -1289,9 +1322,10 @@ def Main():
     global decoders
 
     oParser = optparse.OptionParser(usage='usage: %prog [options] pdf-file|zip-file|url\n' + __description__, version='%prog ' + __version__)
+    oParser.add_option('-m', '--man', action='store_true', default=False, help='Print manual')
     oParser.add_option('-s', '--search', help='string to search in indirect objects (except streams)')
     oParser.add_option('-f', '--filter', action='store_true', default=False, help='pass stream object through filters (FlateDecode, ASCIIHexDecode, ASCII85Decode, LZWDecode and RunLengthDecode only)')
-    oParser.add_option('-o', '--object', help='id of indirect object to select (version independent)')
+    oParser.add_option('-o', '--object', help='id(s) of indirect object(s) to select, use comma (,) to separate ids (version independent)')
     oParser.add_option('-r', '--reference', help='id of indirect object being referenced (version independent)')
     oParser.add_option('-e', '--elements', help='type of elements to select (cxtsi)')
     oParser.add_option('-w', '--raw', action='store_true', default=False, help='raw output for data and filters')
@@ -1317,7 +1351,12 @@ def Main():
     oParser.add_option('--decoders', type=str, default='', help='decoders to load (separate decoders with a comma , ; @file supported)')
     oParser.add_option('--decoderoptions', type=str, default='', help='options for the decoder')
     oParser.add_option('-k', '--key', help='key to search in dictionaries')
-    (options, args) = oParser.parse_args()
+    (options, args) = oParser.parse_args(GetArguments())
+
+    if options.man:
+        oParser.print_help()
+        PrintManual()
+        return 0
 
     if len(args) != 1:
         oParser.print_help()
@@ -1376,7 +1415,7 @@ def Main():
                 selectXref = True
                 selectTrailer = True
                 selectStartXref = True
-            if options.search or options.key:
+            if options.search or options.key or options.reference:
                 selectTrailer = True
 
         if options.type == '-':
@@ -1499,7 +1538,7 @@ def Main():
                             if result != None:
                                 savedRoot = result
                         elif options.yara == None and options.generateembedded == 0:
-                            if not options.search and not options.key or options.search and object.Contains(options.search):
+                            if not options.search and not options.key and not options.reference or options.search and object.Contains(options.search):
                                 if oPDFParseDictionary == None:
                                     print('trailer %s' % FormatOutput(object.content, options.raw))
                                 else:
@@ -1511,6 +1550,11 @@ def Main():
                                     result = oPDFParseDictionary.GetNested(options.key)
                                     if result != None:
                                         print(result)
+                            elif options.reference:
+                                for key, value in oPDFParseDictionary.Retrieve():
+                                    if value == [str(options.reference), '0', 'R']:
+                                        print('trailer')
+                                        oPDFParseDictionary.PrettyPrint('  ')
                     elif object.type == PDF_ELEMENT_STARTXREF and selectStartXref:
                         if not options.generate and options.yara == None and options.generateembedded == 0:
                             print('startxref %d' % object.index)
@@ -1520,13 +1564,16 @@ def Main():
                             if object.Contains(options.search):
                                 PrintObject(object, options)
                         elif options.key:
-                            oPDFParseDictionary = cPDFParseDictionary(object.content[1:], options.nocanonicalizedoutput)
+                            contentDictionary = object.ContainsStream()
+                            if not contentDictionary:
+                                contentDictionary = object.content[1:]
+                            oPDFParseDictionary = cPDFParseDictionary(contentDictionary, options.nocanonicalizedoutput)
                             if oPDFParseDictionary.parsed != None:
                                 result = oPDFParseDictionary.GetNested(options.key)
                                 if result != None:
                                     print(result)
                         elif options.object:
-                            if object.id == eval(options.object):
+                            if MatchObjectID(object.id, options.object):
                                 PrintObject(object, options)
                         elif options.reference:
                             if object.References(options.reference):
