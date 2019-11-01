@@ -2,8 +2,8 @@
 
 __description__ = 'Tool for displaying PE file info'
 __author__ = 'Didier Stevens'
-__version__ = '0.7.7'
-__date__ = '2019/09/17'
+__version__ = '0.7.8'
+__date__ = '2019/10/27'
 
 """
 
@@ -42,6 +42,8 @@ History:
   2019/09/13: V0.7.7 added strip (s) to option -g; added option -l
   2019/09/16: continued -l P
   2019/09/17: continue; added option -m
+  2019/09/28: V0.7.8 added MD5 hash to -l P report
+  2019/10/27: introduced environment variable DSS_DEFAULT_HASH_ALGORITHMS
 
 Todo:
 """
@@ -89,10 +91,14 @@ Use option -l to locate and select PE files embedded inside the provided file.
 Use -l P to get an overview of all embedded PE files, like this:
 
 C:\Demo>pecheck.py -l P sample.png.vir
-1: 0x00002ebb DLL 32-bit 0x00016eba 0x000270ba (EOF)
-2: 0x00016ebb DLL 64-bit 0x000270ba 0x000270ba (EOF)
+1: 0x00002ebb DLL 32-bit 0x00016eba 3bd4fcbee95711392260549669df7236 0x000270ba (EOF)
+2: 0x00016ebb DLL 64-bit 0x000270ba 6eede113112f85b0ae99a2210e07cdd0 0x000270ba (EOF)
 
-Then select an embedded PE file for further analysis, like this:
+The first column is the position of the embedded PE file, the fourth column is the end of the embedded PE file without overlay, and the sixth column is the end with overlay.
+The fifth column is the hash of the embedded PE file without overlay. By default, it's the MD5 hash, but this can be changed by setting environment variable DSS_DEFAULT_HASH_ALGORITHMS.
+Like this: set DSS_DEFAULT_HASH_ALGORITHMS=SHA256
+
+After producuing an overview of embedded PE files (with option -l P), select an embedded PE file for further analysis, like this:
 
 C:\Demo>pecheck.py -l 2 sample.png.vir
 
@@ -773,6 +779,42 @@ def PrefixIfNeeded(string, prefix=' '):
     else:
         return prefix + string
 
+class cHashCRC32():
+    def __init__(self):
+        self.crc32 = None
+
+    def update(self, data):
+        self.crc32 = zlib.crc32(data)
+
+    def hexdigest(self):
+        return '%08x' % (self.crc32 & 0xffffffff)
+
+def GetHashObjects(algorithms):
+    dHashes = {}
+
+    if algorithms == '':
+        algorithms = os.getenv('DSS_DEFAULT_HASH_ALGORITHMS', 'md5')
+    if ',' in algorithms:
+        hashes = algorithms.split(',')
+    else:
+        hashes = algorithms.split(';')
+    for name in hashes:
+        if name != 'crc32' and not name in hashlib.algorithms_available:
+            print('Error: unknown hash algorithm: %s' % name)
+            print('Available hash algorithms: ' + ' '.join(name for name in list(hashlib.algorithms_available) + ['crc32']))
+            return [], {}
+        elif name == 'crc32':
+            dHashes[name] = cHashCRC32()
+        else:
+            dHashes[name] = hashlib.new(name)
+
+    return hashes, dHashes
+
+def CalculateChosenHash(data):
+    hashes, dHashes = GetHashObjects('')
+    dHashes[hashes[0]].update(data)
+    return dHashes[hashes[0]].hexdigest(), hashes[0]
+
 def GetInfoCarvedFile(data, position):
     try:
         info = ''
@@ -792,10 +834,12 @@ def GetInfoCarvedFile(data, position):
         if overlayOffset == None:
             lengthStripped = len(dataPEFile)
             lengthWithOverlay = len(dataPEFile)
+            hashStripped, _ = CalculateChosenHash(dataPEFile)
         else:
             lengthStripped = len(dataPEFile[:overlayOffset])
             lengthWithOverlay = len(dataPEFile)
-        info += ' 0x%08x 0x%08x' % (position + lengthStripped - 1, position + lengthWithOverlay - 1)
+            hashStripped, _ = CalculateChosenHash(dataPEFile[:overlayOffset])
+        info += ' 0x%08x %s 0x%08x' % (position + lengthStripped - 1, hashStripped, position + lengthWithOverlay - 1)
         if position + lengthWithOverlay == len(data):
             info += ' (EOF)'
     except:

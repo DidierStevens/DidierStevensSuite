@@ -2,8 +2,8 @@
 
 __description__ = 'Cut a section of bytes out of a file'
 __author__ = 'Didier Stevens'
-__version__ = '0.0.9'
-__date__ = '2019/02/16'
+__version__ = '0.0.10'
+__date__ = '2019/10/28'
 
 """
 
@@ -23,6 +23,9 @@ History:
   2018/03/05: updated #e# expressions
   2018/11/07: 0.0.8 added options -A, -g, -G and --jsonoutput; added hexadecimal support for offset in cut-expression
   2019/02/16: 0.0.9 updated cut expression format
+  2019/07/22: 0.0.10 bugfix #e#chr
+  2019/10/10: added options prefix and suffix
+  2019/10/28: Python 3 fixes
 
 Todo:
 """
@@ -82,6 +85,8 @@ Finally, search string expressions (ASCII, UNICODE and hexadecimal) can be follo
 Examples:
 This cut-expression can be used to dump the first 256 bytes of a PE file located inside the stream: ['MZ']:0x100l
 This cut-expression can be used to dump the OLE file located inside the stream: [d0cf11e0]:
+
+Data can be added to the selected data using option -p --prefix or/and -s --suffix. The value for option -p and -s is a here document (#..., see later).
 
 By default the output uses the same representation as the input, but this can be changed to hex, ascii dump or base64 with options -x, -X, -a, -A, -b and -B.
 
@@ -144,6 +149,8 @@ Output:
 Or use option --literalfilenames.
 
 cut-bytes can process a file stored inside a (password protected) ZIP file too. To process the ZIP file itself, use option --noextraction. The default password is infected, and can be changed with option --password.
+
+This Python script was developed with Python 2.7 and tested with Python 2.7 and 3.6.
 
 '''
     for line in manual.split('\n'):
@@ -413,13 +420,16 @@ def CutData(stream, cutArgument):
 
 #Fix for http://bugs.python.org/issue11395
 def StdoutWriteChunked(data):
-    while data != '':
-        sys.stdout.write(data[0:10000])
-        try:
-            sys.stdout.flush()
-        except IOError:
-            return
-        data = data[10000:]
+    if sys.version_info[0] > 2:
+        sys.stdout.buffer.write(data)
+    else:
+        while data != '':
+            sys.stdout.write(data[0:10000])
+            try:
+                sys.stdout.flush()
+            except IOError:
+                return
+            data = data[10000:]
 
 def LoremIpsumSentence(minimum, maximum):
     words = ['lorem', 'ipsum', 'dolor', 'sit', 'amet', 'consectetur', 'adipiscing', 'elit', 'etiam', 'tortor', 'metus', 'cursus', 'sed', 'sollicitudin', 'ac', 'sagittis', 'eget', 'massa', 'praesent', 'sem', 'fermentum', 'dignissim', 'in', 'vel', 'augue', 'scelerisque', 'auctor', 'libero', 'nam', 'a', 'gravida', 'odio', 'duis', 'vestibulum', 'vulputate', 'quam', 'nec', 'cras', 'nibh', 'feugiat', 'ut', 'vitae', 'ornare', 'justo', 'orci', 'varius', 'natoque', 'penatibus', 'et', 'magnis', 'dis', 'parturient', 'montes', 'nascetur', 'ridiculus', 'mus', 'curabitur', 'nisl', 'egestas', 'urna', 'iaculis', 'lectus', 'maecenas', 'ultrices', 'velit', 'eu', 'porta', 'hac', 'habitasse', 'platea', 'dictumst', 'integer', 'id', 'commodo', 'mauris', 'interdum', 'malesuada', 'fames', 'ante', 'primis', 'faucibus', 'accumsan', 'pharetra', 'aliquam', 'nunc', 'at', 'est', 'non', 'leo', 'nulla', 'sodales', 'porttitor', 'facilisis', 'aenean', 'condimentum', 'rutrum', 'facilisi', 'tincidunt', 'laoreet', 'ultricies', 'neque', 'diam', 'euismod', 'consequat', 'tempor', 'elementum', 'lobortis', 'erat', 'ligula', 'risus', 'donec', 'phasellus', 'quisque', 'vivamus', 'pellentesque', 'tristique', 'venenatis', 'purus', 'mi', 'dictum', 'posuere', 'fringilla', 'quis', 'magna', 'pretium', 'felis', 'pulvinar', 'lacinia', 'proin', 'viverra', 'lacus', 'suscipit', 'aliquet', 'dui', 'molestie', 'dapibus', 'mollis', 'suspendisse', 'sapien', 'blandit', 'morbi', 'tellus', 'enim', 'maximus', 'semper', 'arcu', 'bibendum', 'convallis', 'hendrerit', 'imperdiet', 'finibus', 'fusce', 'congue', 'ullamcorper', 'placerat', 'nullam', 'eros', 'habitant', 'senectus', 'netus', 'turpis', 'luctus', 'volutpat', 'rhoncus', 'mattis', 'nisi', 'ex', 'tempus', 'eleifend', 'vehicula', 'class', 'aptent', 'taciti', 'sociosqu', 'ad', 'litora', 'torquent', 'per', 'conubia', 'nostra', 'inceptos', 'himenaeos']
@@ -671,13 +681,13 @@ def Interpret(expression):
         elif functionname == FUNCTIONNAME_CHR:
             if CheckFunction(functionname, arguments, 1, 2):
                 return None
-            number = CheckNumber(arguments[0], minimum=1, maximum=255)
+            number = CheckNumber(arguments[0], minimum=0, maximum=255)
             if number == None:
                 return None
             if len(arguments) == 1:
                 decoded += chr(number)
             else:
-                number2 = CheckNumber(arguments[1], minimum=1, maximum=255)
+                number2 = CheckNumber(arguments[1], minimum=0, maximum=255)
                 if number2 == None:
                     return None
                 decoded += ''.join([chr(n) for n in range(number, number2 + 1)])
@@ -709,7 +719,7 @@ def FilenameCheckHash(filename, literalfilename):
         if result == None:
             return FCH_ERROR, 'expression'
         else:
-            return FCH_DATA, result
+            return FCH_DATA, C2BIP3(result)
     elif filename.startswith('#'):
         return FCH_DATA, C2BIP3(filename[1:])
     else:
@@ -769,8 +779,8 @@ class cBinaryFile:
         return data
 
 def CutBytes(expression, filename, options):
+    data = cBinaryFile(filename, C2BIP3(options.password), options.noextraction, options.literalfilenames).Data()
     if options.grep or options.grepno:
-        data = cBinaryFile(filename, C2BIP3(options.password), options.noextraction, options.literalfilenames).Data()
         start = 0
         if options.jsonoutput:
             object = []
@@ -809,7 +819,7 @@ def CutBytes(expression, filename, options):
 
     else:
         if options.hexdump:
-            DumpFunction = HexDump
+            DumpFunction = lambda x: C2BIP3(HexDump(x))
         elif options.hexdumpnows:
             DumpFunction = lambda x: binascii.b2a_hex(x)
         elif options.base64:
@@ -817,14 +827,30 @@ def CutBytes(expression, filename, options):
         elif options.base64nows:
             DumpFunction = lambda x: Base64Dump(x, True)
         elif options.asciidump:
-            DumpFunction = HexAsciiDump
+            DumpFunction = lambda x: C2BIP3(HexAsciiDump(x, False))
         elif options.asciidumprle:
-            DumpFunction = lambda x: HexAsciiDump(x, True)
+            DumpFunction = lambda x: C2BIP3(HexAsciiDump(x, True))
         else:
             DumpFunction = lambda x: x
             IfWIN32SetBinary(sys.stdout)
 
-        StdoutWriteChunked(DumpFunction(CutData(cBinaryFile(filename, C2BIP3(options.password), options.noextraction, options.literalfilenames).Data(), expression)[0]))
+        data = CutData(data, expression)[0]
+
+        if options.prefix != '':
+            fch, prefix = FilenameCheckHash(options.prefix, False)
+            if fch != FCH_DATA:
+                raise Exception('Error %s parsing prefix: %s' % (prefix, options.prefix))
+            else:
+                data = prefix + data
+        
+        if options.suffix != '':
+            fch, suffix = FilenameCheckHash(options.suffix, False)
+            if fch != FCH_DATA:
+                raise Exception('Error %s parsing suffix: %s' % (suffix, options.suffix))
+            else:
+                data = data + suffix
+        
+        StdoutWriteChunked(DumpFunction(data))
 
 def Main():
     oParser = optparse.OptionParser(usage='usage: %prog [options] cut-expression [[#]file]\n' + __description__, version='%prog ' + __version__)
@@ -832,6 +858,8 @@ def Main():
     oParser.add_option('-g', '--grep', action='store_true', default=False, help='binary grep')
     oParser.add_option('-G', '--grepno', action='store_true', default=False, help='binary grep non-overlapping')
     oParser.add_option('--jsonoutput', action='store_true', default=False, help='produce json output')
+    oParser.add_option('-p', '--prefix', default='', help='Prefix expression')
+    oParser.add_option('-s', '--suffix', default='', help='Suffix expression')
     oParser.add_option('-d', '--dump', action='store_true', default=False, help='perform dump')
     oParser.add_option('-x', '--hexdump', action='store_true', default=False, help='perform hex dump')
     oParser.add_option('-X', '--hexdumpnows', action='store_true', default=False, help='perform hex dump without whitespace')
