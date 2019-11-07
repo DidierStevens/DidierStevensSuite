@@ -2,8 +2,8 @@
 
 __description__ = "Program to convert numbers into a string"
 __author__ = 'Didier Stevens'
-__version__ = '0.0.7'
-__date__ = '2018/12/15'
+__version__ = '0.0.8'
+__date__ = '2019/11/02'
 
 """
 
@@ -23,6 +23,8 @@ History:
   2018/08/25: 0.0.5 added option -S
   2018/12/15: 0.0.6 added option -t and changed option --end
   2018/12/15: 0.0.7 added option -T
+  2019/09/25: 0.0.8 added option -b
+  2019/11/02: added C2BIP3
 
 Todo:
 """
@@ -34,6 +36,7 @@ import re
 import sys
 import textwrap
 import math
+import os
 
 def PrintManual():
     manual = '''
@@ -110,6 +113,8 @@ Total      : count =     25 minimum =     47 maximum =    119 average =     97
 
 Output can be written to a file using option -o.
 
+Use option -b --binary when you expect the output to be binary data. This option will prevent linefeeds to be expanded to carriage return + linefeed on Windows (this tool produces text output by default).
+
 numbers-to-string.py needs at least 3 numbers per line to start extracting. Lines with less than 3 numbers are ignored. 3 numbers is the default minimum value, and can be changed using option -n.
 
 Errors that occur when evaluating the Python expression will be silently ignored. To have the tool raise these errors, use option -e.
@@ -130,6 +135,13 @@ Option --end can be used to provide the string (last occurence) that is the end 
 '''
     for line in manual.split('\n'):
         print(textwrap.fill(line))
+
+#Convert 2 Bytes If Python 3
+def C2BIP3(string):
+    if sys.version_info[0] > 2:
+        return bytes([ord(x) for x in string])
+    else:
+        return string
 
 def File2Strings(filename):
     try:
@@ -167,19 +179,46 @@ def IFF(expression, valueTrue, valueFalse):
     else:
         return CIC(valueFalse)
 
+def IfWIN32SetBinary(io):
+    if sys.platform == 'win32':
+        import msvcrt
+        msvcrt.setmode(io.fileno(), os.O_BINARY)
+
+#Fix for http://bugs.python.org/issue11395
+def StdoutWriteChunked(data):
+    if sys.version_info[0] > 2:
+        sys.stdout.buffer.write(C2BIP3(data))
+    else:
+        while data != '':
+            sys.stdout.write(data[0:10000])
+            try:
+                sys.stdout.flush()
+            except IOError:
+                return
+            data = data[10000:]
+
 class cOutput():
-    def __init__(self, filename=None):
+    def __init__(self, filename=None, binary=False):
         self.filename = filename
+        self.binary = binary
         if self.filename and self.filename != '':
-            self.f = open(self.filename, 'w')
+            self.f = open(self.filename, IFF(self.binary, 'wb', 'w'))
         else:
             self.f = None
+            if self.binary:
+                IfWIN32SetBinary(sys.stdout)
 
     def Line(self, line):
         if self.f:
-            self.f.write(line + '\n')
+            if self.binary:
+                self.f.write(line)
+            else:
+                self.f.write(line + '\n')
         else:
-            print(line)
+            if self.binary:
+                StdoutWriteChunked(line)
+            else:
+                print(line)
 
     def Close(self):
         if self.f:
@@ -192,9 +231,9 @@ def ExpandFilenameArguments(filenames):
 class cOutputResult():
     def __init__(self, options):
         if options.output:
-            self.oOutput = cOutput(options.output)
+            self.oOutput = cOutput(options.output, options.binary)
         else:
-            self.oOutput = cOutput()
+            self.oOutput = cOutput(binary=options.binary)
         self.options = options
 
     def Line(self, line):
@@ -377,6 +416,7 @@ https://DidierStevens.com'''
     oParser.add_option('-S', '--statistics', action='store_true', default=False, help='Generate statistics')
     oParser.add_option('-t', '--table', type=str, default='', help='Translation table')
     oParser.add_option('-T', '--begintable', type=str, default='', help='Begin translation table')
+    oParser.add_option('-b', '--binary', action='store_true', default=False, help='Produce binary output')
     oParser.add_option('--grep', type=str, default='', help='Grep expression')
     oParser.add_option('--grepoptions', type=str, default='', help='Grep options')
     oParser.add_option('--begin', type=str, default='', help='Begin substring')
@@ -388,6 +428,9 @@ https://DidierStevens.com'''
         PrintManual()
         return
 
+    if options.statistics and options.binary:
+        print('Options statistics and binary are mutually exclusive!')
+        return
     if len(args) == 0:
         NumbersToString('', [''], options)
     elif len(args) == 1 and not options.statistics:
