@@ -2,8 +2,8 @@
 
 __description__ = 'This is essentialy a wrapper for the struct module'
 __author__ = 'Didier Stevens'
-__version__ = '0.0.9'
-__date__ = '2019/07/15'
+__version__ = '0.0.10'
+__date__ = '2019/11/08'
 
 """
 Source code put in public domain by Didier Stevens, no Copyright
@@ -41,6 +41,8 @@ History:
   2019/03/25: added library & -f name= ; added select remainder (-s r)
   2019/04/18: added FiletimeUTC; added support for annotations to library files
   2019/07/15: 0.0.9 added tlv format parsing
+  2019/11/03: 0.0.10 added bitstream support
+  2019/11/08: added multibits for bitstream
 
 Todo:
 """
@@ -210,6 +212,17 @@ File: registry.blob.bin
  8:     0x20   735 '0\x82\x02\xdb0\x82\x01\xc3\xa0\x03\x02\
 
 This command parses the binary blob of a certificate found inside the Windows registry. Each record consists of 3 little-endian 32-bit integers (<III) followed by data. The first integer (index 0), the PropID, is the type (t:0) and the third integer (index 2) is the length (l:2). This is the length of the value (data).
+
+This tool can also extract single bits and join them into a bitstream. To achieve this, start the format specifier with bitstream= and provide values for format (f:), bits (b:) and join (j:) separated by a comma (,).
+Like this example:
+
+C:\Demo>format-bytes.py -f "bitstream=f:<H,b:0,j:<" stego.wav
+
+The bytes in file stego.wav are parsed as little-endian, unsigned 16-bit integers (<H) because of format specifier f:<H.
+For each integer, the least significant bit is taken (bits specifier b:0) and then joined into bytes from least significant bit to most significant bit (join specifier j:<).
+
+:b can take several bit positions, separated by ;, like this: b:0;1.
+:j can be < or >.
 
 Format strings can be stored inside a library file. A library file has the name of the program (format-bytes) and extension .library. Library files can be placed in the same directory as the program, and/or the current directory.
 A library file is a text file. Each format string has a name and takes one line: name=formatstring.
@@ -439,6 +452,14 @@ This cut-expression can be used to dump the OLE file located inside the file con
         print(textwrap.fill(line, 79))
 
 LIBRARY_EXTENSION = '.library'
+
+KEYWORD_FORMAT = 'format'
+KEYWORD_TLV = 'tlv'
+KEYWORD_TYPE = 'type'
+KEYWORD_LENGTH = 'length'
+KEYWORD_BITSTREAM = 'bitstream'
+KEYWORD_BITS = 'bits'
+KEYWORD_JOIN = 'join'
 
 dLibrary = {}
 
@@ -1458,18 +1479,29 @@ def ParseFormat(formatvalue):
     annotations = ''
     representation = ''
     remainder = False
-    tlv = None
+    special = None
     if formatvalue.startswith('name='):
         formatvalue, annotations = Library(formatvalue[5:])
-    if formatvalue.startswith('tlv='):
-        tlv = {}
-        for element in formatvalue[4:].split(','):
+    if formatvalue.startswith(KEYWORD_TLV + '='):
+        special = {KEYWORD_FORMAT: KEYWORD_TLV}
+        for element in formatvalue[len(KEYWORD_TLV + '='):].split(','):
             if element.startswith('f:'):
                 format = element[2:]
             elif element.startswith('t:'):
-                tlv['type'] = int(element[2:])
+                special[KEYWORD_TYPE] = int(element[2:])
             elif element.startswith('l:'):
-                tlv['length'] = int(element[2:])
+                special[KEYWORD_LENGTH] = int(element[2:])
+            else:
+                raise
+    elif formatvalue.startswith(KEYWORD_BITSTREAM + '='):
+        special = {KEYWORD_FORMAT: KEYWORD_BITSTREAM}
+        for element in formatvalue[len(KEYWORD_BITSTREAM + '='):].split(','):
+            if element.startswith('f:'):
+                format = element[2:]
+            elif element.startswith('b:'):
+                special[KEYWORD_BITS] = [int(number) for number in element[2:].split(';')]
+            elif element.startswith('j:'):
+                special[KEYWORD_JOIN] = element[2:]
             else:
                 raise
     else:
@@ -1482,7 +1514,7 @@ def ParseFormat(formatvalue):
             format = format[:-1]
             remainder = True
 
-    return SearchAndReplaceFormat(format), representation, annotations, remainder, tlv
+    return SearchAndReplaceFormat(format), representation, annotations, remainder, special
 
 def FindAll(data, sub):
     result = []
@@ -1505,7 +1537,7 @@ def ParseAnnotations(annotations, dAnnotations):
 def FormatBytesSingle(filename, cutexpression, content, options):
     MergeUserLibrary()
 
-    format, representation, annotations, remainder, tlv = ParseFormat(options.format)
+    format, representation, annotations, remainder, special = ParseFormat(options.format)
 
     dAnnotations = {}
     if options.annotations != '':
@@ -1516,7 +1548,7 @@ def FormatBytesSingle(filename, cutexpression, content, options):
     oBinaryFile = cBinaryFile(filename, C2BIP3(options.password), options.noextraction, options.literalfilenames, content)
     if cutexpression == '':
         if format != '':
-            if remainder or tlv != None:
+            if remainder or special != None:
                 data = oBinaryFile.read()
             else:
                 data = oBinaryFile.read(struct.calcsize(format))
@@ -1528,12 +1560,14 @@ def FormatBytesSingle(filename, cutexpression, content, options):
         data = CutData(oBinaryFile.read(), cutexpression)
     oBinaryFile.close()
 
-    if filename != '' and options.select == '':
+    dumpData = options.select != '' or special != None and special[KEYWORD_FORMAT] == KEYWORD_BITSTREAM
+
+    if filename != '' and not dumpData:
         print('File: %s%s' % (filename, IFF(oBinaryFile.extracted, ' (extracted)', '')))
     if format == '' and options.find == '':
         print('s:signed u:unsigned l:little-endian b:big-endian m:mixed-endian')
     if format != '':
-        if options.select != '':
+        if dumpData:
             if options.dump:
                 DumpFunction = lambda x:x
                 IfWIN32SetBinary(sys.stdout)
@@ -1545,7 +1579,7 @@ def FormatBytesSingle(filename, cutexpression, content, options):
                 DumpFunction = HexAsciiDump
 
         selectionCounter = 0
-        if tlv == None:
+        if special == None:
             size = struct.calcsize(format)
             for index, element in enumerate(struct.unpack(format, data[0:size])):
                 index += 1
@@ -1587,22 +1621,22 @@ def FormatBytesSingle(filename, cutexpression, content, options):
                     oDump = cDump(remainderx100)
                     print(oDump.HexAsciiDump())
                     FormatBytesData(remainderx100, -1, options)
-        else:
+        elif special[KEYWORD_FORMAT] == KEYWORD_TLV:
             size = struct.calcsize(format)
             index = 0
             while len(data) >= size:
                 index += 1
                 fields = struct.unpack(format, data[0:size])
                 data = data[size:]
-                value = data[:fields[tlv['length']]]
-                data = data[fields[tlv['length']]:]
+                value = data[:fields[special[KEYWORD_LENGTH]]]
+                data = data[fields[special[KEYWORD_LENGTH]]:]
                 if options.select != '':
                     if options.select != 'r' and int(options.select) == index:
                         StdoutWriteChunked(DumpFunction(value))
                         selectionCounter += 1
                 else:
-		                line = '%2d: %8s %5d %s' % (index, NumberToHex(fields[tlv['type']]), fields[tlv['length']], repr(value)[0:40])
-		                print(line)
+                    line = '%2d: %8s %5d %s' % (index, NumberToHex(fields[special[KEYWORD_TYPE]]), fields[special[KEYWORD_LENGTH]], repr(value)[0:40])
+                    print(line)
             if options.select == 'r' and len(data) > 0:
                 StdoutWriteChunked(DumpFunction(data))
                 selectionCounter += 1
@@ -1613,6 +1647,41 @@ def FormatBytesSingle(filename, cutexpression, content, options):
                     oDump = cDump(remainderx100)
                     print(oDump.HexAsciiDump())
                     FormatBytesData(remainderx100, -1, options)
+        else:
+            size = struct.calcsize(format)
+            index = 0
+            bits = ''
+            oResult = DataIO()
+            if special[KEYWORD_JOIN] == '<':
+                joinLittleendian = True
+            elif special[KEYWORD_JOIN] == '>':
+                joinLittleendian = False
+            else:
+                raise
+            while len(data) - size * index >= size:
+                fields = struct.unpack(format, data[index * size:(index + 1) * size])
+                for bit in special[KEYWORD_BITS]:
+                    bitPattern = 2 ** bit
+                    if fields[0] & bitPattern == bitPattern:
+                        bit = '1'
+                    else:
+                        bit = '0'
+                    if joinLittleendian:
+                        bits = bit + bits
+                    else:
+                        bits = bits + bit
+                    if len(bits) == 8:
+                        oResult.write(C2BIP3(chr(int(bits, 2))))
+                        bits = ''
+                index += 1
+            if len(bits) != 0:
+                padding = '0' * (8 - len(bits))
+                if joinLittleendian:
+                    bits = padding + bits
+                else:
+                    bits = bits + padding
+                oResult.write(C2BIP3(chr(int(bits, 2))))
+            StdoutWriteChunked(DumpFunction(oResult.getvalue()))
 
         if options.select != '' and selectionCounter == 0:
             print('Warning: no item was selected with expression %s' % options.select)
