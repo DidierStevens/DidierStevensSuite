@@ -2,8 +2,8 @@
 
 __description__ = '&H decoder for oledump.py'
 __author__ = 'Didier Stevens'
-__version__ = '0.0.1'
-__date__ = '2014/12/19'
+__version__ = '0.0.2'
+__date__ = '2019/11/24'
 
 """
 
@@ -13,6 +13,7 @@ Use at your own risk
 
 History:
   2014/12/19: start
+  2019/11/24: Python 3 fixes
 
 Todo:
 """
@@ -31,7 +32,10 @@ class cAmpersandHexDecoder(cDecoderParent):
         return not self.done
 
     def Decode(self):
-        decoded = ''.join([chr(int(s[2:], 16)) for s in re.compile('&H[0-9a-f]{2}', re.IGNORECASE).findall(self.stream)])
+        if sys.version_info[0] > 2:
+            decoded = bytes([int(s[2:], 16) for s in re.compile(b'&H[0-9a-f]{2}', re.IGNORECASE).findall(self.stream)])
+        else:
+            decoded = ''.join([chr(int(s[2:], 16)) for s in re.compile('&H[0-9a-f]{2}', re.IGNORECASE).findall(self.stream)])
         self.name = '&H decoder'
         self.done = True
         return decoded

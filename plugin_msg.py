@@ -2,8 +2,8 @@
 
 __description__ = 'MSG plugin for oledump.py'
 __author__ = 'Didier Stevens'
-__version__ = '0.0.3'
-__date__ = '2018/07/14'
+__version__ = '0.0.4'
+__date__ = '2019/11/04'
 
 """
 
@@ -16,6 +16,7 @@ History:
   2017/12/17: 0.0.2 added options -d and -a
   2017/12/30: removed option -a (becomes default) and -d; and added option -n
   2018/07/14: 0.0.3 added option -k
+  2019/11/04: 0.0.4 added tag 1009
 
 Todo:
 """
@@ -68,6 +69,7 @@ class cMSG(cPluginParent):
           '0E29': 'Recvd account2(?)',
           '1000': 'Message body',
           '1008': 'RTF sync body tag',
+          '1009': 'RTF Compressed',
           '1035': 'Message ID (?)',
           '1046': 'Sender email(?)',
           '3001': 'Display name',

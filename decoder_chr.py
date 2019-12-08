@@ -2,8 +2,8 @@
 
 __description__ = 'CHR decoder for oledump.py'
 __author__ = 'Didier Stevens'
-__version__ = '0.0.1'
-__date__ = '2014/12/19'
+__version__ = '0.0.2'
+__date__ = '2019/11/24'
 
 """
 
@@ -13,6 +13,7 @@ Use at your own risk
 
 History:
   2014/12/31: start
+  2019/11/24: Python 3 fixes
 
 Todo:
 """
@@ -31,7 +32,10 @@ class cCHRDecoder(cDecoderParent):
         return not self.done
 
     def Decode(self):
-        decoded = ''.join([chr(int(s[4:-1])) for s in re.compile('chr\(\d+\)', re.IGNORECASE).findall(SearchAndDecompress(self.stream))])
+        if sys.version_info[0] > 2:
+            decoded = bytes([int(s[4:-1]) for s in re.compile('chr\(\d+\)', re.IGNORECASE).findall(SearchAndDecompress(self.stream))])
+        else:
+            decoded = ''.join([chr(int(s[4:-1])) for s in re.compile('chr\(\d+\)', re.IGNORECASE).findall(SearchAndDecompress(self.stream))])
         self.name = 'CHR decoder'
         self.done = True
         return decoded

@@ -2,8 +2,8 @@
 
 __description__ = 'XOR 1 byte decoder for oledump.py'
 __author__ = 'Didier Stevens'
-__version__ = '0.0.1'
-__date__ = '2014/12/14'
+__version__ = '0.0.2'
+__date__ = '2019/11/24'
 
 """
 
@@ -13,6 +13,7 @@ Use at your own risk
 
 History:
   2014/12/14: start
+  2019/11/24: Python 3 fixes
 
 Todo:
 """
@@ -38,7 +39,10 @@ class cXOR1Decoder(cDecoderParent):
         return self.keyXOR1 != 0x100
 
     def Decode(self):
-        decoded = ''.join([chr(ord(c) ^ self.keyXOR1) for c in self.stream])
+        if sys.version_info[0] > 2:
+            decoded = bytes([(c ^ self.keyXOR1) for c in self.stream])
+        else:
+            decoded = ''.join([chr(ord(c) ^ self.keyXOR1) for c in self.stream])
         self.name = 'XOR 1 byte key 0x%02X' % self.keyXOR1
         self.keyXOR1 += 1
         return decoded

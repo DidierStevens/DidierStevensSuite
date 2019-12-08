@@ -2,8 +2,8 @@
 
 __description__ = 'BIFF plugin for oledump.py'
 __author__ = 'Didier Stevens'
-__version__ = '0.0.5'
-__date__ = '2019/03/06'
+__version__ = '0.0.6'
+__date__ = '2019/11/05'
 
 """
 
@@ -22,6 +22,7 @@ History:
   2018/10/26: continue
   2019/01/05: 0.0.4 added option -x
   2019/03/06: 0.0.5 enhanced parsing of formula expressions
+  2019/11/05: 0.0.6 Python 3 support
 
 Todo:
 """
@@ -46,16 +47,16 @@ def HexASCII(data, length=16):
                     result.append(CombineHexASCII(hexDump, asciiDump, length))
                 hexDump = '%08X:' % i
                 asciiDump = ''
-            hexDump += ' %02X' % ord(b)
-            asciiDump += IFF(ord(b) >= 32, b, '.')
+            hexDump += ' %02X' % P23Ord(b)
+            asciiDump += IFF(P23Ord(b) >= 32, b, '.')
         result.append(CombineHexASCII(hexDump, asciiDump, length))
     return result
 
 def StringsASCII(data):
-    return re.findall('[^\x00-\x08\x0A-\x1F\x7F-\xFF]{4,}', data)
+    return re.findall(b'[^\x00-\x08\x0A-\x1F\x7F-\xFF]{4,}', data)
 
 def StringsUNICODE(data):
-    return [foundunicodestring.replace('\x00', '') for foundunicodestring, dummy in re.findall('(([^\x00-\x08\x0A-\x1F\x7F-\xFF]\x00){4,})', data)]
+    return [foundunicodestring.replace('\x00', '') for foundunicodestring, dummy in re.findall(b'(([^\x00-\x08\x0A-\x1F\x7F-\xFF]\x00){4,})', data)]
 
 def Strings(data, encodings='sL'):
     dStrings = {}
@@ -66,7 +67,7 @@ def Strings(data, encodings='sL'):
             dStrings[encoding] = StringsUNICODE(data)
     return dStrings
 
-def ContainsWord(word, expression):
+def ContainsWP23Ord(word, expression):
     return struct.pack('<H', word) in expression
 
 #https://docs.microsoft.com/en-us/openspecs/office_file_formats/ms-xls/6e5eed10-5b77-43d6-8dd0-37345f8654ad
@@ -569,19 +570,19 @@ def ParseExpression(expression):
 
     result = ''
     while len(expression) > 0:
-        ptgid = ord(expression[0])
+        ptgid = P23Ord(expression[0])
         expression = expression[1:]
         if ptgid in dTokens:
             result += dTokens[ptgid] + ' '
             if ptgid == 0x17:
-                length = ord(expression[0])
+                length = P23Ord(expression[0])
                 expression = expression[1:]
                 if expression[0] == '\x00': # probably BIFF8 -> UNICODE (compressed)
                     expression = expression[1:]
                 result += '"%s" ' % expression[:length]
                 expression = expression[length:]
             elif ptgid == 0x19:
-                grbit = ord(expression[0])
+                grbit = P23Ord(expression[0])
                 expression = expression[1:]
                 if grbit & 0x04:
                     result += 'CHOOSE '
@@ -591,25 +592,25 @@ def ParseExpression(expression):
             elif ptgid == 0x16 or ptgid == 0x0e:
                 pass
             elif ptgid == 0x1e:
-                result += '%d ' % (ord(expression[0]) + ord(expression[1]) * 0x100)
+                result += '%d ' % (P23Ord(expression[0]) + P23Ord(expression[1]) * 0x100)
                 expression = expression[2:]
             elif ptgid == 0x41:
-                functionid = ord(expression[0]) + ord(expression[1]) * 0x100
+                functionid = P23Ord(expression[0]) + P23Ord(expression[1]) * 0x100
                 result += '%s (0x%04x) ' % (dFunctions.get(functionid, '*UNKNOWN FUNCTION*'), functionid)
                 expression = expression[2:]
             elif ptgid == 0x22 or ptgid == 0x42:
-                functionid = ord(expression[1]) + ord(expression[2]) * 0x100
-                result += 'args %d func %s (0x%04x) ' % (ord(expression[0]), dFunctions.get(functionid, '*UNKNOWN FUNCTION*'), functionid)
+                functionid = P23Ord(expression[1]) + P23Ord(expression[2]) * 0x100
+                result += 'args %d func %s (0x%04x) ' % (P23Ord(expression[0]), dFunctions.get(functionid, '*UNKNOWN FUNCTION*'), functionid)
                 expression = expression[3:]
             elif ptgid == 0x23:
-                result += '%04x ' % (ord(expression[0]) + ord(expression[1]) * 0x100)
+                result += '%04x ' % (P23Ord(expression[0]) + P23Ord(expression[1]) * 0x100)
                 expression = expression[14:]
             elif ptgid == 0x1f:
                 result += 'FLOAT '
                 expression = expression[8:]
             elif ptgid == 0x26:
                 expression = expression[4:]
-                expression = expression[ord(expression[0]) + ord(expression[1]) * 0x100:]
+                expression = expression[P23Ord(expression[0]) + P23Ord(expression[1]) * 0x100:]
                 result += 'REFERENCE-EXPRESSION '
             elif ptgid == 0x01:
                 formatcodes = 'HH'
@@ -628,10 +629,10 @@ def ParseExpression(expression):
         else:
             result += '*UNKNOWN TOKEN* '
             break
-    if expression == '':
+    if expression == b'':
         return result
     else:
-        functions = [dFunctions[functionid] for functionid in [0x6E, 0x95] if ContainsWord(functionid, expression)]
+        functions = [dFunctions[functionid] for functionid in [0x6E, 0x95] if ContainsWP23Ord(functionid, expression)]
         if functions != []:
             message = ' Could contain following functions: ' + ','.join(functions) + ' -'
         else:
@@ -928,7 +929,7 @@ class cBIFF(cPluginParent):
             if options.find.startswith('0x'):
                 options.find = binascii.a2b_hex(options.find[2:])
 
-            while stream != '':
+            while len(stream) > 0:
                 formatcodes = 'HH'
                 formatsize = struct.calcsize(formatcodes)
                 opcode, length = struct.unpack(formatcodes, stream[0:formatsize])
@@ -955,34 +956,34 @@ class cBIFF(cPluginParent):
 
                 # FORMULA record #a# difference BIFF4 and BIFF5+
                 if opcode == 0x18 and len(data) >= 16:
-                    if ord(data[0]) & 0x20:
+                    if P23Ord(data[0]) & 0x20:
                         dBuildInNames = {1: 'Auto_Open', 2: 'Auto_Close'}
-                        code = ord(data[14])
+                        code = P23Ord(data[14])
                         if code == 0: #a# hack with BIFF8 Unicode
-                            code = ord(data[15])
+                            code = P23Ord(data[15])
                         line += ' - build-in-name %d %s' % (code, dBuildInNames.get(code, '?'))
                     else:
                         pass
-                        line += ' - %s' % (data[14:14+ord(data[3])])
+                        line += ' - %s' % (data[14:14+P23Ord(data[3])])
 
                 # BOUNDSHEET record
                 if opcode == 0x85 and len(data) >= 6:
                     dSheetType = {0: 'worksheet or dialog sheet', 1: 'Excel 4.0 macro sheet', 2: 'chart', 6: 'Visual Basic module'}
-                    if ord(data[5]) == 1:
+                    if P23Ord(data[5]) == 1:
                         macros4Found = True
                     dSheetState = {0: 'visible', 1: 'hidden', 2: 'very hidden'}
-                    line += ' - %s, %s' % (dSheetType.get(ord(data[5]), '%02x' % ord(data[5])), dSheetState.get(ord(data[4]), '%02x' % ord(data[4])))
+                    line += ' - %s, %s' % (dSheetType.get(P23Ord(data[5]), '%02x' % P23Ord(data[5])), dSheetState.get(P23Ord(data[4]), '%02x' % P23Ord(data[4])))
 
                 # STRING record
                 if opcode == 0x207 and len(data) >= 4:
-                    values = Strings(data[3:]).values()
-                    strings = ''
+                    values = list(Strings(data[3:]).values())
+                    strings = b''
                     if values[0] != []:
-                        strings += ' '.join(values[0])
+                        strings += b' '.join(values[0])
                     if values[1] != []:
-                        if strings != '':
-                            strings += ' '
-                        strings += ' '.join(values[1])
+                        if strings != b'':
+                            strings += b' '
+                        strings += b' '.join(values[1])
                     line += ' - %s' % strings
 
                 if options.find == '' and options.opcode == '' and not options.xlm or options.opcode != '' and options.opcode.lower() in line.lower() or options.find != '' and options.find in data or options.xlm and opcode in [0x06, 0x18, 0x85, 0x207]:

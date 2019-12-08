@@ -2,8 +2,8 @@
 
 __description__ = 'ROL 1 byte decoder for oledump.py'
 __author__ = 'Didier Stevens'
-__version__ = '0.0.1'
-__date__ = '2014/12/16'
+__version__ = '0.0.2'
+__date__ = '2019/11/24'
 
 """
 
@@ -13,6 +13,7 @@ Use at your own risk
 
 History:
   2014/12/16: start
+  2019/11/24: Python 3 fixes
 
 Todo:
 """
@@ -38,7 +39,10 @@ class cROL1Decoder(cDecoderParent):
         return self.keyROL1 != 0x08
 
     def Decode(self):
-        decoded = ''.join([chr(((ord(c) << self.keyROL1) | (ord(c) >> (8 - self.keyROL1))) & 0xFF) for c in self.stream])
+        if sys.version_info[0] > 2:
+            decoded = bytes([(((c << self.keyROL1) | (c >> (8 - self.keyROL1))) & 0xFF) for c in self.stream])
+        else:
+            decoded = ''.join([chr(((ord(c) << self.keyROL1) | (ord(c) >> (8 - self.keyROL1))) & 0xFF) for c in self.stream])
         self.name = 'ROL 1 byte key 0x%02X' % self.keyROL1
         self.keyROL1 += 1
         return decoded

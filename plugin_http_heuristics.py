@@ -2,8 +2,8 @@
 
 __description__ = 'HTTP Heuristics plugin for oledump.py'
 __author__ = 'Didier Stevens'
-__version__ = '0.0.10'
-__date__ = '2018/10/13'
+__version__ = '0.0.11'
+__date__ = '2019/11/05'
 
 """
 
@@ -27,12 +27,14 @@ History:
   2015/04/01: 0.0.8 added PreProcess
   2016/12/11: 0.0.9 added iOffset loop
   2018/10/13: 0.0.10 changed XOR logic, added options (-e -k)
+  2019/11/05: 0.0.11 Python 3 support
 
 Todo:
 """
 
 import re
 import binascii
+import codecs
 
 def ReplaceFunction(match):
     try:
@@ -173,7 +175,7 @@ class cHTTPHeuristics(cPluginParent):
             resultHttp = [line for line in self.BruteforceDecode(result) if StartsWithHTTP(line)]
 
         if resultHttp == []:
-            resultHttp = [line.decode('rot13') for line in self.Strings() if ContainsHTTP(line.decode('rot13'))]
+            resultHttp = [codecs.encode(line, 'rot-13') for line in self.Strings() if ContainsHTTP(codecs.encode(line, 'rot-13'))]
         else:
             return resultHttp
 
