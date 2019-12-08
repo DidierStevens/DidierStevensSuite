@@ -2,8 +2,8 @@
 
 __description__ = "Program to convert numbers into a string"
 __author__ = 'Didier Stevens'
-__version__ = '0.0.8'
-__date__ = '2019/11/02'
+__version__ = '0.0.9'
+__date__ = '2019/12/08'
 
 """
 
@@ -25,6 +25,7 @@ History:
   2018/12/15: 0.0.7 added option -T
   2019/09/25: 0.0.8 added option -b
   2019/11/02: added C2BIP3
+  2019/12/08: 0.0.9 Python 3 bug fix
 
 Todo:
 """
@@ -297,6 +298,7 @@ def CalculateStatistics(numbers):
     return (len(numbers), min(numbers), max(numbers), sum(numbers) / len(numbers))
 
 def Chr(number, options, translation):
+    number = int(number)
     try:
         if options.table != '':
             return options.table[number]
@@ -368,6 +370,7 @@ def NumbersToStringSingle(function, filenames, oOutput, options):
                             result = ''.join(map(ChrFunction, [eval(function) for n in map(int, results)]))
                             error = False
                         except:
+                            raise
                             if options.error:
                                 print('n = %d' % n)
                                 raise
