@@ -2,8 +2,8 @@
 
 __description__ = 'Analyze OLE files (Compound Binary Files)'
 __author__ = 'Didier Stevens'
-__version__ = '0.0.43'
-__date__ = '2019/11/24'
+__version__ = '0.0.44'
+__date__ = '2019/12/18'
 
 """
 
@@ -89,6 +89,7 @@ History:
   2019/11/04: fixed plugin path when compiled with pyinstaller
   2019/11/05: Python 3 support
   2019/11/24: changed HeuristicDecompress; Python 3 fixes
+  2019/12/18: 0.0.44 added option -f
 
 Todo:
 """
@@ -365,6 +366,28 @@ To extract the embedded file, use option -e and redirect the output to a file li
 C:\Demo>oledump.py -s 6 -e Book1-insert-object-calc-rol3.exe.xls > extracted.bin
 
 Use option --storages to display storages (by default, oledump only lists streams).
+
+Option -f can be used to find embedded OLE files. This is useful, for example, in the following scenario:
+AutoCAD drawing files (.dwg) can contain VBA macros. Although the .dwg file format is a proprietary format, VBA macros are stored as an embedded OLE file. The header of a DWG file contains a pointer to the embedded OLE file, but since an OLE file starts with a MAGIC sequence (D0CF11E0), you can just scan the input file for this sequence.
+This can be done using option -f (--find). This option takes a value: letter l or a positive integer.
+To have an overview of embedded OLE files, use option "-f l" (letter l) like this:
+
+C:\Demo>oledump.py -f l Drawing1vba.dwg
+Position of potential embedded OLE files:
+ 1 0x00008090
+ 
+This will report the position of every (potential) embedded OLE file inside the input file. Here you can see that there is one file at position 0x8090.
+You can then select this file and analyze it, using -f 1 (integer 1):
+
+C:\Demo>oledump.py -f 1 Drawing1vba.dwg
+  1:       374 'VBA_Project/PROJECT'
+  2:        38 'VBA_Project/PROJECTwm'
+  3: M    1255 'VBA_Project/VBA/ThisDrawing'
+  4:      1896 'VBA_Project/VBA/_VBA_PROJECT'
+  5:       315 'VBA_Project/VBA/dir'
+  6:        16 'VBA_Project_Version'
+  
+And then you can use option -s to select streams and analyze them.
 
 Analyzing the content of streams (and VBA macros) can be quite challenging. To help with the analysis, oledump provides support for plugins and YARA rules.
 
@@ -2002,85 +2025,105 @@ def OLEDump(filename, options):
     else:
         oStringIO = DataIO(open(filename, 'rb').read())
 
-    magic = oStringIO.read(6)
-    oStringIO.seek(0)
-    if magic[0:4] == OLEFILE_MAGIC:
-        ole = olefile.OleFileIO(oStringIO)
-        returnCode, selectionCounter = OLESub(ole, '', rules, options)
-        PrintWarningSelection(options.select, selectionCounter)
-        ole.close()
-    elif magic[0:2] == b'PK':
-        oZipfile = zipfile.ZipFile(oStringIO, 'r')
-        counter = 0
-        selectionCounterTotal = 0
-        oleFileFound = False
-        OPCFound = False
-        for info in oZipfile.infolist():
-            oZipContent = oZipfile.open(info, 'r')
-            content = oZipContent.read()
-            if info.filename == '[Content_Types].xml':
-                OPCFound = True
-            if content[0:4] == OLEFILE_MAGIC:
-                letter = chr(P23Ord('A') + counter)
-                counter += 1
-                if options.select == '':
-                    if not options.quiet and not options.jsonoutput:
-                        print('%s: %s' % (letter, info.filename))
-                ole = olefile.OleFileIO(DataIO(content))
-                returnCode, selectionCounter = OLESub(ole, letter, rules, options)
-                selectionCounterTotal += selectionCounter
-                oleFileFound = True
-                ole.close()
-            oZipContent.close()
-        if not oleFileFound:
-            print('Warning: no OLE file was found inside this ZIP container%s' % IFF(OPCFound, ' (OPC)', ''))
-        PrintWarningSelection(options.select, selectionCounterTotal)
-        oZipfile.close()
-    else:
-        data = oStringIO.read()
-        oStringIO.seek(0)
-        if b'<?xml' in data:
-            try:
-                oXML = xml.dom.minidom.parse(oStringIO)
-            except:
-                print('Error: parsing %s as XML.' % filename)
-                return -1
-            counter = 0
-            for oElement in oXML.getElementsByTagName('*'):
-                if oElement.firstChild and oElement.firstChild.nodeValue:
-                    try:
-                        data = binascii.a2b_base64(oElement.firstChild.nodeValue)
-                    except binascii.Error:
-                        data = ''
-                    except UnicodeEncodeError:
-                        data = ''
-                    content = C2BIP3(data)
-                    if content.startswith(ACTIVEMIME_MAGIC):
-                        content = HeuristicZlibDecompress(content)
-                    if content[0:4] == OLEFILE_MAGIC:
-                        letter = chr(P23Ord('A') + counter)
-                        counter += 1
-                        if options.select == '':
-                            if not options.quiet:
-                                nameValue = ''
-                                for key, value in oElement.attributes.items():
-                                    if key.endswith(':name'):
-                                        nameValue = value
-                                        break
-                                print('%s: %s' % (letter, nameValue))
-                        ole = olefile.OleFileIO(DataIO(content))
-                        returnCode, selectionCounter = OLESub(ole, letter, rules, options)
-                        PrintWarningSelection(options.select, selectionCounter)
-                        ole.close()
-        elif data.startswith(ACTIVEMIME_MAGIC):
-            content = HeuristicZlibDecompress(data)
-            if content[0:4] == OLEFILE_MAGIC:
-                ole = olefile.OleFileIO(DataIO(content))
-                returnCode, selectionCounter = OLESub(ole, '', rules, options)
-                PrintWarningSelection(options.select, selectionCounter)
-                ole.close()
+    if options.find != '':
+        filecontent = oStringIO.read()
+        locations = FindAll(filecontent, OLEFILE_MAGIC)
+        if len(locations) == 0:
+            print('No embedded OLE files found')
         else:
-            print('Error: %s is not a valid OLE file.' % filename)
+            if options.find == 'l':
+                print('Position of potential embedded OLE files:')
+                for index, position in enumerate(locations):
+                    print(' %d 0x%08x' % (index + 1, position))
+            else:
+                index = int(options.find)
+                if index <= 0 or index > len(locations):
+                    print('Wrong index, must be between 1 and %d' % len(locations))
+                else:
+                    ole = olefile.OleFileIO(DataIO(filecontent[locations[int(options.find) -  1]:]))
+                    returnCode, selectionCounter = OLESub(ole, '', rules, options)
+                    PrintWarningSelection(options.select, selectionCounter)
+                    ole.close()
+    else:
+        magic = oStringIO.read(6)
+        oStringIO.seek(0)
+        if magic[0:4] == OLEFILE_MAGIC:
+            ole = olefile.OleFileIO(oStringIO)
+            returnCode, selectionCounter = OLESub(ole, '', rules, options)
+            PrintWarningSelection(options.select, selectionCounter)
+            ole.close()
+        elif magic[0:2] == b'PK':
+            oZipfile = zipfile.ZipFile(oStringIO, 'r')
+            counter = 0
+            selectionCounterTotal = 0
+            oleFileFound = False
+            OPCFound = False
+            for info in oZipfile.infolist():
+                oZipContent = oZipfile.open(info, 'r')
+                content = oZipContent.read()
+                if info.filename == '[Content_Types].xml':
+                    OPCFound = True
+                if content[0:4] == OLEFILE_MAGIC:
+                    letter = chr(P23Ord('A') + counter)
+                    counter += 1
+                    if options.select == '':
+                        if not options.quiet and not options.jsonoutput:
+                            print('%s: %s' % (letter, info.filename))
+                    ole = olefile.OleFileIO(DataIO(content))
+                    returnCode, selectionCounter = OLESub(ole, letter, rules, options)
+                    selectionCounterTotal += selectionCounter
+                    oleFileFound = True
+                    ole.close()
+                oZipContent.close()
+            if not oleFileFound:
+                print('Warning: no OLE file was found inside this ZIP container%s' % IFF(OPCFound, ' (OPC)', ''))
+            PrintWarningSelection(options.select, selectionCounterTotal)
+            oZipfile.close()
+        else:
+            data = oStringIO.read()
+            oStringIO.seek(0)
+            if b'<?xml' in data:
+                try:
+                    oXML = xml.dom.minidom.parse(oStringIO)
+                except:
+                    print('Error: parsing %s as XML.' % filename)
+                    return -1
+                counter = 0
+                for oElement in oXML.getElementsByTagName('*'):
+                    if oElement.firstChild and oElement.firstChild.nodeValue:
+                        try:
+                            data = binascii.a2b_base64(oElement.firstChild.nodeValue)
+                        except binascii.Error:
+                            data = ''
+                        except UnicodeEncodeError:
+                            data = ''
+                        content = C2BIP3(data)
+                        if content.startswith(ACTIVEMIME_MAGIC):
+                            content = HeuristicZlibDecompress(content)
+                        if content[0:4] == OLEFILE_MAGIC:
+                            letter = chr(P23Ord('A') + counter)
+                            counter += 1
+                            if options.select == '':
+                                if not options.quiet:
+                                    nameValue = ''
+                                    for key, value in oElement.attributes.items():
+                                        if key.endswith(':name'):
+                                            nameValue = value
+                                            break
+                                    print('%s: %s' % (letter, nameValue))
+                            ole = olefile.OleFileIO(DataIO(content))
+                            returnCode, selectionCounter = OLESub(ole, letter, rules, options)
+                            PrintWarningSelection(options.select, selectionCounter)
+                            ole.close()
+            elif data.startswith(ACTIVEMIME_MAGIC):
+                content = HeuristicZlibDecompress(data)
+                if content[0:4] == OLEFILE_MAGIC:
+                    ole = olefile.OleFileIO(DataIO(content))
+                    returnCode, selectionCounter = OLESub(ole, '', rules, options)
+                    PrintWarningSelection(options.select, selectionCounter)
+                    ole.close()
+            else:
+                print('Error: %s is not a valid OLE file.' % filename)
 
     return returnCode
 
@@ -2121,6 +2164,7 @@ def Main():
     oParser.add_option('-C', '--cut', type=str, default='', help='cut data')
     oParser.add_option('-E', '--extra', type=str, default='', help='add extra info (environment variable: OLEDUMP_EXTRA)')
     oParser.add_option('--storages', action='store_true', default=False, help='Include storages in report')
+    oParser.add_option('-f', '--find', type=str, default='', help='Find D0CF11E0 MAGIC sequence (use l for listing, number for selecting)')
     oParser.add_option('-j', '--jsonoutput', action='store_true', default=False, help='produce json output')
     oParser.add_option('--password', default=MALWARE_PASSWORD, help='The ZIP password to be used (default %s)' % MALWARE_PASSWORD)
     (options, args) = oParser.parse_args()

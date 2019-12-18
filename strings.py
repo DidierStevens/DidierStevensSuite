@@ -4,8 +4,8 @@ from __future__ import print_function
 
 __description__ = 'Strings command in Python'
 __author__ = 'Didier Stevens'
-__version__ = '0.0.4'
-__date__ = '2019/08/05'
+__version__ = '0.0.5'
+__date__ = '2019/12/17'
 
 """
 Source code put in the public domain by Didier Stevens, no Copyright
@@ -28,6 +28,7 @@ History:
   2018/12/12: 0.0.4 added option -T
   2019/04/14: Quote bugfix
   2019/08/05: bugfix #e#chr
+  2019/12/17: 0.0.5 added option -P
 
 Todo:
 """
@@ -97,6 +98,9 @@ Option -p excludes all import strings found in PE files (this requires module pe
 To exclude known strings from "goodware", i.e. not malware, use option -g with yarGEN's database.
 
 The selection of strings to output can be inverted with option -v.
+
+Option -P selects pascal strings. A pascal string is a string preceded by an integer with the number of characters in the string (a counter). Option -p takes a value that defines how to decode the counter, using the same syntax as the struct module.
+For example, to define the counter as a little-endian 32-bit unsigned integer, use '-P "<I"'. Use > for big-endian, B for 8-bit (byte) and H for 16-bit.
 
 Use option -f to prefix each string with the name of the file it was found it.
 
@@ -1391,7 +1395,20 @@ def ExtractStringsASCII(data, options):
         regex = REGEX_WHITESPACE + '{%d,}'
     else:
         regex = REGEX_STANDARD + '{%d,}'
-    return re.findall(C2BIP3(regex % options.bytes), data)
+
+    if options.pascal == '':
+        return re.findall(C2BIP3(regex % options.bytes), data)
+    else:
+        structFormat = options.pascal
+        structFormatLength = struct.calcsize(structFormat)
+        foundStrings = []
+
+        for oMatch in re.finditer(C2BIP3(regex % options.bytes), data):
+            if oMatch.start(0) >= structFormatLength:
+                foundString = oMatch.group(0)
+                if struct.unpack(structFormat, data[oMatch.start(0) - structFormatLength:oMatch.start(0)])[0] == len(foundString):
+                    foundStrings.append(foundString)
+        return foundStrings
 
 def ExtractStringsUNICODE(data, options):
     if options.regex != '':
@@ -1400,7 +1417,21 @@ def ExtractStringsUNICODE(data, options):
         regex = '((' + REGEX_WHITESPACE + '\x00){%d,})'
     else:
         regex = '((' + REGEX_STANDARD + '\x00){%d,})'
-    return [foundunicodestring.replace(C2BIP3('\x00'), C2BIP3('')) for foundunicodestring, dummy in re.findall(C2BIP3(regex % options.bytes), data)]
+
+
+    if options.pascal == '':
+        return [foundunicodestring.replace(C2BIP3('\x00'), C2BIP3('')) for foundunicodestring, dummy in re.findall(C2BIP3(regex % options.bytes), data)]
+    else:
+        structFormat = options.pascal
+        structFormatLength = struct.calcsize(structFormat)
+        foundStrings = []
+
+        for oMatch in re.finditer(C2BIP3(regex % options.bytes), data):
+            if oMatch.start(0) >= structFormatLength:
+                foundString = oMatch.group(0).replace(C2BIP3('\x00'), C2BIP3(''))
+                if struct.unpack(structFormat, data[oMatch.start(0) - structFormatLength:oMatch.start(0)])[0] == len(foundString):
+                    foundStrings.append(foundString)
+        return foundStrings
 
 def ExtractStrings(data, options):
     if options.type == 'all':
@@ -1577,6 +1608,7 @@ https://DidierStevens.com'''
     oParser.add_option('-g', '--goodwarestrings', action='store_true', default=False, help='Use the goodware strings db to filter out strings')
     oParser.add_option('-f', '--filename', action='store_true', default=False, help='Include filename (as prefix)')
     oParser.add_option('-T', '--trim', type=int, default=0, help='Trim strings to given maximum length')
+    oParser.add_option('-P', '--pascal', default='', help='Counter format for pascal strings')
     oParser.add_option('--password', default='infected', help='The ZIP password to be used (default infected)')
     oParser.add_option('--noextraction', action='store_true', default=False, help='Do not extract from archive file')
     oParser.add_option('--literalfilenames', action='store_true', default=False, help='Do not interpret filenames')
