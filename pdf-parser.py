@@ -2,10 +2,10 @@
 
 __description__ = 'pdf-parser, use it to parse a PDF document'
 __author__ = 'Didier Stevens'
-__version__ = '0.7.3'
-__date__ = '2019/09/26'
+__version__ = '0.7.4'
+__date__ = '2019/11/05'
 __minimum_python_version__ = (2, 5, 1)
-__maximum_python_version__ = (3, 6, 3)
+__maximum_python_version__ = (3, 7, 5)
 
 """
 Source code put in public domain by Didier Stevens, no Copyright
@@ -68,6 +68,7 @@ History:
   2019/04/12: V0.7.2 Python 2.6.6 compatibility fix
   2019/07/30: bug fixes (including fixes Josef Hinteregger)
   2019/09/26: V0.7.3 added multiple id selection to option -o; added man page (-m); added environment variable PDFPARSER_OPTIONS; bug fixes
+  2019/11/05: V0.7.4 fixed plugin path when compiled with pyinstaller, replaced eval with int
 
 Todo:
   - handle printf todo
@@ -409,8 +410,8 @@ class cPDFParser:
                             if IsNumeric(self.token2[1]):
                                 self.token3 = self.oPDFTokenizer.TokenIgnoreWhiteSpace()
                                 if self.token3[1] == 'obj':
-                                    self.objectId = eval(self.token[1])
-                                    self.objectVersion = eval(self.token2[1])
+                                    self.objectId = int(self.token[1], 10)
+                                    self.objectVersion = int(self.token2[1], 10)
                                     self.context = CONTEXT_OBJ
                                 else:
                                     self.oPDFTokenizer.unget(self.token3)
@@ -430,7 +431,7 @@ class cPDFParser:
                         elif self.token[1] == 'startxref':
                             self.token2 = self.oPDFTokenizer.TokenIgnoreWhiteSpace()
                             if self.token2 and IsNumeric(self.token2[1]):
-                                return cPDFElementStartxref(eval(self.token2[1]))
+                                return cPDFElementStartxref(int(self.token2[1], 10))
                             else:
                                 self.oPDFTokenizer.unget(self.token2)
                                 if self.verbose:
@@ -1207,10 +1208,16 @@ def AddDecoder(cClass):
 class cDecoderParent():
     pass
 
+def GetScriptPath():
+    if getattr(sys, 'frozen', False):
+        return os.path.dirname(sys.executable)
+    else:
+        return os.path.dirname(sys.argv[0])
+
 def LoadDecoders(decoders, verbose):
     if decoders == '':
         return
-    scriptPath = os.path.dirname(sys.argv[0])
+    scriptPath = GetScriptPath()
     for decoder in sum(map(ProcessAt, decoders.split(',')), []):
         try:
             if not decoder.lower().endswith('.py'):
@@ -1297,7 +1304,7 @@ def HexAsciiDumpLine(data):
 def ParseINIFile():
     oConfigParser = ConfigParser.ConfigParser(allow_no_value=True)
     oConfigParser.optionxform = str
-    oConfigParser.read(os.path.join(os.path.dirname(sys.argv[0]), 'pdfid.ini'))
+    oConfigParser.read(os.path.join(GetScriptPath(), 'pdfid.ini'))
     keywords = []
     if oConfigParser.has_section('keywords'):
         for key, value in oConfigParser.items('keywords'):

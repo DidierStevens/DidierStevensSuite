@@ -2,8 +2,8 @@
 
 __description__ = 'ZIP dump utility'
 __author__ = 'Didier Stevens'
-__version__ = '0.0.15'
-__date__ = '2018/12/15'
+__version__ = '0.0.16'
+__date__ = '2019/12/27'
 
 """
 
@@ -44,6 +44,8 @@ History:
   2018/07/01: 0.0.13: added option --jsonoutput
   2018/07/07: 0.0.14: updated to version 2 of jsonoutput
   2018/12/15: 0.0.15: updated help
+  2019/12/26: 0.0.16: added option -f and started Python 3 support
+  2019/12/27: continue
 
 Todo:
 """
@@ -54,7 +56,6 @@ import hashlib
 import signal
 import sys
 import os
-import cStringIO
 import string
 import math
 import binascii
@@ -66,6 +67,7 @@ import gzip
 import zlib
 import codecs
 import json
+import struct
 try:
     import yara
 except:
@@ -74,6 +76,10 @@ if sys.version_info[0] >= 3:
     from io import StringIO
 else:
     from cStringIO import StringIO
+if sys.version_info[0] >= 3:
+    from io import BytesIO as DataIO
+else:
+    from cStringIO import StringIO as DataIO
 
 QUOTE = '"'
 
@@ -143,7 +149,7 @@ When options -X, -A or -D are used without selecting a file (option -s), all fil
 
 The output produced by zipdump.py can de written to a file with option -o.
 
-If the ZIP file is password protected, zipdump.py will try with password 'infected'. Option -p can be used to provide a different password to open the ZIP file. To provide a list of passwords to try, 
+If the ZIP file is password protected, zipdump.py will try with password 'infected'. Option -p can be used to provide a different password to open the ZIP file. To provide a list of passwords to try,
 use option -P with the name of the file containing passwords to try (dictionary attack). This file can be a text file or a gzip compressed text file. The password file is completely read into memory before the dictionary attack is executed.
 After the dictionary attack, the selected commands (via other options) are executed.
 Example:
@@ -175,9 +181,9 @@ This can be useful when reports of many ZIP files are merged together.
 
 Option -e extends the amount of information reported:
 C:\Demo>zipdump.py -e example.zip
-Index Filename     Encrypted Timestamp           MD5                              Filesize Entropy       Unique bytes Magic HEX Magic ASCII Null bytes Control bytes Whitespace bytes Printable bytes High bytes 
-    1 Dialog42.exe         0 2012-02-25 12:08:26 9b7f8260724e2cb643ad0729ec995b40    58120 6.42503434625          256 4d5a5000  MZP.             13014          6403             1678           19366      17659 
-    2 readme.txt           0 2015-11-24 19:40:12 098f6bcd4621d373cade4e832627b4f6        4 1.5                      3  74657374 test                 0             0                0               4          0 
+Index Filename     Encrypted Timestamp           MD5                              Filesize Entropy       Unique bytes Magic HEX Magic ASCII Null bytes Control bytes Whitespace bytes Printable bytes High bytes
+    1 Dialog42.exe         0 2012-02-25 12:08:26 9b7f8260724e2cb643ad0729ec995b40    58120 6.42503434625          256 4d5a5000  MZP.             13014          6403             1678           19366      17659
+    2 readme.txt           0 2015-11-24 19:40:12 098f6bcd4621d373cade4e832627b4f6        4 1.5                      3  74657374 test                 0             0                0               4          0
 
 Columns MD5, Filesize and Entropy should be self-explanatory.
 Unique bytes counts the number of unique, different byte values contained in the file.
@@ -216,7 +222,7 @@ If you need other data than displayed by option -e, use option -E (extra). This 
 
 Example adding the SHA256 hash to the report:
 C:\Demo>zipdump.py -E "%SHA256%" example.zip
-Index Filename     Encrypted Timestamp           
+Index Filename     Encrypted Timestamp
     1 Dialog42.exe         0 2012-02-25 12:08:26 0a391054e50a4808553466263c9c3b63e895be02c957dbb957da3ba96670cf34
     2 readme.txt           0 2015-11-24 19:40:12 9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08
 
@@ -250,15 +256,15 @@ All files inside the ZIP file are scanned with the provided YARA rules, you can 
 
 Example:
 C:\Demo>zipdump.py -y contains_pe_file.yara example.zip
-Index Filename     Decoder YARA namespace        YARA rule        
-    1 Dialog42.exe         contains_pe_file.yara Contains_PE_File 
+Index Filename     Decoder YARA namespace        YARA rule
+    1 Dialog42.exe         contains_pe_file.yara Contains_PE_File
 
 In this example, you use YARA rule contains_pe_file.yara to find PE files (executables) inside ZIP files. The rule triggered for file 1, because it contains an EXE file.
 
 If you want more information about what was detected by the YARA rule, use option --yarastrings like in this example:
 C:\Demo>zipdump.py -y contains_pe_file.yara --yarastrings example.zip
-Index Filename     Decoder YARA namespace        YARA rule        
-    1 Dialog42.exe         contains_pe_file.yara Contains_PE_File 000000 $a 4d5a 'MZ' 
+Index Filename     Decoder YARA namespace        YARA rule
+    1 Dialog42.exe         contains_pe_file.yara Contains_PE_File 000000 $a 4d5a 'MZ'
 
 Use option --yarastringsraw to see only the matched strings, and nothing more.
 
@@ -279,9 +285,9 @@ rule Contains_PE_File
 To deal with encoded files, zipdump supports decoders. A decoder is a type of plugin, that will bruteforce a type of encoding on each file. For example, decoder_xor1 will encode each file via XOR and a key of 1 byte. So effectively, 256 different encodings of the file will be scanned by the YARA rules. 256 encodings because: XOR key 0x00, XOR key 0x01, XOR key 0x02, ..., XOR key 0xFF
 Here is an example:
 C:\Demo>zipdump.py -y contains_pe_file.yara -C decoder_xor1 example.zip
-Index Filename            Decoder             YARA namespace        YARA rule        
-    1 Dialog42.exe                            contains_pe_file.yara Contains_PE_File 
-    3 Dialog42.exe.XORx14 XOR 1 byte key 0x14 contains_pe_file.yara Contains_PE_File 
+Index Filename            Decoder             YARA namespace        YARA rule
+    1 Dialog42.exe                            contains_pe_file.yara Contains_PE_File
+    3 Dialog42.exe.XORx14 XOR 1 byte key 0x14 contains_pe_file.yara Contains_PE_File
 
 The YARA rule triggers on file 3. It contains a PE file encoded via XORing each byte with key 0x14.
 
@@ -293,6 +299,79 @@ Some decoders take options, to be provided with option --decoderoptions.
 Use option -v to have verbose error messages when debugging your decoders.
 
 With option -j, zipdump will output the content of the ZIP file as a JSON object that can be piped into other tools that support this JSON format.
+
+When a file contains more than one ZIP file, option -f (find) can be used to detect this and select distinct ZIP files.
+
+We will use double.zip, it is a PoC ZIP file: it is the concatenation of 2 ZIP files, the first ZIP file contains a single text file, the second ZIP file contains a single EXE file.
+When zipdump is used to analyse this file, only the second ZIP file (e.g. last) is analyzed:
+
+C:\Demo>zipdump.py double.zip
+Index Filename     Encrypted Timestamp
+    1 Dialog42.exe         0 2012-02-25 12:08:26
+
+To detect the presence of multiple ZIP files, use option -f with value list (or letter l, initial of list), like this:
+
+C:\Demo>zipdump.py -f list double.zip
+     0x00000000 PK0304 fil b'file.txt'
+     0x000002bf PK0102 dir b'file.txt'
+   1 0x00000319 PK0506 end
+     0x0000032f PK0304 fil b'Dialog42.exe'
+     0x000078ef PK0102 dir b'Dialog42.exe'
+   2 0x0000794d PK0506 end
+
+Option "-f list" lists all PK records it finds of the following type:
+  PK0304 local file header
+  PK0102 central directory header
+  PK0506 end of central directory
+
+The presence of more than one "end of central directory" record indicates the presence of multiple ZIP files. Compare the result above for double.zip with a single ZIP file:
+
+C:\Demo>zipdump.py -f list example.zip
+     0x00000000 PK0304 fil b'Dialog42.exe'
+     0x000075c0 PK0102 dir b'Dialog42.exe'
+   1 0x0000761e PK0506 end
+
+Every "end of central directory" record is prefixed by an index, that can be used to select that particular ZIP file for further analysis, using option -f like this (option "-f 1", index number 1):
+
+C:\Demo>zipdump.py -f 1 double.zip
+Index Filename Encrypted Timestamp
+    1 file.txt         0 2019-12-03 22:55:46
+
+Option -f can be combined with all other zipdump options, to further analyze the selected ZIP file. Example:
+
+C:\Demo>zipdump.py -f 1 -s 1 -a double.zip | head
+00000000: 50 6F 72 74 74 69 74 6F  72 20 6C 75 63 74 75 73  Porttitor luctus
+00000010: 20 72 69 73 75 73 20 6E  69 73 69 20 6F 64 69 6F   risus nisi odio
+00000020: 20 73 63 65 6C 65 72 69  73 71 75 65 20 70 6F 73   scelerisque pos
+00000030: 75 65 72 65 20 6E 75 6C  6C 61 20 65 6C 65 69 66  uere nulla eleif
+00000040: 65 6E 64 20 63 6F 6E 73  65 63 74 65 74 75 72 20  end consectetur
+00000050: 6E 69 73 6C 20 74 65 6D  70 6F 72 20 73 61 67 69  nisl tempor sagi
+00000060: 74 74 69 73 20 63 75 72  73 75 73 20 65 67 65 73  ttis cursus eges
+00000070: 74 61 73 20 64 6F 6E 65  63 20 6E 61 74 6F 71 75  tas donec natoqu
+00000080: 65 20 64 69 67 6E 69 73  73 69 6D 20 65 74 20 6A  e dignissim et j
+00000090: 75 73 74 6F 20 74 69 6E  63 69 64 75 6E 74 20 75  usto tincidunt u
+
+If data precedes the first record, or succeeds the last record, an entry with index p (prefix) and/or index s (suffix) will be included in the list of records:
+
+C:\Demo>zipdump.py -f list prefix-double.zip
+   p 0x00000000 data 0:58120l
+     0x0000e308 PK0304 fil b'file.txt'
+     0x0000e5c7 PK0102 dir b'file.txt'
+   1 0x0000e621 PK0506 end
+     0x0000e637 PK0304 fil b'Dialog42.exe'
+     0x00015bf7 PK0102 dir b'Dialog42.exe'
+   2 0x00015c55 PK0506 end
+
+C:\Demo>zipdump.py -f list double-suffix.zip
+     0x00000000 PK0304 fil b'file.txt'
+     0x000002bf PK0102 dir b'file.txt'
+   1 0x00000319 PK0506 end
+     0x0000032f PK0304 fil b'Dialog42.exe'
+     0x000078ef PK0102 dir b'Dialog42.exe'
+   2 0x0000794d PK0506 end
+   s 0x00007963 data 31075:58120l
+
+When p or s is selected with option -f, the selected data is dumped according to the dump flags (-d, -a, -x, -t).
 
 Option -c (--cut) allows for the partial selection of a file. Use this option to "cut out" part of the file.
 The --cut option takes an argument to specify which section of bytes to select from the file. This argument is composed of 2 terms separated by a colon (:), like this:
@@ -322,6 +401,22 @@ When this option is not used, the complete file is selected.
 '''
     for line in manual.split('\n'):
         print(textwrap.fill(line, 78))
+
+#Convert 2 Bytes If Python 3
+def C2BIP3(string):
+    if sys.version_info[0] > 2:
+        if type(string) == bytes:
+            return string
+        else:
+            return bytes([ord(x) for x in string])
+    else:
+        return string
+
+def P23Ord(value):
+    if type(value) == int:
+        return value
+    else:
+        return ord(value)
 
 def FixPipe():
     try:
@@ -462,7 +557,7 @@ class cDump():
             if i % self.dumplinelength == self.dumplinelength / 2:
                 hexDump += ' '
             hexDump += ' %02X' % b
-            asciiDump += IFF(b >= 32 and b <= 128, chr(b), '.')
+            asciiDump += IFF(b >= 32 and b <= 127, chr(b), '.')
         oDumpStream.Addline(self.CombineHexAscii(hexDump, asciiDump))
         return oDumpStream.Content()
 
@@ -509,12 +604,397 @@ def Translate(expression):
         command = expression
     return lambda x: eval('x' + command)
 
+#-BEGINCODE cBinaryFile------------------------------------------------------------------------------
+#import random
+#import binascii
+#import zipfile
+#import gzip
+#import sys
+#if sys.version_info[0] >= 3:
+#    from io import BytesIO as DataIO
+#else:
+#    from cStringIO import StringIO as DataIO
+
+def LoremIpsumSentence(minimum, maximum):
+    words = ['lorem', 'ipsum', 'dolor', 'sit', 'amet', 'consectetur', 'adipiscing', 'elit', 'etiam', 'tortor', 'metus', 'cursus', 'sed', 'sollicitudin', 'ac', 'sagittis', 'eget', 'massa', 'praesent', 'sem', 'fermentum', 'dignissim', 'in', 'vel', 'augue', 'scelerisque', 'auctor', 'libero', 'nam', 'a', 'gravida', 'odio', 'duis', 'vestibulum', 'vulputate', 'quam', 'nec', 'cras', 'nibh', 'feugiat', 'ut', 'vitae', 'ornare', 'justo', 'orci', 'varius', 'natoque', 'penatibus', 'et', 'magnis', 'dis', 'parturient', 'montes', 'nascetur', 'ridiculus', 'mus', 'curabitur', 'nisl', 'egestas', 'urna', 'iaculis', 'lectus', 'maecenas', 'ultrices', 'velit', 'eu', 'porta', 'hac', 'habitasse', 'platea', 'dictumst', 'integer', 'id', 'commodo', 'mauris', 'interdum', 'malesuada', 'fames', 'ante', 'primis', 'faucibus', 'accumsan', 'pharetra', 'aliquam', 'nunc', 'at', 'est', 'non', 'leo', 'nulla', 'sodales', 'porttitor', 'facilisis', 'aenean', 'condimentum', 'rutrum', 'facilisi', 'tincidunt', 'laoreet', 'ultricies', 'neque', 'diam', 'euismod', 'consequat', 'tempor', 'elementum', 'lobortis', 'erat', 'ligula', 'risus', 'donec', 'phasellus', 'quisque', 'vivamus', 'pellentesque', 'tristique', 'venenatis', 'purus', 'mi', 'dictum', 'posuere', 'fringilla', 'quis', 'magna', 'pretium', 'felis', 'pulvinar', 'lacinia', 'proin', 'viverra', 'lacus', 'suscipit', 'aliquet', 'dui', 'molestie', 'dapibus', 'mollis', 'suspendisse', 'sapien', 'blandit', 'morbi', 'tellus', 'enim', 'maximus', 'semper', 'arcu', 'bibendum', 'convallis', 'hendrerit', 'imperdiet', 'finibus', 'fusce', 'congue', 'ullamcorper', 'placerat', 'nullam', 'eros', 'habitant', 'senectus', 'netus', 'turpis', 'luctus', 'volutpat', 'rhoncus', 'mattis', 'nisi', 'ex', 'tempus', 'eleifend', 'vehicula', 'class', 'aptent', 'taciti', 'sociosqu', 'ad', 'litora', 'torquent', 'per', 'conubia', 'nostra', 'inceptos', 'himenaeos']
+    sample = random.sample(words, random.randint(minimum, maximum))
+    sample[0] = sample[0].capitalize()
+    return ' '.join(sample) + '.'
+
+def LoremIpsum(sentences):
+    return ' '.join([LoremIpsumSentence(15, 30) for i in range(sentences)])
+
+STATE_START = 0
+STATE_IDENTIFIER = 1
+STATE_STRING = 2
+STATE_SPECIAL_CHAR = 3
+STATE_ERROR = 4
+
+FUNCTIONNAME_REPEAT = 'repeat'
+FUNCTIONNAME_RANDOM = 'random'
+FUNCTIONNAME_CHR = 'chr'
+FUNCTIONNAME_LOREMIPSUM = 'loremipsum'
+
+def Tokenize(expression):
+    result = []
+    token = ''
+    state = STATE_START
+    while expression != '':
+        char = expression[0]
+        expression = expression[1:]
+        if char == "'":
+            if state == STATE_START:
+                state = STATE_STRING
+            elif state == STATE_IDENTIFIER:
+                result.append([STATE_IDENTIFIER, token])
+                state = STATE_STRING
+                token = ''
+            elif state == STATE_STRING:
+                result.append([STATE_STRING, token])
+                state = STATE_START
+                token = ''
+        elif char >= '0' and char <= '9' or char.lower() >= 'a' and char.lower() <= 'z':
+            if state == STATE_START:
+                token = char
+                state = STATE_IDENTIFIER
+            else:
+                token += char
+        elif char == ' ':
+            if state == STATE_IDENTIFIER:
+                result.append([STATE_IDENTIFIER, token])
+                token = ''
+                state = STATE_START
+            elif state == STATE_STRING:
+                token += char
+        else:
+            if state == STATE_IDENTIFIER:
+                result.append([STATE_IDENTIFIER, token])
+                token = ''
+                state = STATE_START
+                result.append([STATE_SPECIAL_CHAR, char])
+            elif state == STATE_STRING:
+                token += char
+            else:
+                result.append([STATE_SPECIAL_CHAR, char])
+                token = ''
+    if state == STATE_IDENTIFIER:
+        result.append([state, token])
+    elif state == STATE_STRING:
+        result = [[STATE_ERROR, 'Error: string not closed', token]]
+    return result
+
+def ParseFunction(tokens):
+    if len(tokens) == 0:
+        print('Parsing error')
+        return None, tokens
+    if tokens[0][0] == STATE_STRING or tokens[0][0] == STATE_IDENTIFIER and tokens[0][1].startswith('0x'):
+        return [[FUNCTIONNAME_REPEAT, [[STATE_IDENTIFIER, '1'], tokens[0]]], tokens[1:]]
+    if tokens[0][0] != STATE_IDENTIFIER:
+        print('Parsing error')
+        return None, tokens
+    function = tokens[0][1]
+    tokens = tokens[1:]
+    if len(tokens) == 0:
+        print('Parsing error')
+        return None, tokens
+    if tokens[0][0] != STATE_SPECIAL_CHAR or tokens[0][1] != '(':
+        print('Parsing error')
+        return None, tokens
+    tokens = tokens[1:]
+    if len(tokens) == 0:
+        print('Parsing error')
+        return None, tokens
+    arguments = []
+    while True:
+        if tokens[0][0] != STATE_IDENTIFIER and tokens[0][0] != STATE_STRING:
+            print('Parsing error')
+            return None, tokens
+        arguments.append(tokens[0])
+        tokens = tokens[1:]
+        if len(tokens) == 0:
+            print('Parsing error')
+            return None, tokens
+        if tokens[0][0] != STATE_SPECIAL_CHAR or (tokens[0][1] != ',' and tokens[0][1] != ')'):
+            print('Parsing error')
+            return None, tokens
+        if tokens[0][0] == STATE_SPECIAL_CHAR and tokens[0][1] == ')':
+            tokens = tokens[1:]
+            break
+        tokens = tokens[1:]
+        if len(tokens) == 0:
+            print('Parsing error')
+            return None, tokens
+    return [[function, arguments], tokens]
+
+def Parse(expression):
+    tokens = Tokenize(expression)
+    if len(tokens) == 0:
+        print('Parsing error')
+        return None
+    if tokens[0][0] == STATE_ERROR:
+        print(tokens[0][1])
+        print(tokens[0][2])
+        print(expression)
+        return None
+    functioncalls = []
+    while True:
+        functioncall, tokens = ParseFunction(tokens)
+        if functioncall == None:
+            return None
+        functioncalls.append(functioncall)
+        if len(tokens) == 0:
+            return functioncalls
+        if tokens[0][0] != STATE_SPECIAL_CHAR or tokens[0][1] != '+':
+            print('Parsing error')
+            return None
+        tokens = tokens[1:]
+
+def InterpretInteger(token):
+    if token[0] != STATE_IDENTIFIER:
+        return None
+    try:
+        return int(token[1])
+    except:
+        return None
+
+def Hex2Bytes(hexadecimal):
+    if len(hexadecimal) % 2 == 1:
+        hexadecimal = '0' + hexadecimal
+    try:
+        return binascii.a2b_hex(hexadecimal)
+    except:
+        return None
+
+def InterpretHexInteger(token):
+    if token[0] != STATE_IDENTIFIER:
+        return None
+    if not token[1].startswith('0x'):
+        return None
+    bytes = Hex2Bytes(token[1][2:])
+    if bytes == None:
+        return None
+    integer = 0
+    for byte in bytes:
+        integer = integer * 0x100 + C2IIP2(byte)
+    return integer
+
+def InterpretNumber(token):
+    number = InterpretInteger(token)
+    if number == None:
+        return InterpretHexInteger(token)
+    else:
+        return number
+
+def InterpretBytes(token):
+    if token[0] == STATE_STRING:
+        return token[1]
+    if token[0] != STATE_IDENTIFIER:
+        return None
+    if not token[1].startswith('0x'):
+        return None
+    return Hex2Bytes(token[1][2:])
+
+def CheckFunction(functionname, arguments, countarguments, maxcountarguments=None):
+    if maxcountarguments == None:
+        if countarguments == 0 and len(arguments) != 0:
+            print('Error: function %s takes no arguments, %d are given' % (functionname, len(arguments)))
+            return True
+        if countarguments == 1 and len(arguments) != 1:
+            print('Error: function %s takes 1 argument, %d are given' % (functionname, len(arguments)))
+            return True
+        if countarguments != len(arguments):
+            print('Error: function %s takes %d arguments, %d are given' % (functionname, countarguments, len(arguments)))
+            return True
+    else:
+        if len(arguments) < countarguments or len(arguments) > maxcountarguments:
+            print('Error: function %s takes between %d and %d arguments, %d are given' % (functionname, countarguments, maxcountarguments, len(arguments)))
+            return True
+    return False
+
+def CheckNumber(argument, minimum=None, maximum=None):
+    number = InterpretNumber(argument)
+    if number == None:
+        print('Error: argument should be a number: %s' % argument[1])
+        return None
+    if minimum != None and number < minimum:
+        print('Error: argument should be minimum %d: %d' % (minimum, number))
+        return None
+    if maximum != None and number > maximum:
+        print('Error: argument should be maximum %d: %d' % (maximum, number))
+        return None
+    return number
+
+def Interpret(expression):
+    functioncalls = Parse(expression)
+    if functioncalls == None:
+        return None
+    decoded = ''
+    for functioncall in functioncalls:
+        functionname, arguments = functioncall
+        if functionname == FUNCTIONNAME_REPEAT:
+            if CheckFunction(functionname, arguments, 2):
+                return None
+            number = CheckNumber(arguments[0], minimum=1)
+            if number == None:
+                return None
+            bytes = InterpretBytes(arguments[1])
+            if bytes == None:
+                print('Error: argument should be a byte sequence: %s' % arguments[1][1])
+                return None
+            decoded += number * bytes
+        elif functionname == FUNCTIONNAME_RANDOM:
+            if CheckFunction(functionname, arguments, 1):
+                return None
+            number = CheckNumber(arguments[0], minimum=1)
+            if number == None:
+                return None
+            decoded += ''.join([chr(random.randint(0, 255)) for x in range(number)])
+        elif functionname == FUNCTIONNAME_LOREMIPSUM:
+            if CheckFunction(functionname, arguments, 1):
+                return None
+            number = CheckNumber(arguments[0], minimum=1)
+            if number == None:
+                return None
+            decoded += LoremIpsum(number)
+        elif functionname == FUNCTIONNAME_CHR:
+            if CheckFunction(functionname, arguments, 1, 2):
+                return None
+            number = CheckNumber(arguments[0], minimum=0, maximum=255)
+            if number == None:
+                return None
+            if len(arguments) == 1:
+                decoded += chr(number)
+            else:
+                number2 = CheckNumber(arguments[1], minimum=0, maximum=255)
+                if number2 == None:
+                    return None
+                if number < number2:
+                    decoded += ''.join([chr(n) for n in range(number, number2 + 1)])
+                else:
+                    decoded += ''.join([chr(n) for n in range(number, number2 - 1, -1)])
+        else:
+            print('Error: unknown function: %s' % functionname)
+            return None
+    return decoded
+
+FCH_FILENAME = 0
+FCH_DATA = 1
+FCH_ERROR = 2
+
+def FilenameCheckHash(filename, literalfilename):
+    if literalfilename:
+        return FCH_FILENAME, filename
+    elif filename.startswith('#h#'):
+        result = Hex2Bytes(filename[3:])
+        if result == None:
+            return FCH_ERROR, 'hexadecimal'
+        else:
+            return FCH_DATA, result
+    elif filename.startswith('#b#'):
+        try:
+            return FCH_DATA, binascii.a2b_base64(filename[3:])
+        except:
+            return FCH_ERROR, 'base64'
+    elif filename.startswith('#e#'):
+        result = Interpret(filename[3:])
+        if result == None:
+            return FCH_ERROR, 'expression'
+        else:
+            return FCH_DATA, result
+    elif filename.startswith('#'):
+        return FCH_DATA, C2BIP3(filename[1:])
+    else:
+        return FCH_FILENAME, filename
+
+def AnalyzeFileError(filename):
+    PrintError('Error opening file %s' % filename)
+    PrintError(sys.exc_info()[1])
+    try:
+        if not os.path.exists(filename):
+            PrintError('The file does not exist')
+        elif os.path.isdir(filename):
+            PrintError('The file is a directory')
+        elif not os.path.isfile(filename):
+            PrintError('The file is not a regular file')
+    except:
+        pass
+
+class cBinaryFile:
+    def __init__(self, filename, zippassword='infected', noextraction=False, literalfilename=False):
+        self.filename = filename
+        self.zippassword = zippassword
+        self.noextraction = noextraction
+        self.literalfilename = literalfilename
+        self.oZipfile = None
+        self.extracted = False
+        self.fIn = None
+
+        fch, data = FilenameCheckHash(self.filename, self.literalfilename)
+        if fch == FCH_ERROR:
+            line = 'Error %s parsing filename: %s' % (data, self.filename)
+            raise Exception(line)
+
+        try:
+            if self.filename == '':
+                if sys.platform == 'win32':
+                    import msvcrt
+                    msvcrt.setmode(sys.stdin.fileno(), os.O_BINARY)
+                self.fIn = sys.stdin
+            elif fch == FCH_DATA:
+                self.fIn = DataIO(data)
+            elif not self.noextraction and self.filename.lower().endswith('.zip'):
+                self.oZipfile = zipfile.ZipFile(self.filename, 'r')
+                if len(self.oZipfile.infolist()) == 1:
+                    self.fIn = self.oZipfile.open(self.oZipfile.infolist()[0], 'r', self.zippassword)
+                    self.extracted = True
+                else:
+                    self.oZipfile.close()
+                    self.oZipfile = None
+                    self.fIn = open(self.filename, 'rb')
+            elif not self.noextraction and self.filename.lower().endswith('.gz'):
+                self.fIn = gzip.GzipFile(self.filename, 'rb')
+                self.extracted = True
+            else:
+                self.fIn = open(self.filename, 'rb')
+        except:
+            AnalyzeFileError(self.filename)
+            raise
+
+    def close(self):
+        if self.fIn != sys.stdin and self.fIn != None:
+            self.fIn.close()
+        if self.oZipfile != None:
+            self.oZipfile.close()
+
+    def read(self, size=None):
+        try:
+            fRead = self.fIn.buffer
+        except:
+            fRead = self.fIn
+        if size == None:
+            return fRead.read()
+        else:
+            return fRead.read(size)
+
+    def Data(self):
+        data = self.fIn.read()
+        self.close()
+        return data
+
+#-ENDCODE cBinaryFile--------------------------------------------------------------------------------
+
 #Fix for http://bugs.python.org/issue11395
 def StdoutWriteChunked(data):
-    while data != '':
-        sys.stdout.write(data[0:10000])
-        sys.stdout.flush()
-        data = data[10000:]
+    if sys.version_info[0] > 2:
+        sys.stdout.buffer.write(C2BIP3(data))
+    else:
+        while data != '':
+            sys.stdout.write(data[0:10000])
+            try:
+                sys.stdout.flush()
+            except IOError:
+                return
+            data = data[10000:]
 
 def Magic(data):
     magicPrintable = ''
@@ -573,10 +1053,15 @@ def AddDecoder(cClass):
 class cDecoderParent():
     pass
 
-def LoadDecoders(decoders, verbose):
+def LoadDecoders(decoders, decoderdir, verbose):
     if decoders == '':
         return
-    scriptPath = os.path.dirname(sys.argv[0])
+
+    if decoderdir == '':
+        scriptPath = GetScriptPath()
+    else:
+        scriptPath = decoderdir
+
     for decoder in sum(map(ProcessAt, decoders.split(',')), []):
         try:
             if not decoder.lower().endswith('.py'):
@@ -586,7 +1071,7 @@ def LoadDecoders(decoders, verbose):
                     scriptDecoder = os.path.join(scriptPath, decoder)
                     if os.path.exists(scriptDecoder):
                         decoder = scriptDecoder
-            exec open(decoder, 'r') in globals(), globals()
+            exec(open(decoder, 'r').read(), globals(), globals())
         except Exception as e:
             print('Error loading decoder: %s' % decoder)
             if verbose:
@@ -870,7 +1355,7 @@ def PrintOutput(output, outputExtraInfo, extra, separator, quote, fOut):
             for i in range(len(output)):
                 Print(MakeCSVLine(output[i], separator, quote) + separator + outputExtraInfo[i], fOut)
         else:
-            stringsOutput = [map(ToString, row) for row in output]
+            stringsOutput = [tuple(map(ToString, row)) for row in output]
             lengthMaxRow = max([len(row) for row in output])
             lengthsMax = [0 for i in range(lengthMaxRow)]
             for i in range(lengthMaxRow):
@@ -4448,7 +4933,7 @@ def GetDictionary(passwordfile):
           'nite',
           'notused',
           'sss']
-      
+
 def DictionaryAttack(passwordfile, oZipfile, fOut, stop):
     try:
         oZipfile.open(oZipfile.infolist()[0], 'r').read(2)
@@ -4482,24 +4967,43 @@ def DictionaryAttack(passwordfile, oZipfile, fOut, stop):
                 Print('Passwords: %8d %.2f%% p/s: %d ETC: %s' % (counter, float(counter) / float(len(passwords)) * 100.0, pps, FormatTime(start + len(passwords) / pps)), fOut)
     return None
 
-def ZIPDump(zipfilename, options):
+def SelectDumpFunction(options):
+    if options.dump or options.dumpall:
+        DumpFunction = lambda x:x
+        if sys.platform == 'win32':
+            import msvcrt
+            msvcrt.setmode(sys.stdout.fileno(), os.O_BINARY)
+    elif options.hexdump or options.hexdumpall:
+        DumpFunction = HexDump
+    elif options.translate != '':
+        DumpFunction = Translate(options.translate)
+    else:
+        DumpFunction = HexAsciiDump
+    return DumpFunction
+
+def ZIPDump(zipfilename, options, data=None):
     global decoders
     decoders = []
-    LoadDecoders(options.decoders, True)
+    LoadDecoders(options.decoders, options.decoderdir, True)
 
     FixPipe()
-    if zipfilename == '':
+    if data != None:
+        oZipfile = zipfile.ZipFile(DataIO(data), 'r')
+    elif zipfilename == '':
         if sys.platform == 'win32':
             import msvcrt
             msvcrt.setmode(sys.stdin.fileno(), os.O_BINARY)
-        oZipfile = zipfile.ZipFile(cStringIO.StringIO(sys.stdin.read()), 'r')
+        if sys.version_info[0] > 2:
+            oZipfile = zipfile.ZipFile(DataIO(sys.stdin.buffer.read()), 'r')
+        else:
+            oZipfile = zipfile.ZipFile(DataIO(sys.stdin.read()), 'r')
     else:
         oZipfile = zipfile.ZipFile(zipfilename, 'r')
     zippassword = options.password
     if not options.regular and len(oZipfile.infolist()) == 1:
         try:
-            if oZipfile.open(oZipfile.infolist()[0], 'r', zippassword).read(2) == 'PK':
-                oZipfile2 = zipfile.ZipFile(cStringIO.StringIO(oZipfile.open(oZipfile.infolist()[0], 'r', zippassword).read()), 'r')
+            if oZipfile.open(oZipfile.infolist()[0], 'r', C2BIP3(zippassword)).read(2) == b'PK':
+                oZipfile2 = zipfile.ZipFile(DataIO(oZipfile.open(oZipfile.infolist()[0], 'r', C2BIP3(zippassword)).read()), 'r')
                 oZipfile.close()
                 oZipfile = oZipfile2
         except:
@@ -4514,7 +5018,7 @@ def ZIPDump(zipfilename, options):
         object = []
         counter = 1
         for oZipInfo in oZipfile.infolist():
-            file = oZipfile.open(oZipInfo, 'r', zippassword)
+            file = oZipfile.open(oZipInfo, 'r', C2BIP3(zippassword))
             filecontent = file.read()
             file.close()
             object.append({'id': counter, 'name': oZipInfo.filename, 'content': binascii.b2a_base64(filecontent).strip('\n')})
@@ -4542,22 +5046,12 @@ def ZIPDump(zipfilename, options):
         rules = YARACompile(options.yara)
 
     if options.dump or options.dumpall or options.hexdump or options.hexdumpall or options.asciidump or options.asciidumpall or options.translate != '':
-        if options.dump or options.dumpall:
-            DumpFunction = lambda x:x
-            if sys.platform == 'win32':
-                import msvcrt
-                msvcrt.setmode(sys.stdout.fileno(), os.O_BINARY)
-        elif options.hexdump or options.hexdumpall:
-            DumpFunction = HexDump
-        elif options.translate != '':
-            DumpFunction = Translate(options.translate)
-        else:
-            DumpFunction = HexAsciiDump
+        DumpFunction = SelectDumpFunction(options)
         counter = 0
         for oZipInfo in oZipfile.infolist():
             counter += 1
             if DecideToSelect(options.select, counter, oZipInfo.filename):
-                file = oZipfile.open(oZipInfo, 'r', zippassword)
+                file = oZipfile.open(oZipInfo, 'r', C2BIP3(zippassword))
                 if options.output:
                     fOut.write(DumpFunction(CutData(file.read(), options.cut)))
                 else:
@@ -4566,7 +5060,7 @@ def ZIPDump(zipfilename, options):
                 if options.select == '' and (options.dump or options.hexdump or options.asciidump):
                     break
     else:
-        if oZipfile.comment != '':
+        if oZipfile.comment != b'':
             Print(oZipfile.comment, fOut)
         outputRows = []
         outputExtraInfo = ['']
@@ -4587,7 +5081,7 @@ def ZIPDump(zipfilename, options):
         for oZipInfo in oZipfile.infolist():
             counter += 1
             if DecideToSelect(options.select, counter, oZipInfo.filename):
-                file = oZipfile.open(oZipInfo, 'r', zippassword)
+                file = oZipfile.open(oZipInfo, 'r', C2BIP3(zippassword))
                 filecontent = file.read()
                 file.close()
                 encrypted = oZipInfo.flag_bits & 1
@@ -4641,6 +5135,116 @@ def ZIPDump(zipfilename, options):
         fOut.close()
     oZipfile.close()
 
+def FindAll(data, sub):
+    result = []
+    start = 0
+    while True:
+        position = data.find(sub, start)
+        if position == -1:
+            return result
+        result.append(position)
+        start = position + 1
+
+#a# todo: add more record types - https://pkware.cachefly.net/webdocs/casestudies/APPNOTE.TXT
+def ParseZIPRecord(data):
+    if data[0:2] != b'PK':
+        return None
+    magic = 'PK'
+    extra = None
+    if len(data) >= 4:
+        magic += '%02x%02x' % (P23Ord(data[2]), P23Ord(data[3]))
+        if data[2:4] == b'\x03\x04':
+            magic += ' fil'
+            if len(data[26:28]) == 2:
+                length = struct.unpack('<H', data[26:28])[0]
+                filename = data[30:30 + length]
+                if len(filename) == length:
+                    magic += ' ' + repr(filename)
+        elif data[2:4] == b'\x01\x02':
+            magic += ' dir'
+            if len(data[28:30]) == 2:
+                length = struct.unpack('<H', data[28:30])[0]
+                filename = data[46:46 + length]
+                if len(filename) == length:
+                    magic += ' ' + repr(filename)
+        elif data[2:4] == b'\x05\x06':
+            magic += ' end'
+            if len(data[20:22]) == 2:
+                length = struct.unpack('<H', data[20:22])[0]
+                extra = 22 + length
+        else:
+            return None
+    return magic, extra
+
+def ZIPFind(zipfilename, options):
+    data = cBinaryFile(zipfilename, C2BIP3(options.password), True, True).read()
+    locations = [entry for entry in [[location, ParseZIPRecord(data[location:])] for location in FindAll(data, b'PK')] if entry[1] != None]
+    records = []
+    index = 1
+    if len(locations) > 0 and locations[0][0] != 0:
+        records.append(['p', 0, 'data', locations[0][0]])
+    for location, info in locations:
+        if info[0] == 'PK0506 end':
+            records.append([index, location, info[0], info[1]])
+            index += 1
+        else:
+            records.append([-1, location, info[0], info[1]])
+    if len(locations) > 0 and locations[-1][0] + locations[-1][1][1] < len(data):
+        records.append(['s', locations[-1][0] + locations[-1][1][1], 'data', len(data) - locations[-1][0] - locations[-1][1][1]])
+    if options.find == 'list':
+        index = 1
+        overview = []
+        for index, location, record, info in records:
+            if index in ['p', 's']:
+                print(' %3s 0x%08x %s %d:%dl' % (index, location, record, location, info))
+            else:
+                print(' %3s 0x%08x %s' % ('' if index < 0 else str(index), location, record))
+    elif options.find in ['p', 's']:
+        DumpFunction = SelectDumpFunction(options)
+        partial = None
+        for index, location, record, info in records:
+            if options.find == index:
+                partial = data[location:location + info]
+        if partial == None:
+            print('Index not found')
+        elif options.output:
+            with open(options.output, 'wb' if options.dump or options.dumpall else 'w') as fOut:
+                fOut.write(DumpFunction(CutData(partial, options.cut)))
+        else:
+            StdoutWriteChunked(DumpFunction(CutData(partial, options.cut)))
+    else:
+        index = int(options.find)
+        eocd = None
+        for record in records:
+            if record[0] == index:
+                eocd = record
+        if eocd == None:
+            print('Index not found')
+        else:
+            ZIPDump(zipfilename, options, data[:eocd[1] + eocd[3]])
+
+def ValidateOptions(options):
+    if ParseCutArgument(options.cut)[0] == None:
+        print('Error: the expression of the cut option (-c) is invalid: %s' % options.cut)
+        return True
+
+    if options.find != '':
+        if options.find.lower() in ['l', 'list']:
+            options.find = 'list'
+        elif options.find.lower() in ['p', 's']:
+            options.find = options.find.lower()
+        else:
+            try:
+                number = int(options.find)
+                if number < 1:
+                    print('Error: the value of the find option (-f) is invalid, it should be at least 1: %s' % options.find)
+                    return True
+            except:
+                print('Error: the value of the find option (-f) is invalid: %s' % options.find)
+                return True
+
+    return False
+
 def OptionsEnvironmentVariables(options):
     if options.extra == '':
         options.extra = os.getenv('ZIPDUMP_EXTRA', options.extra)
@@ -4673,6 +5277,8 @@ def Main():
     oParser.add_option('-z', '--zipfilename', action='store_true', default=False, help='include the filename of the ZIP file in the output')
     oParser.add_option('-E', '--extra', type=str, default='', help='add extra info (environment variable: ZIPDUMP_EXTRA)')
     oParser.add_option('-j', '--jsonoutput', action='store_true', default=False, help='produce json output')
+    oParser.add_option('--decoderdir', type=str, default='', help='directory for the decoder')
+    oParser.add_option('-f', '--find', type=str, default='', help='Find PK MAGIC sequence (use l or list for listing, number for selecting)')
     (options, args) = oParser.parse_args()
 
     if options.man:
@@ -4680,8 +5286,7 @@ def Main():
         PrintManual()
         return
 
-    if ParseCutArgument(options.cut)[0] == None:
-        print('Error: the expression of the cut option (-c) is invalid: %s' % options.cut)
+    if ValidateOptions(options):
         return 0
 
     OptionsEnvironmentVariables(options)
@@ -4694,9 +5299,15 @@ def Main():
         print('  https://DidierStevens.com')
         return
     elif len(args) == 0:
-        ZIPDump('', options)
+        if options.find == '':
+            ZIPDump('', options)
+        else:
+            ZIPFind('', options)
     else:
-        ZIPDump(args[0], options)
+        if options.find == '':
+            ZIPDump(args[0], options)
+        else:
+            ZIPFind(args[0], options)
 
 if __name__ == '__main__':
     Main()
