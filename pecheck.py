@@ -2,8 +2,8 @@
 
 __description__ = 'Tool for displaying PE file info'
 __author__ = 'Didier Stevens'
-__version__ = '0.7.8'
-__date__ = '2019/10/27'
+__version__ = '0.7.9'
+__date__ = '2020/01/26'
 
 """
 
@@ -44,6 +44,8 @@ History:
   2019/09/17: continue; added option -m
   2019/09/28: V0.7.8 added MD5 hash to -l P report
   2019/10/27: introduced environment variable DSS_DEFAULT_HASH_ALGORITHMS
+  2020/01/25: 0.7.9 import zlib; Python 3 fixes;
+  2020/01/26: Python 3 fixes;
 
 Todo:
 """
@@ -61,6 +63,7 @@ import os
 import re
 import struct
 import textwrap
+import zlib
 if sys.version_info[0] >= 3:
     from io import StringIO
 else:
@@ -150,6 +153,12 @@ def C2BIP3(string):
         return bytes([ord(x) for x in string])
     else:
         return string
+
+def P23Ord(value):
+    if type(value) == int:
+        return value
+    else:
+        return ord(value)
 
 def File2Strings(filename):
     try:
@@ -281,7 +290,12 @@ def Signature(pe):
         print(' Signature present but error importing pyasn1_modules module')
         return
 
-    contentInfo, _ = der_decoder.decode(str(signature), asn1Spec=rfc2315.ContentInfo())
+    if sys.version_info[0] > 2:
+        signatureArg = signature
+    else:
+        signatureArg = str(signature)
+
+    contentInfo, _ = der_decoder.decode(signatureArg, asn1Spec=rfc2315.ContentInfo())
     contentType = contentInfo.getComponentByName('contentType')
     contentInfoMap = {
         (1, 2, 840, 113549, 1, 7, 1): rfc2315.Data(),
@@ -297,7 +311,10 @@ def Signature(pe):
         print(line)
         oMatch = re.match('( *)value=0x....(.+)', line)
         if oMatch != None:
-            print(oMatch.groups()[0] + '      ' + repr(binascii.a2b_hex(oMatch.groups()[1])))
+            if sys.version_info[0] > 2:
+                print(oMatch.groups()[0] + '      ' + repr(binascii.a2b_hex(oMatch.groups()[1]).decode()))
+            else:
+                print(oMatch.groups()[0] + '      ' + repr(binascii.a2b_hex(oMatch.groups()[1])))
 
 #    for idx in range(len(content)):
 #        print(content.getNameByPosition(idx))
@@ -313,7 +330,7 @@ def SingleFileInfo(filename, data, signatures, options):
     print('SHA-256 hash: %s' % hashlib.sha256(raw).hexdigest())
     print('SHA-512 hash: %s' % hashlib.sha512(raw).hexdigest())
     for section in pe.sections:
-        print('%s entropy: %f (Min=0.0, Max=8.0)' % (''.join(filter(lambda c:c != '\0', str(section.Name))), section.get_entropy()))
+        print('%s entropy: %f (Min=0.0, Max=8.0)' % (SectionNameToString(section.Name), section.get_entropy()))
 
     print('Dump Info:')
     print(pe.dump_info())
@@ -322,7 +339,7 @@ def SingleFileInfo(filename, data, signatures, options):
     try:
         Signature(pe)
     except Exception as e:
-        print(' Error occured: %s' % e.message)
+        print(' Error occured: %s' % e)
     print('')
 
     print('PEiD:')
@@ -338,7 +355,7 @@ def SingleFileInfo(filename, data, signatures, options):
     print('ep address:  0x%08x' % ep_ava)
     for section in pe.sections:
         if section.VirtualAddress <= ep and section.VirtualAddress + section.SizeOfRawData >= ep:
-            print('Section:     %s' % ''.join(filter(lambda c:c != '\0', str(section.Name))))
+            print('Section:     %s' % SectionNameToString(section.Name))
             print('ep offset:   0x%08x' % (section.PointerToRawData + ep - section.VirtualAddress))
 
     print('')
@@ -352,10 +369,7 @@ def SingleFileInfo(filename, data, signatures, options):
         print(' Size:         0x%08x %s %.2f%%' %     (overlaySize, NumberOfBytesHumanRepresentation(overlaySize), float(overlaySize) / float(len(raw)) * 100.0))
         print(' MD5:          %s' % hashlib.md5(raw[overlayOffset:]).hexdigest())
         print(' SHA-256:      %s' % hashlib.sha256(raw[overlayOffset:]).hexdigest())
-        overlayMagic = raw[overlayOffset:][:4]
-        if type(overlayMagic[0]) == int:
-            overlayMagic = ''.join([chr(b) for b in overlayMagic])
-        print(' MAGIC:        %s %s' % (binascii.b2a_hex(overlayMagic), ''.join([IFF(ord(b) >= 32, b, '.') for b in overlayMagic])))
+        print(' MAGIC:        %s' % GenerateMAGIC(raw[overlayOffset:][:4]))
         print(' PE file without overlay:')
         print('  MD5:          %s' % hashlib.md5(raw[:overlayOffset]).hexdigest())
         print('  SHA-256:      %s' % hashlib.sha256(raw[:overlayOffset]).hexdigest())
@@ -508,7 +522,7 @@ def ParseGetData(expression):
     return (int(terms[0].strip()[2:], 16), int(terms[1].strip()[2:], 16))
 
 def GenerateMAGIC(data):
-    return binascii.b2a_hex(data) + ' ' + ''.join([IFF(ord(c) >= 32 and ord(c) <= 128, c, '.') for c in data])
+    return binascii.b2a_hex(data).decode() + ' ' + ''.join([IFF(P23Ord(c) >= 32 and P23Ord(c) < 127, chr(P23Ord(c)), '.') for c in data])
 
 def GetDumpFunction(options):
     if options.dump:
@@ -561,6 +575,12 @@ def Resources(data, options):
                 if options.getdata == '':
                     print('%4d: %-20s' % (counter, column1))
                 counter += 1
+
+def SectionNameToString(name):
+    if sys.version_info[0] > 2:
+        return ''.join([chr(b) for b in name if b != 0])
+    else:
+        return ''.join(filter(lambda c:c != '\0', str(name)))
 
 def Sections(data, options):
     counter = 1
@@ -739,7 +759,7 @@ def Sections(data, options):
         rules = YARACompile(options.yara)
 
     for section in pe.sections:
-        sectionname = ''.join(filter(lambda c:c != '\0', str(section.Name)))
+        sectionname = SectionNameToString(section.Name)
         if options.getdata == '':
             print('%d: %-10s %8d %f %s' % (counter, sectionname, section.SizeOfRawData, section.get_entropy(), dSections.get(sectionname, '')))
             if options.yara != None:
@@ -766,10 +786,10 @@ def FindAll(data, sub):
 
 def FindAllPEFiles(data):
     result = []
-    for position in FindAll(data, 'MZ'):
+    for position in FindAll(data, b'MZ'):
         if len(data[position:]) > 0x40:
             offset = struct.unpack('<I', (data[position + 0x3C:position + 0x40]))[0]
-            if data[position + offset:position + offset + 2] == 'PE':
+            if data[position + offset:position + offset + 2] == b'PE':
                 result.append(position)
     return result
 
@@ -789,7 +809,24 @@ class cHashCRC32():
     def hexdigest(self):
         return '%08x' % (self.crc32 & 0xffffffff)
 
+class cHashChecksum8():
+    def __init__(self):
+        self.sum = 0
+
+    def update(self, data):
+        if sys.version_info[0] >= 3:
+            self.sum += sum(data)
+        else:
+            self.sum += sum(map(ord, data))
+
+    def hexdigest(self):
+        return '%08x' % (self.sum)
+
+dSpecialHashes = {'crc32': cHashCRC32, 'checksum8': cHashChecksum8}
+
 def GetHashObjects(algorithms):
+    global dSpecialHashes
+
     dHashes = {}
 
     if algorithms == '':
@@ -799,12 +836,12 @@ def GetHashObjects(algorithms):
     else:
         hashes = algorithms.split(';')
     for name in hashes:
-        if name != 'crc32' and not name in hashlib.algorithms_available:
+        if not name in dSpecialHashes.keys() and not name in hashlib.algorithms_available:
             print('Error: unknown hash algorithm: %s' % name)
-            print('Available hash algorithms: ' + ' '.join(name for name in list(hashlib.algorithms_available) + ['crc32']))
+            print('Available hash algorithms: ' + ' '.join([name for name in list(hashlib.algorithms_available)] + list(dSpecialHashes.keys())))
             return [], {}
-        elif name == 'crc32':
-            dHashes[name] = cHashCRC32()
+        elif name in dSpecialHashes.keys():
+            dHashes[name] = dSpecialHashes[name]()
         else:
             dHashes[name] = hashlib.new(name)
 

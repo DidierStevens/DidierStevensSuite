@@ -2,8 +2,8 @@
 
 __description__ = 'Analyze OLE files (Compound Binary Files)'
 __author__ = 'Didier Stevens'
-__version__ = '0.0.44'
-__date__ = '2019/12/18'
+__version__ = '0.0.45'
+__date__ = '2020/01/06'
 
 """
 
@@ -90,6 +90,7 @@ History:
   2019/11/05: Python 3 support
   2019/11/24: changed HeuristicDecompress; Python 3 fixes
   2019/12/18: 0.0.44 added option -f
+  2020/01/06: 0.0.45 added verbose YARACompile
 
 Todo:
 """
@@ -1911,7 +1912,7 @@ def YARACompile(ruledata):
             rule = 'rule regex {strings: $a = /%s/ ascii wide nocase condition: $a}' % ruledata[3:]
         else:
             rule = ruledata[1:]
-        return yara.compile(source=rule, externals={'streamname': '', 'VBA': False})
+        return yara.compile(source=rule, externals={'streamname': '', 'VBA': False}), rule
     else:
         dFilepaths = {}
         if os.path.isdir(ruledata):
@@ -1922,7 +1923,7 @@ def YARACompile(ruledata):
         else:
             for filename in ProcessAt(ruledata):
                 dFilepaths[filename] = filename
-        return yara.compile(filepaths=dFilepaths, externals={'streamname': '', 'VBA': False})
+        return yara.compile(filepaths=dFilepaths, externals={'streamname': '', 'VBA': False}), ','.join(dFilepaths.values())
 
 def FilenameInSimulations(filename):
     if dslsimulationdb == None:
@@ -1999,7 +2000,9 @@ def OLEDump(filename, options):
             if sys.version >= '2.7.9':
                 print("You can use PIP to install yara-python like this: pip install yara-python\npip is located in Python's Scripts folder.\n")
             return returnCode
-        rules = YARACompile(options.yara)
+        rules, rulesVerbose = YARACompile(options.yara)
+        if options.verbose:
+            print(rulesVerbose)
 
     if filename == '':
         IfWIN32SetBinary(sys.stdin)
@@ -2160,7 +2163,7 @@ def Main():
     oParser.add_option('-M', '--metadata', action='store_true', default=False, help='Print metadata')
     oParser.add_option('-c', '--calc', action='store_true', default=False, help='Add extra calculated data to output, like hashes')
     oParser.add_option('--decompress', action='store_true', default=False, help='Search for compressed data in the stream and decompress it')
-    oParser.add_option('-V', '--verbose', action='store_true', default=False, help='verbose output with decoder errors')
+    oParser.add_option('-V', '--verbose', action='store_true', default=False, help='verbose output with decoder errors and YARA rules')
     oParser.add_option('-C', '--cut', type=str, default='', help='cut data')
     oParser.add_option('-E', '--extra', type=str, default='', help='add extra info (environment variable: OLEDUMP_EXTRA)')
     oParser.add_option('--storages', action='store_true', default=False, help='Include storages in report')
