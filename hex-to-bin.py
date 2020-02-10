@@ -2,8 +2,8 @@
 
 __description__ = 'Hex to bin'
 __author__ = 'Didier Stevens'
-__version__ = '0.0.3'
-__date__ = '2019/09/11'
+__version__ = '0.0.4'
+__date__ = '2020/02/05'
 
 """
 
@@ -19,6 +19,7 @@ History:
   2019/05/11: added option -l and -s
   2019/08/31: 0.0.3 added option -x
   2019/09/11: updated man; Python3 kludge
+  2020/02/05: 0.0.4 added --bitstream
 
 Todo:
   Get rid of Python2/Python3 conversion kludge
@@ -31,12 +32,17 @@ import os
 import signal
 import textwrap
 import codecs
+if sys.version_info[0] >= 3:
+    from io import BytesIO as DataIO
+else:
+    from cStringIO import StringIO as DataIO
 
 def PrintManual():
     manual = '''
 Manual:
 
-This program reads from the given file or standard input, and converts the hexadecimal data to binary data.
+This program reads from the given file or standard input, and converts the hexadecimal or bitstream data to binary data.
+Unless option -b --bitstream is used, this tool converts hexadecimal data.
 
 Using option -a, this tool will look for the first hexadecimal/ASCII dump (see example below) as produced by other tools developed by Didier Stevens, and extract the contained hexadecimal data to convert to binary data.
 
@@ -55,6 +61,10 @@ Option -l (list) can be used to produce an overview of all hexadecimal/ASCII dum
 Using option -x, this tool will look for the first generic hexadecimal dump produced by other tools NOT developed by Didier Stevens (like registry export), and extract the contained hexadecimal data to convert to binary data.
 An hexadecimal dump needs to start with at least 16 hexadecimal bytes (not interrupted by other letters or digits) to be recognized.
 Options -l and -s can be used together with option -x.
+
+Option -b makes this tool read bitstream data: this is text composed of 0 and 1 characters (whitespace is ignored).
+Each consecutive group of 8 bits (0 or 1 characters) is converted to a byte. The left-most bit is the most significant bit.
+If necessary, the bitstream is right-padded with 0s to make the bitstream length a multiple of 8.
 
 hex-to-bin expects text input (ASCII). When the input is UNICODE, option -t can be used to translate the input text before it is parsed.
 For example, -t utf16 will convert the input text from UTF16.
@@ -217,6 +227,15 @@ def Translate(expression):
         command = expression
     return lambda x: eval('x' + command)
 
+def DecodeBitstream(bitstream):
+    bitstream += ((8 - len(bitstream) % 8) % 8) * b'0'
+    oResult = DataIO()
+    position = 0
+    while position < len(bitstream):
+        oResult.write(C2BIP3(chr(int(bitstream[position:position + 8], 2))))
+        position += 8
+    return oResult.getvalue()
+
 def Hex2Bin(filename, options):
     FixPipe()
     if filename == '':
@@ -239,7 +258,11 @@ def Hex2Bin(filename, options):
         import msvcrt
         msvcrt.setmode(sys.stdout.fileno(), os.O_BINARY)
     y = content.replace(C2BIP3(' '), C2BIP3('')).replace(C2BIP3('\t'), C2BIP3('')).replace(C2BIP3('\r'), C2BIP3('')).replace(C2BIP3('\n'), C2BIP3(''))
-    StdoutWriteChunked(binascii.unhexlify(y))
+    if options.bitstream:
+        data = DecodeBitstream(y)
+    else:
+        data = binascii.unhexlify(y)
+    StdoutWriteChunked(data)
 
 def Main():
     oParser = optparse.OptionParser(usage='usage: %prog [options] [file]\n' + __description__, version='%prog ' + __version__)
@@ -249,6 +272,7 @@ def Main():
     oParser.add_option('-x', '--hexdump', action='store_true', default=False, help='Extract Hex dumps')
     oParser.add_option('-s', '--select', default='1', help='Select dump nr for extraction (default first dump)')
     oParser.add_option('-t', '--translate', type=str, default='', help='String translation, like utf16 or .decode("utf8")')
+    oParser.add_option('-b', '--bitstream', action='store_true', default=False, help='Process a bitstream (string with 0s & 1s)')
     (options, args) = oParser.parse_args()
 
     if options.man:

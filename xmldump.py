@@ -2,8 +2,8 @@
 
 __description__ = 'This is essentially a wrapper for xml.etree.ElementTree'
 __author__ = 'Didier Stevens'
-__version__ = '0.0.3'
-__date__ = '2018/04/01'
+__version__ = '0.0.4'
+__date__ = '2020/01/12'
 
 """
 
@@ -17,6 +17,8 @@ History:
   2017/12/16: 0.0.2 added elementtext and attributes command
   2017/12/31: added option -u
   2018/04/01: 0.0.3 added support for xmlns with single quote
+  2018/06/29: 0.0.4 ProcessFile for Linux/OSX
+  2020/01/12: added pretty print
 
 Todo:
 """
@@ -29,6 +31,7 @@ import sys
 import textwrap
 import xml.etree.ElementTree
 import re
+import xml.dom.minidom
 
 def PrintManual():
     manual = r'''
@@ -36,7 +39,7 @@ Manual:
 
 xmldump.py can be used to extract information from XML files, it is essentially a wrapper for xml.etree.ElementTree.
 
-This Python script was developed with Python 2.7 and tested with Python 2.7 and 3.5.
+This Python script was developed with Python 2.7 and tested with Python 2.7 and 3.7.
 
 It reads one or more files or stdin to parse XML files. If no file arguments are provided to this tool, it will read data from standard input (stdin). This way, this tool can be used in a piped chain of commands.
 
@@ -45,6 +48,7 @@ The first argument to the tool is a command, which can be:
  wordtext
  elementtext
  attributes
+ pretty
 
 Command text will extract all text from the elements in the XML file.
 Example:
@@ -77,22 +81,22 @@ w:t: Second line.
 w:p: Third line
 w:r: Third line
 w:t: Third line
-w:bookmarkStart: 
-w:bookmarkEnd: 
+w:bookmarkStart:
+w:bookmarkEnd:
 w:p: https://DidierStevens.com
 w:hyperlink: https://DidierStevens.com
 w:r: https://DidierStevens.com
-w:rPr: 
-w:rStyle: 
+w:rPr:
+w:rStyle:
 w:t: https://DidierStevens.com
 w:p: Last line
 w:r: Last line
 w:t: Last line
-w:sectPr: 
-w:pgSz: 
-w:pgMar: 
-w:cols: 
-w:docGrid: 
+w:sectPr:
+w:pgSz:
+w:pgMar:
+w:cols:
+w:docGrid:
 
 By default, the namespace URI (xmlns) is suppressed. Use option -u to include it.
 Example:
@@ -109,22 +113,22 @@ zipdump.py -s 4 -d test.docx | xmldump.py -u elementtext
 {http://schemas.openxmlformats.org/wordprocessingml/2006/main}p: Third line
 {http://schemas.openxmlformats.org/wordprocessingml/2006/main}r: Third line
 {http://schemas.openxmlformats.org/wordprocessingml/2006/main}t: Third line
-{http://schemas.openxmlformats.org/wordprocessingml/2006/main}bookmarkStart: 
-{http://schemas.openxmlformats.org/wordprocessingml/2006/main}bookmarkEnd: 
+{http://schemas.openxmlformats.org/wordprocessingml/2006/main}bookmarkStart:
+{http://schemas.openxmlformats.org/wordprocessingml/2006/main}bookmarkEnd:
 {http://schemas.openxmlformats.org/wordprocessingml/2006/main}p: https://DidierStevens.com
 {http://schemas.openxmlformats.org/wordprocessingml/2006/main}hyperlink: https://DidierStevens.com
 {http://schemas.openxmlformats.org/wordprocessingml/2006/main}r: https://DidierStevens.com
-{http://schemas.openxmlformats.org/wordprocessingml/2006/main}rPr: 
-{http://schemas.openxmlformats.org/wordprocessingml/2006/main}rStyle: 
+{http://schemas.openxmlformats.org/wordprocessingml/2006/main}rPr:
+{http://schemas.openxmlformats.org/wordprocessingml/2006/main}rStyle:
 {http://schemas.openxmlformats.org/wordprocessingml/2006/main}t: https://DidierStevens.com
 {http://schemas.openxmlformats.org/wordprocessingml/2006/main}p: Last line
 {http://schemas.openxmlformats.org/wordprocessingml/2006/main}r: Last line
 {http://schemas.openxmlformats.org/wordprocessingml/2006/main}t: Last line
-{http://schemas.openxmlformats.org/wordprocessingml/2006/main}sectPr: 
-{http://schemas.openxmlformats.org/wordprocessingml/2006/main}pgSz: 
-{http://schemas.openxmlformats.org/wordprocessingml/2006/main}pgMar: 
-{http://schemas.openxmlformats.org/wordprocessingml/2006/main}cols: 
-{http://schemas.openxmlformats.org/wordprocessingml/2006/main}docGrid: 
+{http://schemas.openxmlformats.org/wordprocessingml/2006/main}sectPr:
+{http://schemas.openxmlformats.org/wordprocessingml/2006/main}pgSz:
+{http://schemas.openxmlformats.org/wordprocessingml/2006/main}pgMar:
+{http://schemas.openxmlformats.org/wordprocessingml/2006/main}cols:
+{http://schemas.openxmlformats.org/wordprocessingml/2006/main}docGrid:
 
 Command attributes will extract all attributes from the elements in the XML file.
 Example:
@@ -188,6 +192,8 @@ w:cols
   w:space: 720
 w:docGrid
   w:linePitch: 360
+
+Command pretty will just perform a pretty print of the XML file.
 
 By default, output is printed to the consolde (stdout). It can be directed to a file using option -o.
 '''
@@ -276,7 +282,7 @@ def ProcessFile(fIn, fullread):
         yield fIn.read()
     else:
         for line in fIn:
-            yield line.strip('\n')
+            yield line.strip('\n\r')
 
 def XMLGetText(element):
     if sys.version_info[0] > 2:
@@ -299,25 +305,41 @@ def TransformTag(tag, dXMLNS, includeURI):
             return tag
     else:
         return tag
-    
-def ExtractText(root, dXMLNS, oOutput, options):
+
+def AnalyzeXMLNS(data):
+    dXMLNS = {}
+    for match in re.findall('xmlns(:([^=]+))?="([^"]+)"', data):
+        dXMLNS[match[2]] = match[1]
+    for match in re.findall("xmlns(:([^=]+))?='([^']+)'", data):
+        dXMLNS[match[2]] = match[1]
+    root = xml.etree.ElementTree.fromstring(data)
+    return root, dXMLNS
+
+def ExtractText(data, oOutput, options):
+    root, dXMLNS = AnalyzeXMLNS(data)
     oOutput.Line(XMLGetText(root))
 
-def ExtractWordText(root, dXMLNS, oOutput, options):
+def ExtractWordText(data, oOutput, options):
+    root, dXMLNS = AnalyzeXMLNS(data)
     for element in root.iter('{http://schemas.openxmlformats.org/wordprocessingml/2006/main}p'):
         oOutput.Line(XMLGetText(element))
 
-def ExtractElementText(root, dXMLNS, oOutput, options):
+def ExtractElementText(data, oOutput, options):
+    root, dXMLNS = AnalyzeXMLNS(data)
     for element in root.iter():
         oOutput.Line('%s: %s' % (TransformTag(element.tag, dXMLNS, options.includeuri), XMLGetText(element)))
 
-def ExtractElementAttributes(root, dXMLNS, oOutput, options):
+def ExtractElementAttributes(data, oOutput, options):
+    root, dXMLNS = AnalyzeXMLNS(data)
     for element in root.iter():
         oOutput.Line('%s' % (TransformTag(element.tag, dXMLNS, options.includeuri)))
         for key, value in element.items():
             oOutput.Line('  %s: %s' % (TransformTag(key, dXMLNS, options.includeuri), value))
 
-dCommands = {'text': ExtractText, 'wordtext': ExtractWordText, 'elementtext': ExtractElementText, 'attributes': ExtractElementAttributes}
+def PrettyPrint(data, oOutput, options):
+    oOutput.Line(xml.dom.minidom.parseString(data).toprettyxml())
+
+dCommands = {'text': ExtractText, 'wordtext': ExtractWordText, 'elementtext': ExtractElementText, 'attributes': ExtractElementAttributes, 'pretty': PrettyPrint}
 
 def ProcessTextFileSingle(command, filenames, oOutput, options):
     for filename in filenames:
@@ -328,15 +350,8 @@ def ProcessTextFileSingle(command, filenames, oOutput, options):
         data = fIn.read()
         if fIn != sys.stdin:
             fIn.close()
-        
-        dXMLNS = {}
-        for match in re.findall('xmlns(:([^=]+))?="([^"]+)"', data):
-            dXMLNS[match[2]] = match[1]
-        for match in re.findall("xmlns(:([^=]+))?='([^']+)'", data):
-            dXMLNS[match[2]] = match[1]
-        root = xml.etree.ElementTree.fromstring(data)
 
-        dCommands[command](root, dXMLNS, oOutput, options)
+        dCommands[command](data, oOutput, options)
 
 def ProcessTextFile(command, filenames, options):
     oOutput = cOutputResult(options)

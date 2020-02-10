@@ -2,8 +2,8 @@
 
 __description__ = 'Cut a section of bytes out of a file'
 __author__ = 'Didier Stevens'
-__version__ = '0.0.11'
-__date__ = '2020/01/25'
+__version__ = '0.0.12'
+__date__ = '2020/02/01'
 
 """
 
@@ -29,6 +29,7 @@ History:
   2020/01/20: 0.0.11 added ParsePackExpression #p#
   2020/01/24: added #h# support for spaces
   2020/01/25: fix ascii dump 127
+  2020/02/01: 0.0.12 added #u#
 
 Todo:
 """
@@ -52,6 +53,10 @@ if sys.version_info[0] >= 3:
     from io import StringIO
 else:
     from cStringIO import StringIO
+if sys.version_info[0] >= 3:
+    import urllib.request as urllib23
+else:
+    import urllib2 as urllib23
 
 MALWARE_PASSWORD = 'infected'
 dumplinelength = 16
@@ -150,6 +155,9 @@ The string after #p# must contain 2 expressions separated by a # character, like
 The first expression (I in this example) is the format string for the Python struct.pack function, and the second expression (123456 in this example) is a Python expression that needs to be packed by struct.pack.
 In this example, format string I represents an unsigned, 32-bit, little-endian integer, and thus #p#I#123456 generates byte sequence 40E20100 (hexadecimal).
 Remark that the Python expression is evaluated with Python's eval function: this can be abused to achieve arbitrary code execution.
+
+File arguments that start with #u# are a notational convention to download a file using an url.
+For example: #u#http://didierstevens.com
 
 To process a file that starts with #, prefix it with a relative path to the current directory:
  cut-bytes.py : .\#data
@@ -718,6 +726,21 @@ FCH_FILENAME = 0
 FCH_DATA = 1
 FCH_ERROR = 2
 
+def DownloadFile(url):
+    try:
+        if sys.hexversion >= 0x020601F0:
+            infile = urllib23.urlopen(url, timeout=5)
+        else:
+            infile = urllib23.urlopen(url)
+    except urllib23.HTTPError:
+        return None, 'urlopen'
+    try:
+        data = infile.read()
+    except:
+        return None, 'read'
+    infile.close()
+    return data, None
+
 def FilenameCheckHash(filename, literalfilename):
     if literalfilename:
         return FCH_FILENAME, filename
@@ -744,6 +767,12 @@ def FilenameCheckHash(filename, literalfilename):
             return FCH_ERROR, 'pack'
         else:
             return FCH_DATA, result
+    elif filename.startswith('#u#'):
+        result, error = DownloadFile(filename[3:])
+        if result == None:
+            return FCH_ERROR, 'url:' + error
+        else:
+            return FCH_DATA, result
     elif filename.startswith('#'):
         return FCH_DATA, C2BIP3(filename[1:])
     else:
@@ -759,7 +788,10 @@ class cBinaryFile:
 
         fch, data = FilenameCheckHash(self.filename, self.literalfilename)
         if fch == FCH_ERROR:
-            raise Exception('Error %s parsing filename: %s' % (data, self.filename))
+            if data.startswith('url:'):
+                raise Exception('Error %s downloading: %s' % (data.split(':')[1], self.filename[3:]))
+            else:
+                raise Exception('Error %s parsing filename: %s' % (data, self.filename))
 
         if self.filename == '':
             if sys.platform == 'win32':

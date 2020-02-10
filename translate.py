@@ -2,8 +2,8 @@
 
 __description__ = 'Translate bytes according to a Python expression'
 __author__ = 'Didier Stevens'
-__version__ = '2.5.6'
-__date__ = '2019/02/26'
+__version__ = '2.5.7'
+__date__ = '2020/01/06'
 
 """
 
@@ -39,6 +39,7 @@ History:
   2018/04/27: added option literalfilenames
   2019/02/20: 2.5.5 added ZlibRawD
   2019/02/26: 2.5.6 updated help
+  2020/01/06: 2.5.7 added Xor function
 
 Todo:
 """
@@ -114,7 +115,15 @@ Output: ABCD
 Option -e (execute) is used to execute Python commands before the command is executed. This can, for example, be used to import modules.
 Here is an example to decompress a Flash file (.swf):
  translate.py -f -e "import zlib" sample.swf "lambda b: zlib.decompress(b[8:])"
-You can use build in function ZlibD too, and ZlibRawD for inflating without header, and GzipD for gzip decompression.
+
+You can use build-in function ZlibD too, and ZlibRawD for inflating without header, and GzipD for gzip decompression.
+
+Build-in function Xor can be used for Xor decoding with a multi-byte key, like in this example:
+
+Example:
+ translate.py -f #h#320700130717 "lambda data: Xor(data, b'abc')"
+Output:
+ Secret
 
 A second file can be used as input with option -2. The value of the current byte of the second input file is stored in variable byte2 (this too advances byte per byte together with the primary input file).
 
@@ -200,6 +209,12 @@ def ZlibD(data):
 
 def ZlibRawD(data):
     return zlib.decompress(data, -8)
+
+def Xor(data, key):
+    if sys.version_info[0] > 2:
+        return bytes([byte ^ key[index % len(key)] for index, byte in enumerate(data)])
+    else:
+        return ''.join([chr(ord(char) ^ ord(key[index % len(key)])) for index, char in enumerate(data)])
 
 # CIC: Call If Callable
 def CIC(expression):
