@@ -4,8 +4,8 @@ from __future__ import print_function
 
 __description__ = "Template for text file processing"
 __author__ = 'Didier Stevens'
-__version__ = '0.0.1'
-__date__ = '2018/10/20'
+__version__ = '0.0.2'
+__date__ = '2020/02/22'
 
 """
 
@@ -24,7 +24,8 @@ History:
   2018/07/28: added options --begingrep, --begingrepoptions, --endgrep, and --endgrepoptions
   2018/09/18: added eta to progress
   2018/10/08: added %ru% to cOutput; added search and replace
-  2018/10/20: added eol to cOutput.Line 
+  2018/10/20: added eol to cOutput.Line
+  2020/02/22: 0.0.2 added option --context
 
 Todo:
 """
@@ -39,6 +40,7 @@ import os
 import gzip
 import re
 import fnmatch
+import collections
 from contextlib import contextmanager
 
 def PrintManual():
@@ -55,6 +57,12 @@ You can also use a capture group in your regular expression. The line to be proc
 The regular expression matching operation is case sensitive. Use option --grepoptions i to make the matching operation case insensitive.
 Use option --grepoptions v to invert the selection.
 Use option --grepoptions F to match a fixed string in stead of a regular expression.
+
+Option --context can be used to select which lines have to be processed when a line is "grepped". If no context is provided, only "grepped" lines are processed.
+But if you want to process other lines, use option --context. The value for this option is a list of line numbers/ranges separated by a comma. The line numbers are relative to the "grepped" line.
+A number is negative, zero or positive integer. A range is 2 numbers separated by a dash (-).
+For example, line number -1 is the line right before the "grepped" line (0 is the "grepped" line itself).
+Example to select the line before a line containing "trigger" and the second line after the trigger line: --grep trigger --context -1,2
 
 Option --begingrep can be used to select the first line from which on lines have to be processed.
 If this option is not used, all lines will be processed.
@@ -459,7 +467,7 @@ class cGrep():
 def SearchAndReplace(line, search, replace, searchoptions):
     return line.replace(search, replace)
 
-def ProcessFile(fIn, oBeginGrep, oGrep, oEndGrep, options, fullread):
+def ProcessFileWithoutContext(fIn, oBeginGrep, oGrep, oEndGrep, options, fullread):
     if fIn == None:
         return
 
@@ -491,6 +499,69 @@ def ProcessFile(fIn, oBeginGrep, oGrep, oEndGrep, options, fullread):
             if options.search != '':
                 line = SearchAndReplace(line, options.search, options.replace, options.searchoptions)
             yield line
+
+def ProcessFileWithContext(fIn, oBeginGrep, oGrep, oEndGrep, context, options, fullread):
+    if fIn == None:
+        return
+
+    begin = oBeginGrep == None or not oBeginGrep.dogrep
+    end = False
+    returnendline = False
+    lineCounter = 0
+    if len(context) >= 2:
+        queueSize = context[1] - context[0] + 1
+    elif context[0] < 0:
+        queueSize = 0 - context[0] + 1
+    else:
+        queueSize = context[0] - 0 + 1
+    queue = collections.deque([[-1, ''] for i in range(0, queueSize)])
+    lineNumbers = []
+
+    if fullread:
+        yield fIn.read()
+    else:
+        for line in fIn:
+            lineCounter += 1
+            line = line.rstrip('\n\r')
+            if not begin:
+                begin, line = oBeginGrep.Grep(line)
+            if not begin:
+                continue
+            if not end and oEndGrep != None and oEndGrep.dogrep:
+                end, line = oEndGrep.Grep(line)
+                if end:
+                    returnendline = True
+            if end and not returnendline:
+                continue
+            queue.popleft()
+            queue.append([lineCounter, line])
+            selected, line = oGrep.Grep(line)
+            if selected:
+                lineNumbers = sorted(set(lineNumbers + [lineCounter + offset for offset in context]))
+            if lineNumbers == []:
+                continue
+            else:
+                for lineKey, lineValue in queue:
+                    if lineNumbers[0] == lineKey:
+                        line = lineValue
+                        lineNumbers = lineNumbers[1:]
+                        break
+            if end and returnendline:
+                returnendline = False
+            if options.search != '':
+                line = SearchAndReplace(line, options.search, options.replace, options.searchoptions)
+            yield line
+        for line in lineNumbers:
+            for lineKey, lineValue in queue:
+                if line == lineKey:
+                    yield lineValue
+                    break
+
+def ProcessFile(fIn, oBeginGrep, oGrep, oEndGrep, context, options, fullread):
+    if oGrep != None and context != []:
+        return ProcessFileWithContext(fIn, oBeginGrep, oGrep, oEndGrep, context, options, fullread)
+    else:
+        return ProcessFileWithoutContext(fIn, oBeginGrep, oGrep, oEndGrep, options, fullread)
 
 def AnalyzeFileError(filename):
     PrintError('Error opening file %s' % filename)
@@ -535,10 +606,10 @@ def TextFile(filename, oLogfile):
         if fIn != sys.stdin:
             fIn.close()
 
-def ProcessTextFile(filename, oBeginGrep, oGrep, oEndGrep, oOutput, oLogfile, options):
+def ProcessTextFile(filename, oBeginGrep, oGrep, oEndGrep, context, oOutput, oLogfile, options):
     with TextFile(filename, oLogfile) as fIn:
         try:
-            for line in ProcessFile(fIn, oBeginGrep, oGrep, oEndGrep, options, False):
+            for line in ProcessFile(fIn, oBeginGrep, oGrep, oEndGrep, context, options, False):
                 # ----- Put your line processing code here -----
                 oOutput.Line(line)
                 # ----------------------------------------------
@@ -555,15 +626,53 @@ def InstantiateCOutput(options):
         filenameOption = options.output
     return cOutput(filenameOption)
 
+def ParseNumber(number):
+    negative = 1
+    if number[0] == '-':
+        negative = -1
+        number = number[1:]
+    elif number[0] == '+':
+        number = number[1:]
+    digits = ''
+    while len(number) > 0 and number[0] >= '0' and number[0] <= '9':
+        digits += number[0]
+        number = number[1:]
+    return negative * int(digits), number
+
+def ParseTerm(term):
+    start, remainder = ParseNumber(term)
+    if len(remainder) == 0:
+        return [start]
+    if remainder[0] == '-':
+        remainder = remainder[1:]
+        stop, remainder = ParseNumber(remainder)
+        if len(remainder) > 0:
+            raise Exception('Error parsing term: ' + term)
+        return list(range(start, stop + 1))
+    else:
+        raise Exception('Error parsing term: ' + term)
+
+def ParseContext(context):
+    lines = []
+    for term in context.replace(' ', '').split(','):
+        lines += ParseTerm(term)
+    return sorted(set(lines))
+
 def ProcessTextFiles(filenames, oLogfile, options):
     oGrep = cGrep(options.grep, options.grepoptions)
     oBeginGrep = cGrep(options.begingrep, options.begingrepoptions)
     oEndGrep = cGrep(options.endgrep, options.endgrepoptions)
     oOutput = InstantiateCOutput(options)
+    if oGrep == None or not oGrep.dogrep:
+        context = []
+    elif options.context == '':
+        context = []
+    else:
+        context = ParseContext(options.context)
 
     for index, filename in enumerate(filenames):
         oOutput.Filename(filename, index, len(filenames))
-        ProcessTextFile(filename, oBeginGrep, oGrep, oEndGrep, oOutput, oLogfile, options)
+        ProcessTextFile(filename, oBeginGrep, oGrep, oEndGrep, context, oOutput, oLogfile, options)
 
     oOutput.Close()
 
@@ -583,6 +692,7 @@ https://DidierStevens.com'''
     oParser.add_option('-o', '--output', type=str, default='', help='Output to file (# supported)')
     oParser.add_option('--grep', type=str, default='', help='Grep expression')
     oParser.add_option('--grepoptions', type=str, default='', help='grep options (ivF)')
+    oParser.add_option('--context', type=str, default='', help='Grep context (lines to select)')
     oParser.add_option('--begingrep', type=str, default='', help='Grep expression for begin line')
     oParser.add_option('--begingrepoptions', type=str, default='', help='begingrep options (ivF)')
     oParser.add_option('--endgrep', type=str, default='', help='Grep expression for end line')
