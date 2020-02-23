@@ -2,8 +2,8 @@
 
 __description__ = 'BIFF plugin for oledump.py'
 __author__ = 'Didier Stevens'
-__version__ = '0.0.6'
-__date__ = '2019/11/05'
+__version__ = '0.0.7'
+__date__ = '2020/02/23'
 
 """
 
@@ -23,6 +23,7 @@ History:
   2019/01/05: 0.0.4 added option -x
   2019/03/06: 0.0.5 enhanced parsing of formula expressions
   2019/11/05: 0.0.6 Python 3 support
+  2020/02/23: 0.0.7 performance improvement
 
 Todo:
 """
@@ -929,13 +930,13 @@ class cBIFF(cPluginParent):
             if options.find.startswith('0x'):
                 options.find = binascii.a2b_hex(options.find[2:])
 
-            while len(stream) > 0:
+            position = 0
+            while position < len(stream):
                 formatcodes = 'HH'
                 formatsize = struct.calcsize(formatcodes)
-                opcode, length = struct.unpack(formatcodes, stream[0:formatsize])
-                stream = stream[formatsize:]
-                data = stream[:length]
-                stream = stream[length:]
+                opcode, length = struct.unpack(formatcodes, stream[position:position + formatsize])
+                data = stream[position + formatsize:position + formatsize + length]
+                position = position + formatsize + length
 
                 if opcode in dOpcodes:
                     opcodename = dOpcodes[opcode]
