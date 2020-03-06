@@ -2,8 +2,8 @@
 
 __description__ = 'Analyze OLE files (Compound Binary Files)'
 __author__ = 'Didier Stevens'
-__version__ = '0.0.45'
-__date__ = '2020/01/06'
+__version__ = '0.0.46'
+__date__ = '2020/03/06'
 
 """
 
@@ -91,6 +91,7 @@ History:
   2019/11/24: changed HeuristicDecompress; Python 3 fixes
   2019/12/18: 0.0.44 added option -f
   2020/01/06: 0.0.45 added verbose YARACompile
+  2020/03/06: 0.0.46 added %CLSIDDESC% and Root Entry to --storages
 
 Todo:
 """
@@ -136,6 +137,11 @@ except:
     if sys.version >= '2.7.9':
         print("You can use PIP to install olefile like this: pip install olefile\npip is located in Python's Scripts folder.\n")
     exit(-1)
+
+try:
+    from oletools.common.clsid import KNOWN_CLSIDS
+except ImportError:
+    KNOWN_CLSIDS = {}
 
 dumplinelength = 16
 MALWARE_PASSWORD = 'infected'
@@ -557,6 +563,7 @@ If you need more data than the MD5 of each stream, use option -E (extra). This o
                  number of printable bytes
                  number of high bytes
   %CLSID%: storage/stream class ID
+  %CLSIDDESC%: storage/stream class ID description
 
 The parameter for -E may contain other text than the variables, which will be printed. Escape characters \\n and \\t are supported.
 Example displaying the MD5 and SHA256 hash per stream, separated by a space character:
@@ -1564,6 +1571,10 @@ def GenerateExtraInfo(extra, index, indicator, name, entry_clsid, stream):
         prefix = ' '
     if indicator == ' ':
         indicator = ''
+    if KNOWN_CLSIDS == {}:
+        clsidDesc = '<oletools missing>'
+    else:
+        clsidDesc = KNOWN_CLSIDS.get(entry_clsid.upper(), '')
     dExtras = {'%INDEX%': lambda x: index,
                '%INDICATOR%': lambda x: indicator,
                '%LENGTH%': lambda x: '%d' % len(stream),
@@ -1579,6 +1590,7 @@ def GenerateExtraInfo(extra, index, indicator, name, entry_clsid, stream):
                '%HISTOGRAM%': ExtraInfoHISTOGRAM,
                '%BYTESTATS%': ExtraInfoBYTESTATS,
                '%CLSID%': lambda x: entry_clsid,
+               '%CLSIDDESC%': lambda x: clsidDesc,
               }
     for variable in dExtras:
         if variable in extra:
@@ -1599,6 +1611,8 @@ def OLE10HeaderPresent(data):
 
 def OLEGetStreams(ole, storages):
     olestreams = []
+    if storages:
+        olestreams.append([0, [ole.root.name], ole.root.entry_type, ole.root.clsid, ''])
     for fname in ole.listdir(storages=storages):
         if ole.get_type(fname) == 1:
             data = ''
@@ -1742,7 +1756,9 @@ def OLESub(ole, prefix, rules, options):
             else:
                 moduleinfo = ''
             lengthString = '       '
-            if entry_type == 1:
+            if entry_type == 5:
+                indicator = 'R'
+            elif entry_type == 1:
                 indicator = '.'
             elif entry_type == 2:
                 lengthString = '%7d' % len(stream)
