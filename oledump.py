@@ -2,8 +2,8 @@
 
 __description__ = 'Analyze OLE files (Compound Binary Files)'
 __author__ = 'Didier Stevens'
-__version__ = '0.0.46'
-__date__ = '2020/03/06'
+__version__ = '0.0.47'
+__date__ = '2020/03/08'
 
 """
 
@@ -92,6 +92,7 @@ History:
   2019/12/18: 0.0.44 added option -f
   2020/01/06: 0.0.45 added verbose YARACompile
   2020/03/06: 0.0.46 added %CLSIDDESC% and Root Entry to --storages
+  2020/03/08: 0.0.47 updated man
 
 Todo:
 """
@@ -122,17 +123,17 @@ else:
 
 try:
     import dslsimulationdb
-except:
+except ImportError:
     dslsimulationdb = None
 
 try:
     import yara
-except:
+except ImportError:
     pass
 
 try:
     import olefile
-except:
+except ImportError:
     print('This program requires module olefile.\nhttp://www.decalage.info/python/olefileio\n')
     if sys.version >= '2.7.9':
         print("You can use PIP to install olefile like this: pip install olefile\npip is located in Python's Scripts folder.\n")
@@ -372,7 +373,7 @@ SHA256 embedded file: 211b63ae126411545f9177ec80114883d32f7e3c7ccf81ee4e5dd6ffe3
 To extract the embedded file, use option -e and redirect the output to a file like this:
 C:\Demo>oledump.py -s 6 -e Book1-insert-object-calc-rol3.exe.xls > extracted.bin
 
-Use option --storages to display storages (by default, oledump only lists streams).
+Use option --storages to display storages (by default, oledump only lists streams). Indicator . is used for storages except for the Root Entry which has indicator R.
 
 Option -f can be used to find embedded OLE files. This is useful, for example, in the following scenario:
 AutoCAD drawing files (.dwg) can contain VBA macros. Although the .dwg file format is a proprietary format, VBA macros are stored as an embedded OLE file. The header of a DWG file contains a pointer to the embedded OLE file, but since an OLE file starts with a MAGIC sequence (D0CF11E0), you can just scan the input file for this sequence.

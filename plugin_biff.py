@@ -2,8 +2,8 @@
 
 __description__ = 'BIFF plugin for oledump.py'
 __author__ = 'Didier Stevens'
-__version__ = '0.0.7'
-__date__ = '2020/02/23'
+__version__ = '0.0.8'
+__date__ = '2020/03/08'
 
 """
 
@@ -24,6 +24,7 @@ History:
   2019/03/06: 0.0.5 enhanced parsing of formula expressions
   2019/11/05: 0.0.6 Python 3 support
   2020/02/23: 0.0.7 performance improvement
+  2020/03/08: 0.0.8 added options -X and -d
 
 Todo:
 """
@@ -639,7 +640,7 @@ def ParseExpression(expression):
         else:
             message = ''
         return result + ' *INCOMPLETE FORMULA PARSING*' + message + ' Remaining, unparsed expression: ' + repr(expression)
-        
+
 
 class cBIFF(cPluginParent):
     macroOnly = False
@@ -922,6 +923,8 @@ class cBIFF(cPluginParent):
             oParser = optparse.OptionParser()
             oParser.add_option('-s', '--strings', action='store_true', default=False, help='Dump strings')
             oParser.add_option('-a', '--hexascii', action='store_true', default=False, help='Dump hex ascii')
+            oParser.add_option('-X', '--hex', action='store_true', default=False, help='Dump hex without whitespace')
+            oParser.add_option('-d', '--dump', action='store_true', default=False, help='Dump')
             oParser.add_option('-x', '--xlm', action='store_true', default=False, help='Select all records relevant for Excel 4.0 macros')
             oParser.add_option('-o', '--opcode', type=str, default='', help='Opcode to filter for')
             oParser.add_option('-f', '--find', type=str, default='', help='Content to search for')
@@ -934,6 +937,8 @@ class cBIFF(cPluginParent):
             while position < len(stream):
                 formatcodes = 'HH'
                 formatsize = struct.calcsize(formatcodes)
+                if len(stream[position:position + formatsize]) < formatsize:
+                    break
                 opcode, length = struct.unpack(formatcodes, stream[position:position + formatsize])
                 data = stream[position + formatsize:position + formatsize + length]
                 position = position + formatsize + length
@@ -988,7 +993,8 @@ class cBIFF(cPluginParent):
                     line += ' - %s' % strings
 
                 if options.find == '' and options.opcode == '' and not options.xlm or options.opcode != '' and options.opcode.lower() in line.lower() or options.find != '' and options.find in data or options.xlm and opcode in [0x06, 0x18, 0x85, 0x207]:
-                    result.append(line)
+                    if not options.hex and not options.dump:
+                        result.append(line)
 
                     if options.hexascii:
                         result.extend(' ' + foundstring for foundstring in HexASCII(data, 8))
@@ -998,6 +1004,10 @@ class cBIFF(cPluginParent):
                             if len(strings) > 0:
                                 result.append(' ' + dEncodings[encoding] + ':')
                                 result.extend('  ' + foundstring for foundstring in strings)
+                    elif options.hex:
+                        result.append(binascii.b2a_hex(data))
+                    elif options.dump:
+                        result = data
 
             if options.xlm and not macros4Found:
                 result = []
