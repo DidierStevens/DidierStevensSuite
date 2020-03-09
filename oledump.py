@@ -2,8 +2,8 @@
 
 __description__ = 'Analyze OLE files (Compound Binary Files)'
 __author__ = 'Didier Stevens'
-__version__ = '0.0.47'
-__date__ = '2020/03/08'
+__version__ = '0.0.48'
+__date__ = '2020/03/09'
 
 """
 
@@ -93,6 +93,7 @@ History:
   2020/01/06: 0.0.45 added verbose YARACompile
   2020/03/06: 0.0.46 added %CLSIDDESC% and Root Entry to --storages
   2020/03/08: 0.0.47 updated man
+  2020/03/09: 0.0.48 Python 3 bug fix
 
 Todo:
 """
@@ -1811,7 +1812,7 @@ def OLESub(ole, prefix, rules, options):
                             if oPlugin.indexQuiet:
                                 if result != []:
                                     print('%3s: %s' % (index, MyRepr(result[0])))
-                            elif type(result) == str:
+                            elif type(result) == str or type(result) == bytes:
                                 IfWIN32SetBinary(sys.stdout)
                                 StdoutWriteChunked(result)
                             else:
