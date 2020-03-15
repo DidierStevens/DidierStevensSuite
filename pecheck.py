@@ -2,8 +2,8 @@
 
 __description__ = 'Tool for displaying PE file info'
 __author__ = 'Didier Stevens'
-__version__ = '0.7.9'
-__date__ = '2020/01/26'
+__version__ = '0.7.10'
+__date__ = '2020/03/02'
 
 """
 
@@ -46,6 +46,8 @@ History:
   2019/10/27: introduced environment variable DSS_DEFAULT_HASH_ALGORITHMS
   2020/01/25: 0.7.9 import zlib; Python 3 fixes;
   2020/01/26: Python 3 fixes;
+  2020/03/01: 0.7.10 added ProcessDumpInfo and Fixed_get_overlay_data_start_offset
+  2020/03/02: added TLSCallbacks
 
 Todo:
 """
@@ -101,7 +103,7 @@ The first column is the position of the embedded PE file, the fourth column is t
 The fifth column is the hash of the embedded PE file without overlay. By default, it's the MD5 hash, but this can be changed by setting environment variable DSS_DEFAULT_HASH_ALGORITHMS.
 Like this: set DSS_DEFAULT_HASH_ALGORITHMS=SHA256
 
-After producuing an overview of embedded PE files (with option -l P), select an embedded PE file for further analysis, like this:
+After producing an overview of embedded PE files (with option -l P), select an embedded PE file for further analysis, like this:
 
 C:\Demo>pecheck.py -l 2 sample.png.vir
 
@@ -258,6 +260,26 @@ def NumberOfBytesHumanRepresentation(value):
     else:
         return '%.1f GB' % (float(value) / 1024.0 / 1024.0 / 1024.0)
 
+#can be removed if following PR is merged: https://github.com/erocarrera/pefile/pull/254/files
+#this is a fix for when a digital signature is present
+def Fixed_get_overlay_data_start_offset(oPE):
+    overlayOffset = oPE.get_overlay_data_start_offset()
+    if overlayOffset == None:
+        return overlayOffset
+
+    try:
+        security = oPE.OPTIONAL_HEADER.DATA_DIRECTORY[pefile.DIRECTORY_ENTRY['IMAGE_DIRECTORY_ENTRY_SECURITY']]
+    except IndexError:
+        return overlayOffset
+
+    if overlayOffset > security.VirtualAddress + security.Size:
+        return overlayOffset
+
+    if len(oPE.__data__) > security.VirtualAddress + security.Size:
+        return security.VirtualAddress + security.Size
+    else:
+        return None
+
 def Signature(pe):
     try:
         security = pe.OPTIONAL_HEADER.DATA_DIRECTORY[pefile.DIRECTORY_ENTRY['IMAGE_DIRECTORY_ENTRY_SECURITY']]
@@ -320,6 +342,59 @@ def Signature(pe):
 #        print(content.getNameByPosition(idx))
 #        print(content.getNameByPosition(idx), content.getComponentByPosition(idx))
 
+def TLSCallbacks(oPE):
+    if not hasattr(oPE, 'DIRECTORY_ENTRY_TLS'):
+        print(' No TLS')
+        return
+
+    tlsCallbacksRva = oPE.DIRECTORY_ENTRY_TLS.struct.AddressOfCallBacks - oPE.OPTIONAL_HEADER.ImageBase
+    if oPE.FILE_HEADER.IMAGE_FILE_LARGE_ADDRESS_AWARE:
+        format = '<Q'
+    else:
+        format = '<I'
+    formatSize = struct.calcsize(format)
+    foundSection = None
+    for section in oPE.sections:
+        if section.contains_rva(tlsCallbacksRva):
+            foundSection = section
+            tlsCallbacksOffset = section.get_offset_from_rva(tlsCallbacksRva)
+            callbacksArray = oPE.__data__[tlsCallbacksOffset:section.PointerToRawData + section.SizeOfRawData]
+            callbacks = []
+            while len(callbacksArray) >= formatSize:
+                callbackVA = struct.unpack(format, callbacksArray[0:formatSize])[0]
+                if callbackVA == 0:
+                    break
+                else:
+                    callbacks.append(callbackVA)
+                    callbacksArray = callbacksArray[formatSize:]
+
+            print(' Section:     %s' % SectionNameToString(section.Name))
+            print(' Number of callbacks: %d' % len(callbacks))
+            for callback in callbacks:
+                print('   Address:  0x%08x' % callback)
+    if foundSection == None:
+        print(' AddressOfCallBacks not found in any section: 0x%08x' % oPE.DIRECTORY_ENTRY_TLS.struct.AddressOfCallBacks)
+
+def ProcessDumpInfo(oPE):
+    dumpinfo = oPE.dump_info()
+    lines = dumpinfo.split('\n')
+    result = []
+    relocation = False
+    for line in lines:
+        skipLine = False
+        if line == 'Ordinal      RVA         Name':
+            result.append(oPE.DIRECTORY_ENTRY_EXPORT.name.decode())
+            result.append('')
+        if not relocation and line == '[IMAGE_BASE_RELOCATION]':
+            relocation = True
+        elif relocation and line == '':
+            relocation = False
+        elif relocation and line.startswith('   '):
+            skipLine = True
+        if not skipLine:
+            result.append(line)
+    return '\n'.join(result)
+    
 def SingleFileInfo(filename, data, signatures, options):
     pe = pefile.PE(data=data)
     raw = pe.write()
@@ -333,7 +408,7 @@ def SingleFileInfo(filename, data, signatures, options):
         print('%s entropy: %f (Min=0.0, Max=8.0)' % (SectionNameToString(section.Name), section.get_entropy()))
 
     print('Dump Info:')
-    print(pe.dump_info())
+    print(ProcessDumpInfo(pe))
 
     print('Signature:')
     try:
@@ -359,8 +434,15 @@ def SingleFileInfo(filename, data, signatures, options):
             print('ep offset:   0x%08x' % (section.PointerToRawData + ep - section.VirtualAddress))
 
     print('')
+    print('TLS Callbacks:')
+    try:
+        TLSCallbacks(pe)
+    except Exception as e:
+        print(' Error occured: %s' % e)
+    print('')
+
     print('Overlay:')
-    overlayOffset = pe.get_overlay_data_start_offset()
+    overlayOffset = Fixed_get_overlay_data_start_offset(pe)
     if overlayOffset == None:
         print(' No overlay')
     else:
@@ -866,7 +948,7 @@ def GetInfoCarvedFile(data, position):
             info += ' 64-bit'
         else:
             info += ' 32-bit'
-        overlayOffset = oPEtemp.get_overlay_data_start_offset()
+        overlayOffset = Fixed_get_overlay_data_start_offset(oPEtemp)
         dataPEFile = oPEtemp.write()
         if overlayOffset == None:
             lengthStripped = len(dataPEFile)
@@ -909,13 +991,13 @@ def SingleFile(filename, signatures, options):
         pe = pefile.PE(data=data)
         DumpFunction = GetDumpFunction(options)
         if options.getdata == 'o': # overlay
-            overlayOffset = pe.get_overlay_data_start_offset()
+            overlayOffset = Fixed_get_overlay_data_start_offset(pe)
             if overlayOffset == None:
                 print('No overlay')
             else:
                 StdoutWriteChunked(DumpFunction(str(pe.write()[overlayOffset:])))
         elif options.getdata == 's': # strip
-            overlayOffset = pe.get_overlay_data_start_offset()
+            overlayOffset = Fixed_get_overlay_data_start_offset(pe)
             if overlayOffset == None:
                 StdoutWriteChunked(DumpFunction(str(pe.write())))
             else:
