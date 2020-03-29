@@ -4,8 +4,8 @@ from __future__ import print_function
 
 __description__ = 'Crack MS Office document password'
 __author__ = 'Didier Stevens'
-__version__ = '0.0.4'
-__date__ = '2019/08/31'
+__version__ = '0.0.5'
+__date__ = '2020/03/29'
 
 """
 Source code put in the public domain by Didier Stevens, no Copyright
@@ -17,6 +17,7 @@ History:
   2019/01/05: 0.0.2 added option -c and -e; password VelvetSweatshop
   2019/01/22: 0.0.3 fixed agile decryption (Crypto version 4.4: Agile Encryption) bug by adding file.decrypt ...
   2019/08/31: 0.0.4 added option -r
+  2020/03/29: 0.0.5 added -p #f
 
 Todo:
 """
@@ -54,6 +55,7 @@ The password for this ZIP file is "infected" (without double quotes) by default,
 Without any further options, the tool will proceed with a dictonary attack to recover the password of the encrypted MS Office document. The passwords for this dictionary are taken from an internal list.
 When a matching password is found, it will be printed and the tool will stop the dictionary attack.
 To provide your own password list for the dictionary attack, use option -p to provide the filename of a text file with passwords. This text file may be compressed with gzip, and the tool will decompress the file in memory.
+To generate a password list based on the filename, use option -p #f. This will generate a dictionary of all possible substrings of the filename.
 Another method to provide potential passwords, is using option -e: extractpasswords. You use this option with a text file, and the tool will extract all potential passwords from this text file and use as a dictionary. Potential passwords are space-delimited strings found inside the text file. Potential passwords that are surrounded by quotes (single and double) and/or follow after word "password", are put at the beginning of the list of potential passwords to be tested in the dictionay attack.
 One use case for option -e, is an email with password protected attachment: the password is probably mentioned in the message of the email, option -e can be used to generate a dictionary of passwords to try from this message.
 
@@ -97,8 +99,15 @@ def File2Strings(filename):
     finally:
         f.close()
 
-def GetDictionary(passwordfile):
-    if passwordfile != '':
+def GetDictionary(passwordfile, filename):
+    if passwordfile == '#f':
+        result = []
+        for iIter1 in range(len(filename)):
+            password = filename[:iIter1 + 1]
+            for iIter2 in range(len(password)):
+                result.append(password[iIter2:])
+        return result
+    elif passwordfile != '':
         return File2Strings(passwordfile)
     else:
 # https://github.com/magnumripper/JohnTheRipper/blob/bleeding-jumbo/run/password.lst
@@ -3713,7 +3722,7 @@ def Crack(filename, options):
 
     if options.crackedpassword == '':
         if options.extractpasswords == '':
-            passwords = GetDictionary(options.passwordlist)
+            passwords = GetDictionary(options.passwordlist, os.path.basename(filename))
         else:
             passwords = ExtractPasswords(options.extractpasswords)
         if options.rules:

@@ -2,8 +2,8 @@
 
 __description__ = 'Analyze OLE files (Compound Binary Files)'
 __author__ = 'Didier Stevens'
-__version__ = '0.0.48'
-__date__ = '2020/03/09'
+__version__ = '0.0.49'
+__date__ = '2020/03/28'
 
 """
 
@@ -94,6 +94,7 @@ History:
   2020/03/06: 0.0.46 added %CLSIDDESC% and Root Entry to --storages
   2020/03/08: 0.0.47 updated man
   2020/03/09: 0.0.48 Python 3 bug fix
+  2020/03/28: 0.0.49 -s (selection) is no longer case sensitive with letter prefixes
 
 Todo:
 """
@@ -1905,7 +1906,7 @@ def OLESub(ole, prefix, rules, options):
             selection = options.select
             part = ''
         for orphan, fname, entry_type, entry_clsid, stream in OLEGetStreams(ole, options.storages):
-            if selection == 'a' or ('%s%d' % (prefix, counter)) == selection or prefix == 'A' and str(counter) == selection:
+            if selection == 'a' or ('%s%d' % (prefix, counter)) == selection.upper() or prefix == 'A' and str(counter) == selection:
                 StdoutWriteChunked(HeadTail(DumpFunction(DecompressFunction(DecodeFunction(decoders, options, CutData(SelectPart(stream, part, dModuleinfo.get(''.join([c + '\x00' for c in fname[-1]]), None)), options.cut)[0]))), options.headtail))
                 selectionCounter += 1
                 if selection != 'a':
