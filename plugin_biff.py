@@ -2,8 +2,10 @@
 
 __description__ = 'BIFF plugin for oledump.py'
 __author__ = 'Didier Stevens'
-__version__ = '0.0.10'
-__date__ = '2020/03/27'
+__version__ = '0.1.11'
+__date__ = '2020/03/29'
+
+# Slightly modified version by Philippe Lagadec to be imported into olevba
 
 """
 
@@ -33,13 +35,64 @@ History:
               01761b06c24baa818b0a75059e745871246a5e9c6ce0243ad96e8632342cbb59 (ptgFuncVarA)
               d3c1627ca2775d98717eb1abf2b70aedf383845d87993c6b924f2f55d9d4d696 (ptgFunc)
               1d48a42a0b06a087e966b860c8f293a9bf57da8d70f5f83c61242afc5b81eb4f (=SELECT($B$1:$1000:$1000:$B:$B,$B$1))
-
+  2020/03/29 0.0.11 added parsing rk_numbers support 
+              004a9072b2fb33ec418da650b4e114182d8b6ba32de5d7579049751967cf043f
 Todo:
 """
 
 import struct
 import re
 import optparse
+import sys
+import binascii
+
+# A few functions backported from oledump.py:
+
+class cPluginParent():
+    macroOnly = False
+    indexQuiet = False
+
+# CIC: Call If Callable
+def CIC(expression):
+    if callable(expression):
+        return expression()
+    else:
+        return expression
+
+# IFF: IF Function
+def IFF(expression, valueTrue, valueFalse):
+    if expression:
+        return CIC(valueTrue)
+    else:
+        return CIC(valueFalse)
+
+def P23Ord(value):
+    if type(value) == int:
+        return value
+    else:
+        return ord(value)
+
+def P23Chr(value):
+    if type(value) == int:
+        return chr(value)
+    else:
+        return value
+
+## from https://github.com/lucasaragonn/copydat/blob/3a10aeaf69b23dd248a3d5cec69939d0215b2898/library/XLSReader/BiffWorkbook.inc.php
+def to_ieee754 (value):
+    result = 0
+    if ((value & 0x7fffffff) == 0):
+        return 0
+    if ((value & 0x02) != 0):
+        result = value >> 2
+    else:
+        exp = (value & 0x7ff00000) >> 20;
+        mantissa = (0x100000 | (value & 0x000ffffc))
+        result = mantissa / (1 << (20 - (exp - 1023)))
+        if ((value & 0x80000000) >> 31):
+            result = -result
+    if ((value & 0x01) != 0): result /= 100
+    return result
 
 def P23Decode(value):
     if sys.version_info[0] > 2:
@@ -148,7 +201,6 @@ def ParseLocRelU(expression):
         column += 1
     return 'R%s%dC%s%d' % (rowindicator, row, colindicator, column)
 
-#https://docs.microsoft.com/en-us/openspecs/office_file_formats/ms-xls/6e5eed10-5b77-43d6-8dd0-37345f8654ad
 def ParseLoc(expression):
     formatcodes = 'HH'
     formatsize = struct.calcsize(formatcodes)
@@ -1358,6 +1410,7 @@ class cBIFF(cPluginParent):
             0x231: 'FONT : Font Description',
             0x236: 'TABLE : Data Table',
             0x23E: 'WINDOW2 : Sheet Window Information',
+            0x27E: 'RK NUMBER : RK Number',
             0x293: 'STYLE : Style Information',
             0x406: 'FORMULA : Cell Formula',
             0x41E: 'FORMAT : Number Format',
@@ -1452,6 +1505,7 @@ class cBIFF(cPluginParent):
             oParser.add_option('-a', '--hexascii', action='store_true', default=False, help='Dump hex ascii')
             oParser.add_option('-X', '--hex', action='store_true', default=False, help='Dump hex without whitespace')
             oParser.add_option('-b', '--formulabytes', action='store_true', default=False, help='Dump formula bytes')
+            oParser.add_option('-n', '--numbers', action='store_true', default=False, help='Dump numbers from cells')
             oParser.add_option('-d', '--dump', action='store_true', default=False, help='Dump')
             oParser.add_option('-x', '--xlm', action='store_true', default=False, help='Select all records relevant for Excel 4.0 macros')
             oParser.add_option('-o', '--opcode', type=str, default='', help='Opcode to filter for')
@@ -1476,6 +1530,17 @@ class cBIFF(cPluginParent):
                 else:
                     opcodename = ''
                 line = '%04x %6d %s' % (opcode, length, opcodename)
+
+                #  print records
+                if opcode == 0x27e and options.numbers:
+                    formatcodes = 'HH'
+                    formatsize = struct.calcsize(formatcodes)
+                    row, column = struct.unpack(formatcodes, data[0:formatsize])
+
+                    formatcodes = 'I'
+                    formatsize = struct.calcsize(formatcodes)
+                    num = int(to_ieee754(struct.unpack(formatcodes, data[6:])[0]))
+                    line += ' - R%dC%d %d' % (row + 1, column + 1, num)
 
                 # FORMULA record
                 if opcode == 0x06 and len(data) >= 21:
@@ -1526,7 +1591,7 @@ class cBIFF(cPluginParent):
                         strings += b' '.join(values[1])
                     line += ' - %s' % strings
 
-                if options.find == '' and options.opcode == '' and not options.xlm or options.opcode != '' and options.opcode.lower() in line.lower() or options.find != '' and options.find in data or options.xlm and opcode in [0x06, 0x18, 0x85, 0x207]:
+                if options.find == '' and options.opcode == '' and not options.xlm or options.opcode != '' and options.opcode.lower() in line.lower() or options.find != '' and options.find in data or options.xlm and opcode in [0x06, 0x18, 0x85, 0x207, 0x27e]:
                     if not options.hex and not options.dump:
                         result.append(line)
 
