@@ -1496,10 +1496,6 @@ class cBIFF(cPluginParent):
                         spaced_data_hex = ' '.join(a+b for a,b in zip(data_hex[::2], data_hex[1::2]))
                         line += '\nFORMULA BYTES: %s' % spaced_data_hex
 
-                # FILEPASS record
-                if opcode == 0x12:
-                    filepassFound = True
-
                 # FORMULA record #a# difference BIFF4 and BIFF5+
                 if opcode == 0x18 and len(data) >= 16:
                     if P23Ord(data[0]) & 0x20:
@@ -1513,6 +1509,10 @@ class cBIFF(cPluginParent):
                         if P23Ord(data[offset]) == 0:
                             offset = 15
                         line += ' - %s' % (P23Decode(data[offset:offset+P23Ord(data[3])]))
+
+                # FILEPASS record
+                if opcode == 0x2f:
+                    filepassFound = True
 
                 # BOUNDSHEET record
                 if opcode == 0x85 and len(data) >= 6:
