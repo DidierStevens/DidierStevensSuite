@@ -2,8 +2,8 @@
 
 __description__ = 'BIFF plugin for oledump.py'
 __author__ = 'Didier Stevens'
-__version__ = '0.0.10'
-__date__ = '2020/03/27'
+__version__ = '0.0.11'
+__date__ = '2020/04/06'
 
 """
 
@@ -33,6 +33,7 @@ History:
               01761b06c24baa818b0a75059e745871246a5e9c6ce0243ad96e8632342cbb59 (ptgFuncVarA)
               d3c1627ca2775d98717eb1abf2b70aedf383845d87993c6b924f2f55d9d4d696 (ptgFunc)
               1d48a42a0b06a087e966b860c8f293a9bf57da8d70f5f83c61242afc5b81eb4f (=SELECT($B$1:$1000:$1000:$B:$B,$B$1))
+  2020/04/06: 0.0.11 Python 2 bugfixes; password protect record FILEPASS
 
 Todo:
 """
@@ -93,6 +94,8 @@ def ContainsWP23Ord(word, expression):
 def ParseArea(expression):
     formatcodes = 'HHHH'
     formatsize = struct.calcsize(formatcodes)
+    if len(expression) < formatsize:
+        return '*ERROR*'
     row1,row2,col1,col2 = struct.unpack(formatcodes, expression[0:formatsize])
     row1Relative = col1 & 0x8000
     col1Relative = col1 & 0x4000
@@ -1149,7 +1152,7 @@ def ParseExpression(expression):
                 result += '%s ' % dFunctions.get(functionid, '*UNKNOWN FUNCTION*')
                 expression = expression[2:]
             elif ptgid == 0x61 or ptgid == 0x62: # ptgFuncVar  ptgFuncVarA 
-                params_count = expression[0]
+                params_count = P23Ord(expression[0])
                 functionid = P23Ord(expression[1]) + P23Ord(expression[2]) * 0x100
                 result += '%s ' % dFunctions.get(functionid, '*UNKNOWN FUNCTION*')
                 expression = expression[(2+params_count):]
@@ -1182,6 +1185,7 @@ class cBIFF(cPluginParent):
     def Analyze(self):
         result = []
         macros4Found = False
+        filepassFound = False
         dOpcodes = {
             0x06: 'FORMULA : Cell Formula',
             0x0A: 'EOF : End of File',
@@ -1492,6 +1496,10 @@ class cBIFF(cPluginParent):
                         spaced_data_hex = ' '.join(a+b for a,b in zip(data_hex[::2], data_hex[1::2]))
                         line += '\nFORMULA BYTES: %s' % spaced_data_hex
 
+                # FILEPASS record
+                if opcode == 0x12:
+                    filepassFound = True
+
                 # FORMULA record #a# difference BIFF4 and BIFF5+
                 if opcode == 0x18 and len(data) >= 16:
                     if P23Ord(data[0]) & 0x20:
@@ -1543,7 +1551,9 @@ class cBIFF(cPluginParent):
                     elif options.dump:
                         result = data
 
-            if options.xlm and not macros4Found:
+            if options.xlm and filepassFound:
+                result = ['FILEPASS record: file is password protected']
+            elif options.xlm and not macros4Found:
                 result = []
 
         return result
