@@ -2,8 +2,8 @@
 
 __description__ = 'ZIP dump utility'
 __author__ = 'Didier Stevens'
-__version__ = '0.0.16'
-__date__ = '2019/12/27'
+__version__ = '0.0.17'
+__date__ = '2020/04/05'
 
 """
 
@@ -46,6 +46,8 @@ History:
   2018/12/15: 0.0.15: updated help
   2019/12/26: 0.0.16: added option -f and started Python 3 support
   2019/12/27: continue
+  2020/01/05: 0.0.17: temporary bugfix in ZIPFind for reversed ZIP files
+  2020/04/05: handle incomplete EOCD record
 
 Todo:
 """
@@ -5172,6 +5174,8 @@ def ParseZIPRecord(data):
             if len(data[20:22]) == 2:
                 length = struct.unpack('<H', data[20:22])[0]
                 extra = 22 + length
+            else:
+                extra = len(data)
         else:
             return None
     return magic, extra
@@ -5189,7 +5193,7 @@ def ZIPFind(zipfilename, options):
             index += 1
         else:
             records.append([-1, location, info[0], info[1]])
-    if len(locations) > 0 and locations[-1][0] + locations[-1][1][1] < len(data):
+    if len(locations) > 0 and locations[-1][1][1] != None and locations[-1][0] + locations[-1][1][1] < len(data):
         records.append(['s', locations[-1][0] + locations[-1][1][1], 'data', len(data) - locations[-1][0] - locations[-1][1][1]])
     if options.find == 'list':
         index = 1
@@ -5198,7 +5202,10 @@ def ZIPFind(zipfilename, options):
             if index in ['p', 's']:
                 print(' %3s 0x%08x %s %d:%dl' % (index, location, record, location, info))
             else:
-                print(' %3s 0x%08x %s' % ('' if index < 0 else str(index), location, record))
+                if record == 'PK0506 end' and info < 22:
+                    print(' %3s 0x%08x %s %d byte(s) missing' % ('' if index < 0 else str(index), location, record, 22 - info))
+                else:
+                    print(' %3s 0x%08x %s' % ('' if index < 0 else str(index), location, record))
     elif options.find in ['p', 's']:
         DumpFunction = SelectDumpFunction(options)
         partial = None
