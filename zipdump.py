@@ -2,8 +2,8 @@
 
 __description__ = 'ZIP dump utility'
 __author__ = 'Didier Stevens'
-__version__ = '0.0.17'
-__date__ = '2020/04/05'
+__version__ = '0.0.18'
+__date__ = '2020/04/13'
 
 """
 
@@ -48,6 +48,7 @@ History:
   2019/12/27: continue
   2020/01/05: 0.0.17: temporary bugfix in ZIPFind for reversed ZIP files
   2020/04/05: handle incomplete EOCD record
+  2020/04/13: 0.0.18 added option info
 
 Todo:
 """
@@ -352,6 +353,19 @@ C:\Demo>zipdump.py -f 1 -s 1 -a double.zip | head
 00000070: 74 61 73 20 64 6F 6E 65  63 20 6E 61 74 6F 71 75  tas donec natoqu
 00000080: 65 20 64 69 67 6E 69 73  73 69 6D 20 65 74 20 6A  e dignissim et j
 00000090: 75 73 74 6F 20 74 69 6E  63 69 64 75 6E 74 20 75  usto tincidunt u
+
+Option -i can be used together with option -f to provide info about the selected end-of-central-directory record (in stead of analyzing the ZIP file). Example:
+
+C:\Demo>zipdump.py -f 1 -i sample.vir
+EOCD (End Of Central Directory) record: PK\\x05\\x06
+ Disk number field: 0
+ Start disk number field: 0
+ Entries on disk field: 15
+ Entries in directory field: 15
+ Directory size field: 975
+ Directory offset field: 87903 (0x0001575f)
+ Incomplete comment length field, missing 1 byte(s)
+00000000: 00
 
 If data precedes the first record, or succeeds the last record, an entry with index p (prefix) and/or index s (suffix) will be included in the list of records:
 
@@ -5180,6 +5194,97 @@ def ParseZIPRecord(data):
             return None
     return magic, extra
 
+def AnalyzeZIPRecord(data, options):
+    DumpFunction = SelectDumpFunction(options)
+
+    if data[0:2] != b'PK':
+        print('This is not a PKZIP record')
+        StdoutWriteChunked(DumpFunction(CutData(data, options.cut)))
+        return
+
+    data = data[2:]
+    if data[:2] != b'\x05\x06':
+        print('This is not a PKZIP end-of-central-directory record')
+        StdoutWriteChunked(DumpFunction(CutData(data, options.cut)))
+        return
+
+    print('EOCD (End Of Central Directory) record: PK\\x05\\x06')
+
+    data = data[2:]
+
+    formatstringH = '<H'
+    formatlengthH = struct.calcsize(formatstringH)
+    formatstringI = '<I'
+    formatlengthI = struct.calcsize(formatstringI)
+
+    if len(data) < formatlengthH:
+        print(' Incomplete disk number field, missing %d byte(s)' % (formatlengthH - len(data)))
+        StdoutWriteChunked(DumpFunction(CutData(data, options.cut)))
+        return
+    else:
+        print(' Disk number field: %d' % struct.unpack(formatstringH, data[:formatlengthH])[0])
+
+    data = data[formatlengthH:]
+    if len(data) < formatlengthH:
+        print(' Incomplete start disk number field, missing %d byte(s)' % (formatlengthH - len(data)))
+        StdoutWriteChunked(DumpFunction(CutData(data, options.cut)))
+        return
+    else:
+        print(' Start disk number field: %d' % struct.unpack(formatstringH, data[:formatlengthH])[0])
+
+    data = data[formatlengthH:]
+    if len(data) < formatlengthH:
+        print(' Incomplete entries on disk field, missing %d byte(s)' % (formatlengthH - len(data)))
+        StdoutWriteChunked(DumpFunction(CutData(data, options.cut)))
+        return
+    else:
+        print(' Entries on disk field: %d' % struct.unpack(formatstringH, data[:formatlengthH])[0])
+
+    data = data[formatlengthH:]
+    if len(data) < formatlengthH:
+        print(' Incomplete entries in directory field, missing %d byte(s)' % (formatlengthH - len(data)))
+        StdoutWriteChunked(DumpFunction(CutData(data, options.cut)))
+        return
+    else:
+        print(' Entries in directory field: %d' % struct.unpack(formatstringH, data[:formatlengthH])[0])
+
+    data = data[formatlengthH:]
+    if len(data) < formatlengthI:
+        print(' Incomplete directory size field, missing %d byte(s)' % (formatlengthI - len(data)))
+        StdoutWriteChunked(DumpFunction(CutData(data, options.cut)))
+        return
+    else:
+        print(' Directory size field: %d' % struct.unpack(formatstringI, data[:formatlengthI])[0])
+
+    data = data[formatlengthI:]
+    if len(data) < formatlengthI:
+        print(' Incomplete directory offset field, missing %d byte(s)' % (formatlengthI - len(data)))
+        StdoutWriteChunked(DumpFunction(CutData(data, options.cut)))
+        return
+    else:
+        directoryOffset = struct.unpack(formatstringI, data[:formatlengthI])[0]
+        print(' Directory offset field: %d (0x%08x)' % (directoryOffset, directoryOffset))
+
+    data = data[formatlengthI:]
+    if len(data) < formatlengthH:
+        print(' Incomplete comment length field, missing %d byte(s)' % (formatlengthH - len(data)))
+        StdoutWriteChunked(DumpFunction(CutData(data, options.cut)))
+        return
+    else:
+        commentLength = struct.unpack(formatstringH, data[:formatlengthH])[0]
+        print(' Comment length field: %d' % commentLength)
+
+    if commentLength == 0:
+        return
+
+    data = data[formatlengthH:]
+    if len(data) < commentLength:
+        print(' Incomplete comment field, missing %d byte(s)' % (commentLength - len(data)))
+        StdoutWriteChunked(DumpFunction(CutData(data, options.cut)))
+        return
+    else:
+        print(' Comment field: %s' % repr(data[:commentLength]))
+
 def ZIPFind(zipfilename, options):
     data = cBinaryFile(zipfilename, C2BIP3(options.password), True, True).read()
     locations = [entry for entry in [[location, ParseZIPRecord(data[location:])] for location in FindAll(data, b'PK')] if entry[1] != None]
@@ -5227,6 +5332,8 @@ def ZIPFind(zipfilename, options):
                 eocd = record
         if eocd == None:
             print('Index not found')
+        elif options.info:
+            AnalyzeZIPRecord(data[eocd[1]:], options)
         else:
             ZIPDump(zipfilename, options, data[:eocd[1] + eocd[3]])
 
@@ -5286,6 +5393,7 @@ def Main():
     oParser.add_option('-j', '--jsonoutput', action='store_true', default=False, help='produce json output')
     oParser.add_option('--decoderdir', type=str, default='', help='directory for the decoder')
     oParser.add_option('-f', '--find', type=str, default='', help='Find PK MAGIC sequence (use l or list for listing, number for selecting)')
+    oParser.add_option('-i', '--info', action='store_true', default=False, help='display extra info')
     (options, args) = oParser.parse_args()
 
     if options.man:
