@@ -2,8 +2,8 @@
 
 __description__ = 'This is essentially a wrapper for xml.etree.ElementTree'
 __author__ = 'Didier Stevens'
-__version__ = '0.0.4'
-__date__ = '2020/01/12'
+__version__ = '0.0.5'
+__date__ = '2020/04/16'
 
 """
 
@@ -19,6 +19,7 @@ History:
   2018/04/01: 0.0.3 added support for xmlns with single quote
   2018/06/29: 0.0.4 ProcessFile for Linux/OSX
   2020/01/12: added pretty print
+  2020/04/16: 0.0.5 added celltext; option --encoding
 
 Todo:
 """
@@ -200,6 +201,9 @@ By default, output is printed to the consolde (stdout). It can be directed to a 
     for line in manual.split('\n'):
         print(textwrap.fill(line))
 
+DEFAULT_SEPARATOR = ','
+QUOTE = '"'
+
 def File2Strings(filename):
     try:
         f = open(filename, 'r')
@@ -235,6 +239,24 @@ def IFF(expression, valueTrue, valueFalse):
         return CIC(valueTrue)
     else:
         return CIC(valueFalse)
+
+def ToString(value):
+    if isinstance(value, str):
+        return value
+    else:
+        return str(value)
+
+def Quote(value, separator, quote):
+    value = ToString(value)
+    if len(value) > 1 and value[0] == quote and value[-1] == quote:
+        return value
+    if separator in value or value == '':
+        return quote + value + quote
+    else:
+        return value
+
+def MakeCSVLine(row, separator, quote):
+    return separator.join([Quote(value, separator, quote) for value in row])
 
 class cOutput():
     def __init__(self, filename=None):
@@ -339,14 +361,36 @@ def ExtractElementAttributes(data, oOutput, options):
 def PrettyPrint(data, oOutput, options):
     oOutput.Line(xml.dom.minidom.parseString(data).toprettyxml())
 
-dCommands = {'text': ExtractText, 'wordtext': ExtractWordText, 'elementtext': ExtractElementText, 'attributes': ExtractElementAttributes, 'pretty': PrettyPrint}
+def ExtractCellText(data, oOutput, options):
+    oOutput.Line(MakeCSVLine(['Reference', 'Formula', 'Value'], DEFAULT_SEPARATOR, QUOTE))
+    root, dXMLNS = AnalyzeXMLNS(data)
+    for element in root.iter('{http://schemas.openxmlformats.org/spreadsheetml/2006/main}c'):
+        if 'r' in element.attrib:
+            reference = element.attrib['r']
+        else:
+            reference = ''
+        formula = ''
+        value = ''
+        for child in element:
+            if child.tag == '{http://schemas.openxmlformats.org/spreadsheetml/2006/main}f':
+                formula = XMLGetText(child)
+            if child.tag == '{http://schemas.openxmlformats.org/spreadsheetml/2006/main}v':
+                value = XMLGetText(child)
+        oOutput.Line(MakeCSVLine([reference, formula, value], DEFAULT_SEPARATOR, QUOTE))
+
+dCommands = {'text': ExtractText, 'wordtext': ExtractWordText, 'elementtext': ExtractElementText, 'attributes': ExtractElementAttributes, 'pretty': PrettyPrint, 'celltext': ExtractCellText}
 
 def ProcessTextFileSingle(command, filenames, oOutput, options):
     for filename in filenames:
         if filename == '':
+            if options.encoding != '':
+                sys.stdin.reconfigure(encoding=options.encoding)
             fIn = sys.stdin
         else:
-            fIn = open(filename, 'r')
+            if options.encoding == '':
+                fIn = open(filename, 'r')
+            else:
+                fIn = open(filename, 'r', encoding=options.encoding)
         data = fIn.read()
         if fIn != sys.stdin:
             fIn.close()
@@ -373,6 +417,7 @@ https://DidierStevens.com'''
     oParser.add_option('-m', '--man', action='store_true', default=False, help='Print manual')
     oParser.add_option('-u', '--includeuri', action='store_true', default=False, help='Include URI for the tags')
     oParser.add_option('-o', '--output', type=str, default='', help='Output to file')
+    oParser.add_option('--encoding', type=str, default='', help='Encoding for file open')
     (options, args) = oParser.parse_args()
 
     if options.man:
