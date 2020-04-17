@@ -2,7 +2,7 @@
 
 __description__ = 'This is essentially a wrapper for xml.etree.ElementTree'
 __author__ = 'Didier Stevens'
-__version__ = '0.0.5'
+__version__ = '0.0.6'
 __date__ = '2020/04/16'
 
 """
@@ -20,6 +20,7 @@ History:
   2018/06/29: 0.0.4 ProcessFile for Linux/OSX
   2020/01/12: added pretty print
   2020/04/16: 0.0.5 added celltext; option --encoding
+  2020/04/16: 0.0.6 updated man page
 
 Todo:
 """
@@ -50,6 +51,7 @@ The first argument to the tool is a command, which can be:
  elementtext
  attributes
  pretty
+ celltext
 
 Command text will extract all text from the elements in the XML file.
 Example:
@@ -196,7 +198,16 @@ w:docGrid
 
 Command pretty will just perform a pretty print of the XML file.
 
-By default, output is printed to the consolde (stdout). It can be directed to a file using option -o.
+Command celltext will produce a CSV file of all the cells in an Excel sheet.
+
+Example:
+zipdump.py -s 5 -d spreadsheet.xlsm | xmldump.py celltext
+
+Reference,Formula,Value
+A1,EXEC("note"&"pad"),33
+A2,HALT(),1
+
+By default, output is printed to the console (stdout). It can be directed to a file using option -o.
 '''
     for line in manual.split('\n'):
         print(textwrap.fill(line))
