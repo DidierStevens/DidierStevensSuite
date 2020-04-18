@@ -2,8 +2,8 @@
 
 __description__ = 'Hex to bin'
 __author__ = 'Didier Stevens'
-__version__ = '0.0.4'
-__date__ = '2020/02/05'
+__version__ = '0.0.5'
+__date__ = '2020/04/16'
 
 """
 
@@ -20,6 +20,8 @@ History:
   2019/08/31: 0.0.3 added option -x
   2019/09/11: updated man; Python3 kludge
   2020/02/05: 0.0.4 added --bitstream
+  2020/04/15: 0.0.5 added option --hexonly
+  2020/04/16: added option --upperonly and --loweronly
 
 Todo:
   Get rid of Python2/Python3 conversion kludge
@@ -43,6 +45,9 @@ Manual:
 
 This program reads from the given file or standard input, and converts the hexadecimal or bitstream data to binary data.
 Unless option -b --bitstream is used, this tool converts hexadecimal data.
+
+By default, this tool ignores whitespace.
+When option -H (--hexonly) is used, all input characters except hexadecimal digits are ignored. This option can be combined with --upperonly (hex digits have to be uppercase) or with --loweronly (hex digits have to be lowercase).
 
 Using option -a, this tool will look for the first hexadecimal/ASCII dump (see example below) as produced by other tools developed by Didier Stevens, and extract the contained hexadecimal data to convert to binary data.
 
@@ -257,7 +262,18 @@ def Hex2Bin(filename, options):
     if sys.platform == 'win32':
         import msvcrt
         msvcrt.setmode(sys.stdout.fileno(), os.O_BINARY)
-    y = content.replace(C2BIP3(' '), C2BIP3('')).replace(C2BIP3('\t'), C2BIP3('')).replace(C2BIP3('\r'), C2BIP3('')).replace(C2BIP3('\n'), C2BIP3(''))
+    if options.hexonly:
+        hexdigits = b'0123456789abcdefABCDEF'
+        if options.upperonly:
+            hexdigits = b'0123456789ABCDEF'
+        if options.loweronly:
+            hexdigits = b'0123456789abcdef'
+        if sys.version_info[0] >= 3:
+            y = bytes([b for b in content if b in list(hexdigits)])
+        else:
+            y = b''.join([b for b in content if b in hexdigits])
+    else:
+        y = content.replace(C2BIP3(' '), C2BIP3('')).replace(C2BIP3('\t'), C2BIP3('')).replace(C2BIP3('\r'), C2BIP3('')).replace(C2BIP3('\n'), C2BIP3(''))
     if options.bitstream:
         data = DecodeBitstream(y)
     else:
@@ -273,6 +289,9 @@ def Main():
     oParser.add_option('-s', '--select', default='1', help='Select dump nr for extraction (default first dump)')
     oParser.add_option('-t', '--translate', type=str, default='', help='String translation, like utf16 or .decode("utf8")')
     oParser.add_option('-b', '--bitstream', action='store_true', default=False, help='Process a bitstream (string with 0s & 1s)')
+    oParser.add_option('-H', '--hexonly', action='store_true', default=False, help='Ignore all non-hex characters')
+    oParser.add_option('--upperonly', action='store_true', default=False, help='Hex characters must be uppercase')
+    oParser.add_option('--loweronly', action='store_true', default=False, help='Hex characters must be lowercase')
     (options, args) = oParser.parse_args()
 
     if options.man:
