@@ -2,8 +2,8 @@
 
 __description__ = "Program to evaluate a Python expression for each line in the provided text file(s)"
 __author__ = 'Didier Stevens'
-__version__ = '0.0.6'
-__date__ = '2019/04/20'
+__version__ = '0.0.7'
+__date__ = '2020/04/19'
 
 """
 
@@ -27,6 +27,8 @@ History:
   2018/07/28: added options --begingrep, --begingrepoptions, --endgrep, and --endgrepoptions
   2019/03/20: 0.0.6 added option -n and libraries
   2019/04/20: added import binascii
+  2020/03/02: 0.0.7 added option --encoding
+  2020/04/19: updated man page
 
 Todo:
 """
@@ -191,6 +193,8 @@ Custom definitions can also be placed in a file named python-per-line.library in
 Option -e (execute) is used to execute Python commands before the command is executed. This can, for example, be used to import modules.
 
 If an error occurs when the Python expression is evaluated, the program will report the error and stop. This behavior can be changed with option -i (ignore): using this option, no errors will be reported when evaluating the Python expression and the program will continue to run.
+
+Option --encoding can be used to specify the encoding of the text file to be read. For example, to read a 16-bit Unicode text file, use option "--encoding utf-16".
 '''
     for line in manual.split('\n'):
         print(textwrap.fill(line))
@@ -514,13 +518,17 @@ def Duckify(line):
 
 def PythonPerLineSingle(expression, filename, oBeginGrep, oGrep, oEndGrep, oOutput, options):
     if filename == '':
+        if options.encoding != '':
+            sys.stdin.reconfigure(encoding=options.encoding)
         fIn = sys.stdin
     elif type(filename) == list:
         fIn = filename
     elif os.path.splitext(filename)[1].lower() == '.gz':
         fIn = gzip.GzipFile(filename, 'rb')
-    else:
+    elif options.encoding == '':
         fIn = open(filename, 'r')
+    else:
+        fIn = open(filename, 'r', encoding=options.encoding)
     for line in ProcessFile(fIn, oBeginGrep, oGrep, oEndGrep, False):
         expressionToEvaluate = expression.replace('{}', repr(line))
         try:
@@ -549,7 +557,7 @@ def ParseRange(data):
 
 def LoadScriptIfExists(filename):
     if os.path.exists(filename):
-        execfile(filename, globals(), globals())
+        exec(open(filename, 'r').read(), globals(), globals())
 
 def PythonPerLine(expression, filenames, options):
     if options.name:
@@ -617,6 +625,7 @@ https://DidierStevens.com'''
     oParser.add_option('--begingrepoptions', type=str, default='', help='begingrep options (ivF)')
     oParser.add_option('--endgrep', type=str, default='', help='Grep expression for end line')
     oParser.add_option('--endgrepoptions', type=str, default='', help='endgrep options (ivF)')
+    oParser.add_option('--encoding', type=str, default='', help='Encoding for file open')
     (options, args) = oParser.parse_args()
 
     if CheckArgumentsAndOptions(oParser, args, options):
