@@ -2,8 +2,8 @@
 
 __description__ = 'ZIP dump utility'
 __author__ = 'Didier Stevens'
-__version__ = '0.0.18'
-__date__ = '2020/04/13'
+__version__ = '0.0.19'
+__date__ = '2020/04/29'
 
 """
 
@@ -49,12 +49,12 @@ History:
   2020/01/05: 0.0.17: temporary bugfix in ZIPFind for reversed ZIP files
   2020/04/05: handle incomplete EOCD record
   2020/04/13: 0.0.18 added option info
+  2020/04/29: 0.0.19 added support for AES with pyzipper
 
 Todo:
 """
 
 import optparse
-import zipfile
 import hashlib
 import signal
 import sys
@@ -71,6 +71,10 @@ import zlib
 import codecs
 import json
 import struct
+try:
+    import pyzipper as zipfile
+except ImportError:
+    import zipfile
 try:
     import yara
 except:
@@ -91,6 +95,9 @@ def PrintManual():
 Manual:
 
 zipdump is a tool to analyze ZIP files.
+
+It uses built-in Python module zipfile, unless module pyzipper is installed. Module pyzipper adds AES support, and can be installed with pip (Python 3 only).
+
 The ZIP file can be provided as an argument, via stdin (piping) and it may also be contained in a (password protected) ZIP file.
 
 When providing zipdump with a file to analyze, it will report on the content of the ZIP file, like in this example:
@@ -507,6 +514,12 @@ def ProcessAt(argument):
             return strings
     else:
         return [argument]
+
+def CreateZipFileObject(arg1, arg2):
+    if 'AESZipFile' in dir(zipfile):
+        return zipfile.AESZipFile(arg1, arg2)
+    else:
+        return zipfile.ZipFile(arg1, arg2)
 
 def YARACompile(ruledata):
     if ruledata.startswith('#'):
@@ -959,9 +972,9 @@ class cBinaryFile:
             elif fch == FCH_DATA:
                 self.fIn = DataIO(data)
             elif not self.noextraction and self.filename.lower().endswith('.zip'):
-                self.oZipfile = zipfile.ZipFile(self.filename, 'r')
+                self.oZipfile = CreateZipFileObject(self.filename, 'r')
                 if len(self.oZipfile.infolist()) == 1:
-                    self.fIn = self.oZipfile.open(self.oZipfile.infolist()[0], 'r', self.zippassword)
+                    self.fIn = self.oZipfile.open(self.oZipfile.infolist()[0], 'r', C2BIP3(self.zippassword))
                     self.extracted = True
                 else:
                     self.oZipfile.close()
@@ -4964,7 +4977,7 @@ def DictionaryAttack(passwordfile, oZipfile, fOut, stop):
     start = time.time()
     for password in passwords:
         try:
-            oZipfile.open(oZipfile.infolist()[0], 'r', password).read(2)
+            oZipfile.open(oZipfile.infolist()[0], 'r', C2BIP3(password)).read(2)
             if stop:
                 Print('Password: %s' % password, fOut)
             return password
@@ -5004,22 +5017,22 @@ def ZIPDump(zipfilename, options, data=None):
 
     FixPipe()
     if data != None:
-        oZipfile = zipfile.ZipFile(DataIO(data), 'r')
+        oZipfile = CreateZipFileObject(DataIO(data), 'r')
     elif zipfilename == '':
         if sys.platform == 'win32':
             import msvcrt
             msvcrt.setmode(sys.stdin.fileno(), os.O_BINARY)
         if sys.version_info[0] > 2:
-            oZipfile = zipfile.ZipFile(DataIO(sys.stdin.buffer.read()), 'r')
+            oZipfile = CreateZipFileObject(DataIO(sys.stdin.buffer.read()), 'r')
         else:
-            oZipfile = zipfile.ZipFile(DataIO(sys.stdin.read()), 'r')
+            oZipfile = CreateZipFileObject(DataIO(sys.stdin.read()), 'r')
     else:
-        oZipfile = zipfile.ZipFile(zipfilename, 'r')
+        oZipfile = CreateZipFileObject(zipfilename, 'r')
     zippassword = options.password
     if not options.regular and len(oZipfile.infolist()) == 1:
         try:
             if oZipfile.open(oZipfile.infolist()[0], 'r', C2BIP3(zippassword)).read(2) == b'PK':
-                oZipfile2 = zipfile.ZipFile(DataIO(oZipfile.open(oZipfile.infolist()[0], 'r', C2BIP3(zippassword)).read()), 'r')
+                oZipfile2 = CreateZipFileObject(DataIO(oZipfile.open(oZipfile.infolist()[0], 'r', C2BIP3(zippassword)).read()), 'r')
                 oZipfile.close()
                 oZipfile = oZipfile2
         except:
