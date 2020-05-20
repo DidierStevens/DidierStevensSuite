@@ -2,8 +2,8 @@
 
 __description__ = 'BIFF plugin for oledump.py'
 __author__ = 'Didier Stevens'
-__version__ = '0.0.12'
-__date__ = '2020/05/18'
+__version__ = '0.0.13'
+__date__ = '2020/05/20'
 
 """
 
@@ -37,6 +37,7 @@ History:
   2020/05/16: 0.0.12 option -c
   2020/05/17: option -r
   2020/05/18: continue
+  2020/05/20: option -j
 
 Todo:
 """
@@ -44,6 +45,7 @@ Todo:
 import struct
 import re
 import optparse
+import json
 
 DEFAULT_SEPARATOR = ','
 QUOTE = '"'
@@ -363,7 +365,7 @@ def ParseExpression(expression, cellrefformat):
 0x001C: 'LOOKUP',
 0x001D: 'INDEX',
 0x001E: 'REPT',
-0x001F: 'MID',
+0x001F: ['MID', 3],
 0x0020: 'LEN',
 0x0021: 'VALUE',
 0x0022: 'TRUE',
@@ -1157,13 +1159,16 @@ def ParseExpression(expression, cellrefformat):
                 expression = expression[1:]
                 if P23Ord(expression[0]) == 0: # probably BIFF8 -> UNICODE (compressed)
                     expression = expression[1:]
-                    result += '"%s" ' % P23Decode(expression[:length])
+                    stringValue = P23Decode(expression[:length])
+                    result += '"%s" ' % stringValue
                     expression = expression[length:]
                 elif P23Ord(expression[0]) == 1: # if 1, then double byte chars
                     # doublebyte check: https://docs.microsoft.com/en-us/openspecs/office_file_formats/ms-xls/05162858-0ca9-44cb-bb07-a720928f63f8
                     expression = expression[1:]
-                    result += '"%s" ' % P23Decode(expression[:length*2])
+                    stringValue = P23Decode(expression[:length*2])
+                    result += '"%s" ' % stringValue
                     expression = expression[length*2:]
+                stack.append('"' + stringValue + '"')
             elif ptgid == 0x19:
                 grbit = P23Ord(expression[0])
                 expression = expression[1:]
@@ -1567,6 +1572,7 @@ class cBIFF(cPluginParent):
             oParser.add_option('-o', '--opcode', type=str, default='', help='Opcode to filter for')
             oParser.add_option('-f', '--find', type=str, default='', help='Content to search for')
             oParser.add_option('-c', '--csv', action='store_true', default=False, help='Produce CSV')
+            oParser.add_option('-j', '--json', action='store_true', default=False, help='Produce JSON')
             oParser.add_option('-r', '--cellrefformat', type=str, default='rc', help='Cell reference format (RC, LN)')
             (options, args) = oParser.parse_args(self.options.split(' '))
 
@@ -1694,7 +1700,7 @@ class cBIFF(cPluginParent):
 
                 if options.find == '' and options.opcode == '' and not options.xlm or options.opcode != '' and options.opcode.lower() in line.lower() or options.find != '' and options.find in data or options.xlm and opcode in [0x06, 0x18, 0x85, 0x207]:
                     if not options.hex and not options.dump:
-                        if options.csv:
+                        if options.csv or options.json:
                             if csvrow != None:
                                 result.append(csvrow)
                         else:
@@ -1719,6 +1725,8 @@ class cBIFF(cPluginParent):
                 result = []
             elif options.csv:
                 result = [MakeCSVLine(row, DEFAULT_SEPARATOR, QUOTE) for row in [['Sheet', 'Reference', 'Formula', 'Value']] + result]
+            elif options.json:
+                result = json.dumps(result)
 
         return result
 
