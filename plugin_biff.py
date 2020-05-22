@@ -2,8 +2,8 @@
 
 __description__ = 'BIFF plugin for oledump.py'
 __author__ = 'Didier Stevens'
-__version__ = '0.0.14'
-__date__ = '2020/05/21'
+__version__ = '0.0.15'
+__date__ = '2020/05/22'
 
 """
 
@@ -39,6 +39,7 @@ History:
   2020/05/18: continue
   2020/05/20: 0.0.13 option -j
   2020/05/21: 0.0.14 improved parsing for a83890bbc081b9ec839c9a32ec06eae6f549a0f85fe0a30751ef229a58e440af, bc39d3bb128f329d95393bf0a4f6ec813356e847a00794c18258bfa48df6937f, 002a8371570487bc81eec4aeea9fdfb7
+  2020/05/22: Python 3 fix STRING record 0x207
 
 
 Todo:
@@ -1700,13 +1701,14 @@ class cBIFF(cPluginParent):
                 # STRING record
                 if opcode == 0x207 and len(data) >= 4:
                     values = list(Strings(data[3:]).values())
-                    strings = b''
+                    strings = ''
                     if values[0] != []:
                         strings = values[0][0].encode()
                     if values[1] != []:
-                        if strings != b'':
-                            strings += b' '
-                        strings += b' '.join(values[1])
+                        if strings != '':
+                            strings += ' '
+                        print(values)
+                        strings += ' '.join(values[1])
                     line += ' - %s' % strings
 
                 # number record
