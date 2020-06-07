@@ -2,8 +2,8 @@
 
 __description__ = 'BIFF plugin for oledump.py'
 __author__ = 'Didier Stevens'
-__version__ = '0.0.15'
-__date__ = '2020/05/22'
+__version__ = '0.0.16'
+__date__ = '2020/05/26'
 
 """
 
@@ -39,7 +39,8 @@ History:
   2020/05/18: continue
   2020/05/20: 0.0.13 option -j
   2020/05/21: 0.0.14 improved parsing for a83890bbc081b9ec839c9a32ec06eae6f549a0f85fe0a30751ef229a58e440af, bc39d3bb128f329d95393bf0a4f6ec813356e847a00794c18258bfa48df6937f, 002a8371570487bc81eec4aeea9fdfb7
-  2020/05/22: Python 3 fix STRING record 0x207
+  2020/05/22: 0.0.15 Python 3 fix STRING record 0x207
+  2020/05/26: 0.0.16 added logic for reserved bits in BOUNDSHEET
 
 
 Todo:
@@ -1293,8 +1294,6 @@ def DecodeRKValue(data):
     if number & 0x01:
         divider = 100.0
     if number & 0x02:
-        print(repr(data))
-        raise Exception('DecodeRKValue')
         return (struct.unpack('<i', data)[0] >> 2) / divider
     else:
         return struct.unpack('<d', b'\x00\x00\x00\x00' + data)[0] / divider
@@ -1666,7 +1665,10 @@ class cBIFF(cPluginParent):
                     definesNames.append(name)
                     if flags & 0x01:
                         line += ' hidden'
-                    parsedExpression, stack = ParseExpression(data[offset+lnName:offset+lnName+szFormula], definesNames, sheetNames, options.cellrefformat)
+                    try:
+                        parsedExpression, stack = ParseExpression(data[offset+lnName:offset+lnName+szFormula], definesNames, sheetNames, options.cellrefformat)
+                    except IndexError:
+                        parsedExpression = '*PARSING ERROR*'
                     line += ' len=%d %s' % (szFormula, parsedExpression)
 
                 # FILEPASS record
@@ -1681,11 +1683,17 @@ class cBIFF(cPluginParent):
                     dSheetType = {0: 'worksheet or dialog sheet', 1: 'Excel 4.0 macro sheet', 2: 'chart', 6: 'Visual Basic module'}
                     if sheetType == 1:
                         macros4Found = True
-                    dSheetState = {0: 'visible', 1: 'hidden', 2: 'very hidden'}
                     sheetName = ShortXLUnicodeString(data[6:])
                     dSheetNames[positionBOF] = sheetName
                     sheetNames.append(sheetName)
-                    line += ' - %s, %s - %s' % (dSheetType.get(sheetType, '%02x' % sheetType), dSheetState.get(sheetState, '%02x' % sheetState), sheetName)
+
+                    dSheetState = {0: 'visible', 1: 'hidden', 2: 'very hidden', 3: 'visibility=3'}
+                    visibility = ''
+                    if sheetState > 3:
+                        visibility = 'reserved bits not zero: 0x%02x ' % (sheetState & 0xFC)
+                    visibility += dSheetState.get(sheetState & 3, '0x%02x' % (sheetState & 3))
+                        
+                    line += ' - %s, %s - %s' % (dSheetType.get(sheetType, '%02x' % sheetType), visibility, sheetName)
 
                 # BOF record
                 if opcode == 0x0809 and len(data) >= 4:
@@ -1707,7 +1715,6 @@ class cBIFF(cPluginParent):
                     if values[1] != []:
                         if strings != '':
                             strings += ' '
-                        print(values)
                         strings += ' '.join(values[1])
                     line += ' - %s' % strings
 
