@@ -2,8 +2,8 @@
 
 __description__ = 'Translate bytes according to a Python expression'
 __author__ = 'Didier Stevens'
-__version__ = '2.5.7'
-__date__ = '2020/01/06'
+__version__ = '2.5.8'
+__date__ = '2020/06/08'
 
 """
 
@@ -40,6 +40,7 @@ History:
   2019/02/20: 2.5.5 added ZlibRawD
   2019/02/26: 2.5.6 updated help
   2020/01/06: 2.5.7 added Xor function
+  2020/06/08: 2.5.8 Python 3 fix
 
 Todo:
 """
@@ -595,9 +596,17 @@ def Translate(filenameInput, commandPython, options):
     elif options.regex != '' or options.filterregex != '':
         content = fIn.read()
         if options.regex != '':
-            Output(fOut, re.sub(options.regex, eval(commandPython), content))
+            if sys.version_info[0] > 2:
+                regexvalue = options.regex.encode()
+            else:
+                regexvalue = options.regex
+            Output(fOut, re.sub(regexvalue, eval(commandPython), content))
         else:
-            Output(fOut, re.sub(options.filterregex, eval(commandPython), ''.join([x.group() for x in re.finditer(options.filterregex, content)])))
+            if sys.version_info[0] > 2:
+                regexvalue = options.filterregex.encode()
+            else:
+                regexvalue = options.filterregex
+            Output(fOut, re.sub(regexvalue, eval(commandPython), ''.join([x.group() for x in re.finditer(options.filterregex, content)])))
     else:
         Transform(fIn, fIn2, fOut, commandPython)
 
