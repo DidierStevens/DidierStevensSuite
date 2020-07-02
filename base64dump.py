@@ -2,8 +2,8 @@
 
 __description__ = 'Extract base64 strings from file'
 __author__ = 'Didier Stevens'
-__version__ = '0.0.10'
-__date__ = '2018/05/23'
+__version__ = '0.0.12'
+__date__ = '2020/07/02'
 
 """
 
@@ -29,6 +29,7 @@ History:
   2018/05/07: 0.0.9: added bx and ah encoding; added YARA support; added decoders
   2018/05/23: 0.0.10: added zxle and zxbe encoding; added option --ignore
   2018/07/23: 0.0.11: added option -I
+  2020/07/02: 0.0.12: added zxc encoding, verbose YARACompile, updated CutData, option -A, selection warning, DSS_DEFAULT_HASH_ALGORITHMS, option --jsonoutput, option -T, option -p
 
 Todo:
 """
@@ -37,7 +38,6 @@ import optparse
 import sys
 import os
 import zipfile
-import cStringIO
 import binascii
 import textwrap
 import re
@@ -46,6 +46,8 @@ import string
 import math
 import string
 import codecs
+import zlib
+import json
 try:
     import yara
 except:
@@ -54,10 +56,14 @@ if sys.version_info[0] >= 3:
     from io import StringIO
 else:
     from cStringIO import StringIO
+if sys.version_info[0] >= 3:
+    from io import BytesIO as DataIO
+else:
+    from cStringIO import StringIO as DataIO
 
 dumplinelength = 16
-MALWARE_PASSWORD = 'infected'
-REGEX_STANDARD = '[\x09\x20-\x7E]'
+MALWARE_PASSWORD = b'infected'
+REGEX_STANDARD = b'[\x09\x20-\x7E]'
 
 def PrintManual():
     manual = '''
@@ -80,6 +86,8 @@ The second column (Size) is the length of the base64 string.
 The third column (Encoded) is the start of the base64 string.
 The fourth column (Decoded) is the ASCII dump of the start of the decoded base64 string.
 The fifth column (MD5 decoded) is the MD5 hash of the decoded base64 string.
+By default, it's the MD5 hash, but this can be changed by setting environment variable DSS_DEFAULT_HASH_ALGORITHMS.
+Like this: set DSS_DEFAULT_HASH_ALGORITHMS=sha256
 
 By default, base64dump will search for base64 encoding strings. It's possible to specify other encodings by using option -e. This option takes the following values:
 b64
@@ -90,6 +98,7 @@ bx
 ah
 zxle
 zxbe
+zxc
 
 bu stands for "backslash UNICODE" (\\u), it looks like this: \\u9090\\ueb77...
 pu stands for "percent UNICODE" (%u), it looks like this: %u9090%ueb77...
@@ -98,6 +107,7 @@ bx stands for "backslash hexadecimal" (\\x), it looks like this: \\x90\\x90...
 ah stands for "ampersand hexadecimal" (&H), it looks like this: &H90&H90...
 zxle stands for "zero hexadecimal little-endian" (0x), it looks like this: 0x909090900xeb77...
 zxbe stands for "zero hexadecimal big-endian" (0x), it looks like this: 0x909090900x77eb...
+zxc stands for "zero hexadecimal comma" (0x), it looks like this: 0x90,0x90,0x90,0x90...
 
 zxle and zxbe encoding looks for 1 to 8 hexadecimal characters after the prefix 0x. If the number of hexadecimal characters is uneven, a 0 (digit zero) will be prefixed to have an even number of hexadecimal digits.
 
@@ -211,6 +221,22 @@ You can specify decoders in exactly the same way as plugins, for example specify
 If decoders are located in a different directory, you could specify it with the --decoderdir option.
 Some decoders take options, to be provided with option --decoderoptions.
 
+Some malformed encodings, like BASE64 strings with a number of digits that is not a multiple of 4, will not be detected by base64dump.py.
+Such strings are detected using regular expressions, but are then discarded because they don't have the correct length (length of BASE64 strings must be a multiple of 4, length os hexadecimal strings must be a multiple of 2).
+If you still need to decode such strings, you can use option -p (--process). This option allows you to specify a Python function (that will be evaluated, so use only trusted input for this option) to modify the detected string before it is decoded).
+You can use builtin function L4 (Length 4) for example: function L4 takes a string as input and truncates it if necessary, by removing characters from the end so that the length becomes a multiple of 4.
+Example:
+C:\Demo>base64dump.py -p L4 malformed_base64.vir
+
+You can also provide your own function, for example via a lambda expression:
+C:\Demo>base64dump.py -p "lambda x: x[:-1]" malformed_base64.vir
+
+In this example, the lambda expression will remove one character from the end of the detected string.
+
+With option -T (--headtail), output can be truncated to the first 10 lines and last 10 lines of output.
+
+With option --jsonoutput base64dump.py will output selected content as a JSON object that can be piped into other tools that support this JSON format.
+
 Option -c (--cut) allows for the partial selection of a datastream. Use this option to "cut out" part of the datastream.
 The --cut option takes an argument to specify which section of bytes to select from the datastream. This argument is composed of 2 terms separated by a colon (:), like this:
 termA:termB
@@ -253,6 +279,18 @@ def CIC(expression):
         return expression()
     else:
         return expression
+
+def P23Ord(value):
+    if type(value) == int:
+        return value
+    else:
+        return ord(value)
+
+def P23Chr(value):
+    if type(value) == int:
+        return chr(value)
+    else:
+        return value
 
 # IFF: IF Function
 def IFF(expression, valueTrue, valueFalse):
@@ -299,22 +337,36 @@ class cDump():
             countSpaces += 1
         return hexDump + '  ' + (' ' * countSpaces) + asciiDump
 
-    def HexAsciiDump(self):
+    def HexAsciiDump(self, rle=False):
         oDumpStream = self.cDumpStream(self.prefix)
+        position = ''
         hexDump = ''
         asciiDump = ''
+        previousLine = None
+        countRLE = 0
         for i, b in enumerate(self.data):
             b = self.C2IIP2(b)
             if i % self.dumplinelength == 0:
                 if hexDump != '':
-                    oDumpStream.Addline(self.CombineHexAscii(hexDump, asciiDump))
-                hexDump = '%08X:' % (i + self.offset)
+                    line = self.CombineHexAscii(hexDump, asciiDump)
+                    if not rle or line != previousLine:
+                        if countRLE > 0:
+                            oDumpStream.Addline('* %d 0x%02x' % (countRLE, countRLE * self.dumplinelength))
+                        oDumpStream.Addline(position + line)
+                        countRLE = 0
+                    else:
+                        countRLE += 1
+                    previousLine = line
+                position = '%08X:' % (i + self.offset)
+                hexDump = ''
                 asciiDump = ''
             if i % self.dumplinelength == self.dumplinelength / 2:
                 hexDump += ' '
             hexDump += ' %02X' % b
-            asciiDump += IFF(b >= 32 and b <= 128, chr(b), '.')
-        oDumpStream.Addline(self.CombineHexAscii(hexDump, asciiDump))
+            asciiDump += IFF(b >= 32 and b < 128, chr(b), '.')
+        if countRLE > 0:
+            oDumpStream.Addline('* %d 0x%02x' % (countRLE, countRLE * self.dumplinelength))
+        oDumpStream.Addline(self.CombineHexAscii(position + hexDump, asciiDump))
         return oDumpStream.Content()
 
     def Base64Dump(self, nowhitespace=False):
@@ -349,18 +401,24 @@ class cDump():
 def HexDump(data):
     return cDump(data, dumplinelength=dumplinelength).HexDump()
 
-def HexAsciiDump(data):
-    return cDump(data, dumplinelength=dumplinelength).HexAsciiDump()
+def HexAsciiDump(data, rle=False):
+    return cDump(data, dumplinelength=dumplinelength).HexAsciiDump(rle=rle)
 
 #Fix for http://bugs.python.org/issue11395
 def StdoutWriteChunked(data):
-    while data != '':
-        sys.stdout.write(data[0:10000])
-        try:
-            sys.stdout.flush()
-        except IOError:
-            return
-        data = data[10000:]
+    if sys.version_info[0] > 2:
+        if isinstance(data, str):
+            sys.stdout.write(data)
+        else:
+            sys.stdout.buffer.write(data)
+    else:
+        while data != '':
+            sys.stdout.write(data[0:10000])
+            try:
+                sys.stdout.flush()
+            except IOError:
+                return
+            data = data[10000:]
 
 def IfWIN32SetBinary(io):
     if sys.platform == 'win32':
@@ -393,18 +451,18 @@ def ExpandFilenameArguments(filenames):
     return list(collections.OrderedDict.fromkeys(sum(map(glob.glob, sum(map(ProcessAt, filenames), [])), [])))
 
 def AsciiDump(data):
-    return ''.join([IFF(ord(b) >= 32, b, '.') for b in data])
+    return ''.join([IFF(P23Ord(b) >= 32 and P23Ord(b) < 127, P23Chr(b), '.') for b in data])
 
 def Magic(data):
     magicPrintable = ''
     magicHex = ''
     for iter in range(4):
         if len(data) >= iter + 1:
-            if ord(data[iter]) >= 0x20 and ord(data[iter]) < 0x7F:
-                magicPrintable += data[iter]
+            if P23Ord(data[iter]) >= 0x20 and P23Ord(data[iter]) < 0x7F:
+                magicPrintable += P23Chr(data[iter])
             else:
                 magicPrintable += '.'
-            magicHex += '%02x' % ord(data[iter])
+            magicHex += '%02x' % P23Ord(data[iter])
     return magicPrintable, magicHex
 
 def CalculateByteStatistics(dPrevalence):
@@ -414,7 +472,7 @@ def CalculateByteStatistics(dPrevalence):
     countWhitespaceBytes = 0
     countUniqueBytes = 0
     for iter in range(1, 0x21):
-        if chr(iter) in string.whitespace:
+        if P23Chr(iter) in string.whitespace:
             countWhitespaceBytes += dPrevalence[iter]
         else:
             countControlBytes += dPrevalence[iter]
@@ -438,11 +496,11 @@ def CalculateFileMetaData(data):
     for iter in range(256):
         dPrevalence[iter] = 0
     for char in data:
-        dPrevalence[ord(char)] += 1
+        dPrevalence[P23Ord(char)] += 1
 
     fileSize, entropy, countUniqueBytes, countNullByte, countControlBytes, countWhitespaceBytes, countPrintableBytes, countHighBytes = CalculateByteStatistics(dPrevalence)
     magicPrintable, magicHex = Magic(data[0:4])
-    return hashlib.md5(data).hexdigest(), magicPrintable, magicHex, fileSize, entropy, countUniqueBytes, countNullByte, countControlBytes, countWhitespaceBytes, countPrintableBytes, countHighBytes
+    return CalculateChosenHash(data)[0], magicPrintable, magicHex, fileSize, entropy, countUniqueBytes, countNullByte, countControlBytes, countWhitespaceBytes, countPrintableBytes, countHighBytes
 
 CUTTERM_NOTHING = 0
 CUTTERM_POSITION = 1
@@ -454,6 +512,18 @@ def Replace(string, dReplacements):
         return dReplacements[string]
     else:
         return string
+
+def ParseInteger(argument):
+    sign = 1
+    if argument.startswith('+'):
+        argument = argument[1:]
+    elif argument.startswith('-'):
+        argument = argument[1:]
+        sign = -1
+    if argument.startswith('0x'):
+        return sign * int(argument[2:], 16)
+    else:
+        return sign * int(argument)
 
 def ParseCutTerm(argument):
     if argument == '':
@@ -467,23 +537,28 @@ def ParseCutTerm(argument):
             value = -value
         return CUTTERM_POSITION, value, argument[len(oMatch.group(0)):]
     if oMatch == None:
-        oMatch = re.match(r'\[([0-9a-f]+)\](\d+)?([+-]\d+)?', argument, re.I)
+        oMatch = re.match(r'\[([0-9a-f]+)\](\d+)?([+-](?:0x[0-9a-f]+|\d+))?', argument, re.I)
     else:
         value = int(oMatch.group(1))
         if argument.startswith('-'):
             value = -value
         return CUTTERM_POSITION, value, argument[len(oMatch.group(0)):]
     if oMatch == None:
-        oMatch = re.match(r"\[\'(.+?)\'\](\d+)?([+-]\d+)?", argument)
+        oMatch = re.match(r"\[u?\'(.+?)\'\](\d+)?([+-](?:0x[0-9a-f]+|\d+))?", argument)
     else:
         if len(oMatch.group(1)) % 2 == 1:
             raise Exception("Uneven length hexadecimal string")
         else:
-            return CUTTERM_FIND, (binascii.a2b_hex(oMatch.group(1)), int(Replace(oMatch.group(2), {None: '1'})), int(Replace(oMatch.group(3), {None: '0'}))), argument[len(oMatch.group(0)):]
+            return CUTTERM_FIND, (binascii.a2b_hex(oMatch.group(1)), int(Replace(oMatch.group(2), {None: '1'})), ParseInteger(Replace(oMatch.group(3), {None: '0'}))), argument[len(oMatch.group(0)):]
     if oMatch == None:
         return None, None, argument
     else:
-        return CUTTERM_FIND, (oMatch.group(1), int(Replace(oMatch.group(2), {None: '1'})), int(Replace(oMatch.group(3), {None: '0'}))), argument[len(oMatch.group(0)):]
+        if argument.startswith("[u'"):
+            # convert ascii to unicode 16 byte sequence
+            searchtext = oMatch.group(1).decode('unicode_escape').encode('utf16')[2:]
+        else:
+            searchtext = oMatch.group(1)
+        return CUTTERM_FIND, (searchtext, int(Replace(oMatch.group(2), {None: '1'})), ParseInteger(Replace(oMatch.group(3), {None: '0'}))), argument[len(oMatch.group(0)):]
 
 def ParseCutArgument(argument):
     type, value, remainder = ParseCutTerm(argument.strip())
@@ -517,8 +592,8 @@ def ParseCutArgument(argument):
     else:
         return typeLeft, valueLeft, type, value
 
-def Find(data, value, nth):
-    position = -1
+def Find(data, value, nth, startposition=-1):
+    position = startposition
     while nth > 0:
         position = data.find(value, position + 1)
         if position == -1:
@@ -528,12 +603,12 @@ def Find(data, value, nth):
 
 def CutData(stream, cutArgument):
     if cutArgument == '':
-        return stream
+        return [stream, None, None]
 
     typeLeft, valueLeft, typeRight, valueRight = ParseCutArgument(cutArgument)
 
     if typeLeft == None:
-        return stream
+        return [stream, None, None]
 
     if typeLeft == CUTTERM_NOTHING:
         positionBegin = 0
@@ -542,7 +617,7 @@ def CutData(stream, cutArgument):
     elif typeLeft == CUTTERM_FIND:
         positionBegin = Find(stream, valueLeft[0], valueLeft[1])
         if positionBegin == -1:
-            return ''
+            return ['', None, None]
         positionBegin += valueLeft[2]
     else:
         raise Exception("Unknown value typeLeft")
@@ -556,30 +631,106 @@ def CutData(stream, cutArgument):
     elif typeRight == CUTTERM_LENGTH:
         positionEnd = positionBegin + valueRight
     elif typeRight == CUTTERM_FIND:
-        positionEnd = Find(stream, valueRight[0], valueRight[1])
+        positionEnd = Find(stream, valueRight[0], valueRight[1], positionBegin)
         if positionEnd == -1:
-            return ''
+            return ['', None, None]
         else:
             positionEnd += len(valueRight[0])
         positionEnd += valueRight[2]
     else:
         raise Exception("Unknown value typeRight")
 
-    return stream[positionBegin:positionEnd]
+    return [stream[positionBegin:positionEnd], positionBegin, positionEnd]
+
+class cHashCRC32():
+    def __init__(self):
+        self.crc32 = None
+
+    def update(self, data):
+        self.crc32 = zlib.crc32(data)
+
+    def hexdigest(self):
+        return '%08x' % (self.crc32 & 0xffffffff)
+
+class cHashChecksum8():
+    def __init__(self):
+        self.sum = 0
+
+    def update(self, data):
+        if sys.version_info[0] >= 3:
+            self.sum += sum(data)
+        else:
+            self.sum += sum(map(ord, data))
+
+    def hexdigest(self):
+        return '%08x' % (self.sum)
+
+dSpecialHashes = {'crc32': cHashCRC32, 'checksum8': cHashChecksum8}
+
+def GetHashObjects(algorithms):
+    global dSpecialHashes
+
+    dHashes = {}
+
+    if algorithms == '':
+        algorithms = os.getenv('DSS_DEFAULT_HASH_ALGORITHMS', 'md5')
+    if ',' in algorithms:
+        hashes = algorithms.split(',')
+    else:
+        hashes = algorithms.split(';')
+    for name in hashes:
+        if not name in dSpecialHashes.keys() and not name in hashlib.algorithms_available:
+            print('Error: unknown hash algorithm: %s' % name)
+            print('Available hash algorithms: ' + ' '.join([name for name in list(hashlib.algorithms_available)] + list(dSpecialHashes.keys())))
+            return [], {}
+        elif name in dSpecialHashes.keys():
+            dHashes[name] = dSpecialHashes[name]()
+        else:
+            dHashes[name] = hashlib.new(name)
+
+    return hashes, dHashes
+
+def CalculateChosenHash(data):
+    hashes, dHashes = GetHashObjects('')
+    dHashes[hashes[0]].update(data)
+    return dHashes[hashes[0]].hexdigest(), hashes[0]
 
 def ExtractStringsASCII(data):
-    regex = REGEX_STANDARD + '{%d,}'
+    regex = REGEX_STANDARD + b'{%d,}'
     return re.findall(regex % 4, data)
 
 def ExtractStringsUNICODE(data):
-    regex = '((' + REGEX_STANDARD + '\x00){%d,})'
-    return [foundunicodestring.replace('\x00', '') for foundunicodestring, dummy in re.findall(regex % 4, data)]
+    regex = b'((' + REGEX_STANDARD + b'\x00){%d,})'
+    return [foundunicodestring.replace(b'\x00', b'') for foundunicodestring, dummy in re.findall(regex % 4, data)]
 
 def ExtractStrings(data):
     return ExtractStringsASCII(data) + ExtractStringsUNICODE(data)
 
 def DumpFunctionStrings(data):
     return ''.join([extractedstring + '\n' for extractedstring in ExtractStrings(data)])
+
+def RemoveLeadingEmptyLines(data):
+    if data[0] == '':
+        return RemoveLeadingEmptyLines(data[1:])
+    else:
+        return data
+
+def RemoveTrailingEmptyLines(data):
+    if data[-1] == '':
+        return RemoveTrailingEmptyLines(data[:-1])
+    else:
+        return data
+
+def HeadTail(data, apply):
+    count = 10
+    if apply:
+        lines = RemoveTrailingEmptyLines(RemoveLeadingEmptyLines(data.split('\n')))
+        if len(lines) <= count * 2:
+            return data
+        else:
+            return '\n'.join(lines[0:count] + ['...'] + lines[-count:])
+    else:
+        return data
 
 def Translate(expression):
     try:
@@ -589,16 +740,18 @@ def Translate(expression):
         command = expression
     return lambda x: eval('x' + command)
 
-def DecodeDataBase64(data):
-    for base64string in re.findall('[ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/]+={0,2}', data):
+def DecodeDataBase64(data, ProcessFunction):
+    for base64string in re.findall(b'[ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/]+={0,2}', data):
+        base64string = ProcessFunction(base64string)
         if len(base64string) % 4 == 0:
             try:
                 yield (base64string, binascii.a2b_base64(base64string))
             except:
                 continue
 
-def DecodeDataHex(data):
-    for hexstring in re.findall('[ABCDEFabcdef0123456789]+', data):
+def DecodeDataHex(data, ProcessFunction):
+    for hexstring in re.findall(b'[ABCDEFabcdef0123456789]+', data):
+        hexstring = ProcessFunction(hexstring)
         if len(hexstring) % 2 == 0:
             try:
                 yield (hexstring, binascii.a2b_hex(hexstring))
@@ -606,70 +759,83 @@ def DecodeDataHex(data):
                 continue
 
 def DecodeBU(data):
-    decoded = ''
-    while data != '':
+    decoded = b''
+    while data != b'':
         decoded += binascii.a2b_hex(data[4:6]) + binascii.a2b_hex(data[2:4])
         data = data[6:]
     return decoded
 
-def DecodeDataBU(data):
-    for bu in re.findall(r'(?:\\u[ABCDEFabcdef0123456789]{4})+', data):
+def DecodeDataBU(data, ProcessFunction):
+    for bu in re.findall(br'(?:\\u[ABCDEFabcdef0123456789]{4})+', data):
         yield (bu, DecodeBU(bu))
 
-def DecodeDataPU(data):
-    for bu in re.findall(r'(?:%u[ABCDEFabcdef0123456789]{4})+', data):
+def DecodeDataPU(data, ProcessFunction):
+    for bu in re.findall(br'(?:%u[ABCDEFabcdef0123456789]{4})+', data):
         yield (bu, DecodeBU(bu))
 
 def DecodeBX(data):
-    decoded = ''
-    while data != '':
+    decoded = b''
+    while data != b'':
         decoded += binascii.a2b_hex(data[2:4])
         data = data[4:]
     return decoded
 
-def DecodeDataBX(data):
-    for bx in re.findall(r'(?:\\x[ABCDEFabcdef0123456789]{2})+', data):
+def DecodeDataBX(data, ProcessFunction):
+    for bx in re.findall(br'(?:\\x[ABCDEFabcdef0123456789]{2})+', data):
         yield (bx, DecodeBX(bx))
 
-def DecodeDataAH(data):
-    for ah in re.findall(r'(?:&H[ABCDEFabcdef0123456789]{2})+', data):
+def DecodeDataAH(data, ProcessFunction):
+    for ah in re.findall(br'(?:&H[ABCDEFabcdef0123456789]{2})+', data):
         yield (ah, DecodeBX(ah))
 
 def ReverseCount(data, count):
-    result = ''
-    while data != '':
+    result = b''
+    while data != b'':
         part = data[0:count]
         data = data[count:]
         result = part + result
     return result
 
 def DecodeZXLittleEndian(data):
-    decoded = ''
-    for hex in data.split('0x'):
-        if hex == '':
+    decoded = b''
+    for hex in data.split(b'0x'):
+        if hex == b'':
             continue
         if len(hex) % 2 == 1:
-            hex = '0' + hex
+            hex = b'0' + hex
         decoded += binascii.a2b_hex(ReverseCount(hex, 2))
     return decoded
 
-def DecodeDataZXLittleEndian(data):
-    for zx in re.findall(r'(?:0x[ABCDEFabcdef0123456789]{1,8})+', data):
+def DecodeDataZXLittleEndian(data, ProcessFunction):
+    for zx in re.findall(br'(?:0x[ABCDEFabcdef0123456789]{1,8})+', data):
         yield (zx, DecodeZXLittleEndian(zx))
 
 def DecodeZXBigEndian(data):
-    decoded = ''
-    for hex in data.split('0x'):
-        if hex == '':
+    decoded = b''
+    for hex in data.split(b'0x'):
+        if hex == b'':
             continue
         if len(hex) % 2 == 1:
-            hex = '0' + hex
+            hex = b'0' + hex
         decoded += binascii.a2b_hex(hex)
     return decoded
 
-def DecodeDataZXBigEndian(data):
-    for zx in re.findall(r'(?:0x[ABCDEFabcdef0123456789]{1,8})+', data):
+def DecodeDataZXBigEndian(data, ProcessFunction):
+    for zx in re.findall(br'(?:0x[ABCDEFabcdef0123456789]{1,8})+', data):
         yield (zx, DecodeZXBigEndian(zx))
+
+def RemoveWhitespace(data):
+    for whitespacecharacter in string.whitespace:
+        data = data.replace(whitespacecharacter.encode(), b'')
+    return data
+
+def DecodeDataZXC(data, ProcessFunction):
+    data = RemoveWhitespace(data)
+    for hexstring in re.findall(br'(?:0x[ABCDEFabcdef0123456789]{2},)+0x[ABCDEFabcdef0123456789]{2}', data):
+        try:
+            yield (hexstring, binascii.a2b_hex(hexstring.replace(b'0x', b'').replace(b',', b'')))
+        except:
+            continue
 
 def YARACompile(ruledata):
     if ruledata.startswith('#'):
@@ -681,9 +847,13 @@ def YARACompile(ruledata):
             rule = 'rule string {strings: $a = "%s" ascii wide nocase condition: $a}' % ruledata[3:]
         elif ruledata.startswith('#q#'):
             rule = ruledata[3:].replace("'", '"')
+        elif ruledata.startswith('#x#'):
+            rule = 'rule hexadecimal {strings: $a = { %s } condition: $a}' % ruledata[3:]
+        elif ruledata.startswith('#r#'):
+            rule = 'rule regex {strings: $a = /%s/ ascii wide nocase condition: $a}' % ruledata[3:]
         else:
             rule = ruledata[1:]
-        return yara.compile(source=rule, externals={'streamname': '', 'VBA': False})
+        return yara.compile(source=rule, externals={'streamname': '', 'VBA': False}), rule
     else:
         dFilepaths = {}
         if os.path.isdir(ruledata):
@@ -694,7 +864,7 @@ def YARACompile(ruledata):
         else:
             for filename in ProcessAt(ruledata):
                 dFilepaths[filename] = filename
-        return yara.compile(filepaths=dFilepaths, externals={'streamname': '', 'VBA': False})
+        return yara.compile(filepaths=dFilepaths, externals={'streamname': '', 'VBA': False}), ','.join(dFilepaths.values())
 
 def AddDecoder(cClass):
     global decoders
@@ -722,7 +892,7 @@ def LoadDecoders(decoders, decoderdir, verbose):
                     scriptDecoder = os.path.join(scriptPath, decoder)
                     if os.path.exists(scriptDecoder):
                         decoder = scriptDecoder
-            exec open(decoder, 'r') in globals(), globals()
+            exec(open(decoder, 'r').read(), globals(), globals())
         except Exception as e:
             print('Error loading decoder: %s' % decoder)
             if verbose:
@@ -751,6 +921,17 @@ def DecodeFunction(decoders, options, stream):
         return stream
     return decoders[0](stream, options.decoderoptions).Decode()
 
+def PrintWarningSelection(select, selectionCounter):
+    if select != '' and selectionCounter == 0:
+        print('Warning: no decoding was selected with expression %s' % select)
+
+def L4(data):
+    modulus = len(data) % 4
+    if modulus == 0:
+        return data
+    else:
+        return data[:-modulus]
+
 def BASE64Dump(filename, options):
     global decoders
 
@@ -763,6 +944,7 @@ def BASE64Dump(filename, options):
         'ah': ('&H hexadecimal, example: &H90&H90...', DecodeDataAH),
         'zxle': ('0x hexadecimal little-endian, example: 0x909090900xeb77...', DecodeDataZXLittleEndian),
         'zxbe': ('0x hexadecimal big-endian, example: 0x909090900x77eb...', DecodeDataZXBigEndian),
+        'zxc': ('0x hexadecimal 2 digits, comma-separated, example: 0x90,0x90,0x90,0x90...', DecodeDataZXC),
     }
 
     if options.encoding == '?' :
@@ -783,15 +965,18 @@ def BASE64Dump(filename, options):
 
     if filename == '':
         IfWIN32SetBinary(sys.stdin)
-        oStringIO = cStringIO.StringIO(sys.stdin.read())
+        if sys.version_info[0] >= 3:
+            oDataIO = DataIO(sys.stdin.buffer.read())
+        else:
+            oDataIO = DataIO(sys.stdin.read())
     elif filename.lower().endswith('.zip'):
         oZipfile = zipfile.ZipFile(filename, 'r')
         oZipContent = oZipfile.open(oZipfile.infolist()[0], 'r', C2BIP3(MALWARE_PASSWORD))
-        oStringIO = cStringIO.StringIO(oZipContent.read())
+        oDataIO = DataIO(oZipContent.read())
         oZipContent.close()
         oZipfile.close()
     else:
-        oStringIO = cStringIO.StringIO(open(filename, 'rb').read())
+        oDataIO = DataIO(open(filename, 'rb').read())
 
     if options.dump:
         DumpFunction = lambda x:x
@@ -800,6 +985,8 @@ def BASE64Dump(filename, options):
         DumpFunction = HexDump
     elif options.asciidump:
         DumpFunction = HexAsciiDump
+    elif options.asciidumprle:
+        DumpFunction = lambda x: HexAsciiDump(x, True)
     elif options.strings:
         DumpFunction = DumpFunctionStrings
     elif options.translate != '':
@@ -807,21 +994,24 @@ def BASE64Dump(filename, options):
     else:
         DumpFunction = None
 
+    selectionCounter = 0
+    if options.jsonoutput:
+        jsonObject = []
+
     if options.encoding == 'all' or options.yara != None:
         formatString = '%3s  %-7s %-16s %-16s %-32s'
-        columnNames = ('Enc', 'Size', 'Encoded', 'Decoded', 'MD5 decoded')
+        columnNames = ('Enc', 'Size', 'Encoded', 'Decoded', '%s decoded' % CalculateChosenHash(b'')[1])
         print(formatString % columnNames)
         print(formatString % tuple(['-' * len(s) for s in columnNames]))
-    elif options.select == '':
+    elif options.select == '' and not options.jsonoutput:
         formatString = '%-2s  %-7s %-16s %-16s %-32s'
-        columnNames = ('ID', 'Size', 'Encoded', 'Decoded', 'MD5 decoded')
+        columnNames = ('ID', 'Size', 'Encoded', 'Decoded', '%s decoded' % CalculateChosenHash(b'')[1])
         print(formatString % columnNames)
         print(formatString % tuple(['-' * len(s) for s in columnNames]))
 
-    data = oStringIO.read()
+    data = oDataIO.read()
     if options.ignorewhitespace:
-        for whitespacecharacter in string.whitespace:
-            data = data.replace(whitespacecharacter, '')
+        data = RemoveWhitespace(data)
     for ignore in options.ignore:
         data = data.replace(ignore, '')
     for ignore in binascii.a2b_hex(options.ignorehex):
@@ -841,20 +1031,26 @@ def BASE64Dump(filename, options):
         result = None
     dDecodedData = {}
 
+    ProcessFunction = lambda x: x
+    if options.process != '':
+        ProcessFunction = eval(options.process)
+
     rules = None
     if options.yara != None:
         if not 'yara' in sys.modules:
             print('Error: option yara requires the YARA Python module.')
             return
-        rules = YARACompile(options.yara)
+        rules, rulesVerbose = YARACompile(options.yara)
+        if options.verbose:
+            print(rulesVerbose)
         for encoding in dEncodings:
-            for encodeddata, decodeddata in dEncodings[encoding][1](data):
+            for encodeddata, decodeddata in dEncodings[encoding][1](data, ProcessFunction):
                 if options.number and len(decodeddata) < options.number:
                     continue
                 if options.unique and decodeddata in dDecodedData:
                     continue
                 dDecodedData[decodeddata] = True
-                line = '%3s: %7d %-16s %-16s %s' % (encoding, len(encodeddata), encodeddata[0:16], AsciiDump(decodeddata[0:16]), hashlib.md5(decodeddata).hexdigest())
+                line = '%3s: %7d %-16s %-16s %s' % (encoding, len(encodeddata), encodeddata[0:16].decode(), AsciiDump(decodeddata[0:16]), CalculateChosenHash(decodeddata)[0])
                 oDecoders = [cIdentity(decodeddata, None)]
                 for cDecoder in decoders:
                     try:
@@ -881,33 +1077,39 @@ def BASE64Dump(filename, options):
     elif options.encoding == 'all':
         report = []
         for encoding in dEncodings:
-            for encodeddata, decodeddata in dEncodings[encoding][1](data):
+            for encodeddata, decodeddata in dEncodings[encoding][1](data, ProcessFunction):
                 if options.number and len(decodeddata) < options.number:
                     continue
                 if options.unique and decodeddata in dDecodedData:
                     continue
                 dDecodedData[decodeddata] = True
-                report.append([len(encodeddata), '%3s: %7d %-16s %-16s %s' % (encoding, len(encodeddata), encodeddata[0:16], AsciiDump(decodeddata[0:16]), hashlib.md5(decodeddata).hexdigest())])
+                report.append([len(encodeddata), '%3s: %7d %-16s %-16s %s' % (encoding, len(encodeddata), encodeddata[0:16].decode(), AsciiDump(decodeddata[0:16]), CalculateChosenHash(decodeddata)[0])])
         for key, value in sorted(report):
             print(value)
     else:
         counter = 1
-        for encodeddata, decodeddata in dEncodings[options.encoding][1](data):
+        for encodeddata, decodeddata in dEncodings[options.encoding][1](data, ProcessFunction):
             if options.number and len(decodeddata) < options.number:
                 continue
             if options.unique and decodeddata in dDecodedData:
                 continue
             dDecodedData[decodeddata] = True
             if options.select == '':
-                print('%2d: %7d %-16s %-16s %s' % (counter, len(encodeddata), encodeddata[0:16], AsciiDump(decodeddata[0:16]), hashlib.md5(decodeddata).hexdigest()))
+                if options.jsonoutput:
+                    jsonObject.append({'id': counter, 'name': encodeddata[0:16].decode(), 'content': binascii.b2a_base64(decodeddata).strip(b'\n').decode()})
+                else:
+                    print('%2d: %7d %-16s %-16s %s' % (counter, len(encodeddata), encodeddata[0:16].decode(), AsciiDump(decodeddata[0:16]), CalculateChosenHash(decodeddata)[0]))
             elif ('%s' % counter) == options.select or options.select == 'a':
                 if len(decoders) > 1:
                     print('Error: provide only one decoder when using option select')
                     return
-                if DumpFunction == None:
-                    filehash, magicPrintable, magicHex, fileSize, entropy, countUniqueBytes, countNullByte, countControlBytes, countWhitespaceBytes, countPrintableBytes, countHighBytes = CalculateFileMetaData(CutData(decodeddata, options.cut))
+                selectionCounter += 1
+                if options.jsonoutput:
+                    jsonObject.append({'id': counter, 'name': encodeddata[0:16].decode(), 'content': binascii.b2a_base64(decodeddata).strip(b'\n').decode()})
+                elif DumpFunction == None:
+                    filehash, magicPrintable, magicHex, fileSize, entropy, countUniqueBytes, countNullByte, countControlBytes, countWhitespaceBytes, countPrintableBytes, countHighBytes = CalculateFileMetaData(CutData(decodeddata, options.cut)[0])
                     print('Info:')
-                    print(' %s: %s' % ('MD5', filehash))
+                    print(' %s: %s' % (CalculateChosenHash(b'')[1], filehash))
                     print(' %s: %d' % ('Filesize', fileSize))
                     print(' %s: %f' % ('Entropy', entropy))
                     print(' %s: %d (%.2f%%)' % ('Unique bytes', countUniqueBytes, countUniqueBytes / 2.560))
@@ -919,8 +1121,13 @@ def BASE64Dump(filename, options):
                     print(' %s: %s' % ('Printable bytes', countPrintableBytes))
                     print(' %s: %s' % ('High bytes', countHighBytes))
                 else:
-                    StdoutWriteChunked(DumpFunction(DecodeFunction(decoders, options, CutData(decodeddata, options.cut))))
+                    StdoutWriteChunked(HeadTail(DumpFunction(DecodeFunction(decoders, options, CutData(decodeddata, options.cut)[0])), options.headtail))
             counter += 1
+
+    if options.jsonoutput:
+        print(json.dumps({'version': 2, 'id': 'didierstevens.com', 'type': 'content', 'fields': ['id', 'name', 'content'], 'items': jsonObject}))
+    else:
+        PrintWarningSelection(options.select, selectionCounter)
 
     return 0
 
@@ -932,6 +1139,7 @@ def Main():
     oParser.add_option('-d', '--dump', action='store_true', default=False, help='perform dump')
     oParser.add_option('-x', '--hexdump', action='store_true', default=False, help='perform hex dump')
     oParser.add_option('-a', '--asciidump', action='store_true', default=False, help='perform ascii dump')
+    oParser.add_option('-A', '--asciidumprle', action='store_true', default=False, help='perform ascii dump with RLE')
     oParser.add_option('-S', '--strings', action='store_true', default=False, help='perform strings dump')
     oParser.add_option('-t', '--translate', type=str, default='', help='string translation, like utf16 or .decode("utf8")')
     oParser.add_option('-n', '--number', type=int, default=None, help='minimum number of bytes in decoded data')
@@ -946,7 +1154,10 @@ def Main():
     oParser.add_option('--decoderoptions', type=str, default='', help='options for the decoder')
     oParser.add_option('--decoderdir', type=str, default='', help='directory for the decoder')
     oParser.add_option('--yarastrings', action='store_true', default=False, help='Print YARA strings')
-    oParser.add_option('-V', '--verbose', action='store_true', default=False, help='verbose output with decoder errors')
+    oParser.add_option('-V', '--verbose', action='store_true', default=False, help='verbose output with decoder errors and YARA rules')
+    oParser.add_option('--jsonoutput', action='store_true', default=False, help='produce json output')
+    oParser.add_option('-T', '--headtail', action='store_true', default=False, help='do head & tail')
+    oParser.add_option('-p', '--process', type=str, default='', help='Python function to process encodings prior to decoding (like L4, lambda bytes: bytes[:-1], ...)')
     (options, args) = oParser.parse_args()
 
     if options.man:
