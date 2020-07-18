@@ -2,8 +2,8 @@
 
 __description__ = 'Analyze OLE files (Compound Binary Files)'
 __author__ = 'Didier Stevens'
-__version__ = '0.0.50'
-__date__ = '2020/05/21'
+__version__ = '0.0.51'
+__date__ = '2020/07/18'
 
 """
 
@@ -96,6 +96,7 @@ History:
   2020/03/09: 0.0.48 Python 3 bug fix
   2020/03/28: 0.0.49 -s (selection) is no longer case sensitive with letter prefixes
   2020/05/21: 0.0.50 fixed typos man page
+  2020/07/18: 0.0.51 small fix ASCII dump: 0x7F is not printable
 
 Todo:
   add support for pyzipper
@@ -739,7 +740,7 @@ class cDump():
             if i % self.dumplinelength == self.dumplinelength / 2:
                 hexDump += ' '
             hexDump += ' %02X' % b
-            asciiDump += IFF(b >= 32 and b < 128, chr(b), '.')
+            asciiDump += IFF(b >= 32 and b < 127, chr(b), '.')
         if countRLE > 0:
             oDumpStream.Addline('* %d 0x%02x' % (countRLE, countRLE * self.dumplinelength))
         oDumpStream.Addline(self.CombineHexAscii(position + hexDump, asciiDump))

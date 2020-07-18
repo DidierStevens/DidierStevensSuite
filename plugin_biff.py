@@ -2,8 +2,8 @@
 
 __description__ = 'BIFF plugin for oledump.py'
 __author__ = 'Didier Stevens'
-__version__ = '0.0.16'
-__date__ = '2020/05/26'
+__version__ = '0.0.17'
+__date__ = '2020/07/17'
 
 """
 
@@ -41,6 +41,7 @@ History:
   2020/05/21: 0.0.14 improved parsing for a83890bbc081b9ec839c9a32ec06eae6f549a0f85fe0a30751ef229a58e440af, bc39d3bb128f329d95393bf0a4f6ec813356e847a00794c18258bfa48df6937f, 002a8371570487bc81eec4aeea9fdfb7
   2020/05/22: 0.0.15 Python 3 fix STRING record 0x207
   2020/05/26: 0.0.16 added logic for reserved bits in BOUNDSHEET
+  2020/07/17: 0.0.17 added option --statistics
 
 
 Todo:
@@ -1598,6 +1599,7 @@ class cBIFF(cPluginParent):
             oParser.add_option('-c', '--csv', action='store_true', default=False, help='Produce CSV')
             oParser.add_option('-j', '--json', action='store_true', default=False, help='Produce JSON')
             oParser.add_option('-r', '--cellrefformat', type=str, default='rc', help='Cell reference format (RC, LN)')
+            oParser.add_option('-S', '--statistics', action='store_true', default=False, help='Produce BIFF record statistics')
             (options, args) = oParser.parse_args(self.options.split(' '))
 
             if options.find.startswith('0x'):
@@ -1610,12 +1612,14 @@ class cBIFF(cPluginParent):
             sheetNames = []
             definesNames = []
             currentSheetname = ''
+            dOpcodeStatistics = {}
             while position < len(stream):
                 formatcodes = 'HH'
                 formatsize = struct.calcsize(formatcodes)
                 if len(stream[position:position + formatsize]) < formatsize:
                     break
                 opcode, length = struct.unpack(formatcodes, stream[position:position + formatsize])
+                dOpcodeStatistics[opcode] = [dOpcodeStatistics.get(opcode, [0, 0])[0] + 1, dOpcodeStatistics.get(opcode, [0, 0])[1] + length]
                 data = stream[position + formatsize:position + formatsize + length]
                 positionBIFFRecord = position
                 position = position + formatsize + length
@@ -1760,6 +1764,19 @@ class cBIFF(cPluginParent):
 
             if options.xlm and filepassFound:
                 result = ['FILEPASS record: file is password protected']
+            elif options.statistics:
+                stats = []
+                for opcode in sorted(dOpcodeStatistics.keys()):
+                    stats.append((opcode, dOpcodes.get(opcode, ''), dOpcodeStatistics[opcode][0], dOpcodeStatistics[opcode][1]))
+                if options.csv:
+                    result = [MakeCSVLine(['opcode', 'description', 'count', 'totalsize'], DEFAULT_SEPARATOR, QUOTE)]
+                else:
+                    result = []
+                for item in stats:
+                    if options.csv:
+                        result.append(MakeCSVLine(item, DEFAULT_SEPARATOR, QUOTE))
+                    else:
+                        result.append('%d %s: %d %d' % item)
             elif options.xlm and not macros4Found:
                 result = []
             elif options.csv:
