@@ -2,8 +2,8 @@
 
 __description__ = 'ZIP dump utility'
 __author__ = 'Didier Stevens'
-__version__ = '0.0.19'
-__date__ = '2020/04/29'
+__version__ = '0.0.20'
+__date__ = '2020/07/23'
 
 """
 
@@ -50,6 +50,7 @@ History:
   2020/04/05: handle incomplete EOCD record
   2020/04/13: 0.0.18 added option info
   2020/04/29: 0.0.19 added support for AES with pyzipper
+  2020/07/23: 0.0.20 added PK record data descriptor (PK 07 08)
 
 Todo:
 """
@@ -5203,6 +5204,8 @@ def ParseZIPRecord(data):
                 extra = 22 + length
             else:
                 extra = len(data)
+        elif data[2:4] == b'\x07\x08':
+            magic += ' dsc'
         else:
             return None
     return magic, extra
