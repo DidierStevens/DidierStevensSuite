@@ -2,8 +2,8 @@
 
 __description__ = 'Analyze OLE files (Compound Binary Files)'
 __author__ = 'Didier Stevens'
-__version__ = '0.0.51'
-__date__ = '2020/07/18'
+__version__ = '0.0.52'
+__date__ = '2020/07/25'
 
 """
 
@@ -97,6 +97,7 @@ History:
   2020/03/28: 0.0.49 -s (selection) is no longer case sensitive with letter prefixes
   2020/05/21: 0.0.50 fixed typos man page
   2020/07/18: 0.0.51 small fix ASCII dump: 0x7F is not printable
+  2020/07/25: 0.0.52 added support for pyzipper
 
 Todo:
   add support for pyzipper
@@ -106,7 +107,6 @@ import optparse
 import sys
 import math
 import os
-import zipfile
 import binascii
 import xml.dom.minidom
 import zlib
@@ -148,6 +148,11 @@ try:
     from oletools.common.clsid import KNOWN_CLSIDS
 except ImportError:
     KNOWN_CLSIDS = {}
+
+try:
+    import pyzipper as zipfile
+except ImportError:
+    import zipfile
 
 dumplinelength = 16
 MALWARE_PASSWORD = 'infected'
@@ -1956,6 +1961,12 @@ def PrintWarningSelection(select, selectionCounter):
     if select != '' and selectionCounter == 0:
         print('Warning: no stream was selected with expression %s' % select)
 
+def CreateZipFileObject(arg1, arg2):
+    if 'AESZipFile' in dir(zipfile):
+        return zipfile.AESZipFile(arg1, arg2)
+    else:
+        return zipfile.ZipFile(arg1, arg2)
+
 def OLEDump(filename, options):
     returnCode = 0
 
@@ -2033,7 +2044,7 @@ def OLEDump(filename, options):
         else:
             oStringIO = DataIO(sys.stdin.read())
     elif FilenameInSimulations(filename):
-        oZipfile = zipfile.ZipFile(dslsimulationdb.GetSimulation(filename), 'r')
+        oZipfile = CreateZipFileObject(dslsimulationdb.GetSimulation(filename), 'r')
         oZipContent = oZipfile.open(oZipfile.infolist()[0], 'r', C2BIP3(options.password))
         zipContent = oZipContent.read()
         if zipContent.startswith('Neut'):
@@ -2042,7 +2053,7 @@ def OLEDump(filename, options):
         oZipContent.close()
         oZipfile.close()
     elif filename.lower().endswith('.zip'):
-        oZipfile = zipfile.ZipFile(filename, 'r')
+        oZipfile = CreateZipFileObject(filename, 'r')
         oZipContent = oZipfile.open(oZipfile.infolist()[0], 'r', C2BIP3(options.password))
         oStringIO = DataIO(oZipContent.read())
         oZipContent.close()
@@ -2078,7 +2089,7 @@ def OLEDump(filename, options):
             PrintWarningSelection(options.select, selectionCounter)
             ole.close()
         elif magic[0:2] == b'PK':
-            oZipfile = zipfile.ZipFile(oStringIO, 'r')
+            oZipfile = CreateZipFileObject(oStringIO, 'r')
             counter = 0
             selectionCounterTotal = 0
             oleFileFound = False
