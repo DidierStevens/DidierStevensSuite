@@ -2,8 +2,8 @@
 
 __description__ = 'Tool for displaying PE file info'
 __author__ = 'Didier Stevens'
-__version__ = '0.7.10'
-__date__ = '2020/03/02'
+__version__ = '0.7.11'
+__date__ = '2020/07/26'
 
 """
 
@@ -48,6 +48,8 @@ History:
   2020/01/26: Python 3 fixes;
   2020/03/01: 0.7.10 added ProcessDumpInfo and Fixed_get_overlay_data_start_offset
   2020/03/02: added TLSCallbacks
+  2020/07/04: 0.7.11 fixed typo in man page
+  2020/07/26: fixes Python 3 bug for overlays reported by Lenny Zeltser; fixed ASCII 128; added option --verbose
 
 Todo:
 """
@@ -101,7 +103,7 @@ C:\Demo>pecheck.py -l P sample.png.vir
 
 The first column is the position of the embedded PE file, the fourth column is the end of the embedded PE file without overlay, and the sixth column is the end with overlay.
 The fifth column is the hash of the embedded PE file without overlay. By default, it's the MD5 hash, but this can be changed by setting environment variable DSS_DEFAULT_HASH_ALGORITHMS.
-Like this: set DSS_DEFAULT_HASH_ALGORITHMS=SHA256
+Like this: set DSS_DEFAULT_HASH_ALGORITHMS=sha256
 
 After producing an overview of embedded PE files (with option -l P), select an embedded PE file for further analysis, like this:
 
@@ -155,6 +157,13 @@ def C2BIP3(string):
         return bytes([ord(x) for x in string])
     else:
         return string
+
+#Convert to String If Python 2
+def C2SIP2(data):
+    if sys.version_info[0] > 2:
+        return data
+    else:
+        return str(data)
 
 def P23Ord(value):
     if type(value) == int:
@@ -237,7 +246,7 @@ def YARACompile(ruledata):
             rule = 'rule regex {strings: $a = /%s/ ascii wide nocase condition: $a}' % ruledata[3:]
         else:
             rule = ruledata[1:]
-        return yara.compile(source=rule)
+        return yara.compile(source=rule), rule
     else:
         dFilepaths = {}
         if os.path.isdir(ruledata):
@@ -248,7 +257,7 @@ def YARACompile(ruledata):
         else:
             for filename in ProcessAt(ruledata):
                 dFilepaths[filename] = filename
-        return yara.compile(filepaths=dFilepaths)
+        return yara.compile(filepaths=dFilepaths), ','.join(dFilepaths.values())
 
 def NumberOfBytesHumanRepresentation(value):
     if value <= 1024:
@@ -312,10 +321,7 @@ def Signature(pe):
         print(' Signature present but error importing pyasn1_modules module')
         return
 
-    if sys.version_info[0] > 2:
-        signatureArg = signature
-    else:
-        signatureArg = str(signature)
+    signatureArg = C2SIP2(signature)
 
     contentInfo, _ = der_decoder.decode(signatureArg, asn1Spec=rfc2315.ContentInfo())
     contentType = contentInfo.getComponentByName('contentType')
@@ -462,7 +468,9 @@ def SingleFileInfo(filename, data, signatures, options):
         if not 'yara' in sys.modules:
             print('Error: option yara requires the YARA Python module.')
             return
-        rules = YARACompile(options.yara)
+        rules, rulesVerbose = YARACompile(options.yara)
+        if options.verbose:
+            print(rulesVerbose)
         for result in rules.match(data=str(raw)):
             print(' Rule: %s' % result.rule)
             if options.yarastrings:
@@ -523,7 +531,7 @@ class cDump():
             if i % self.dumplinelength == self.dumplinelength / 2:
                 hexDump += ' '
             hexDump += ' %02X' % b
-            asciiDump += IFF(b >= 32 and b < 128, chr(b), '.')
+            asciiDump += IFF(b >= 32 and b < 127, chr(b), '.')
         if countRLE > 0:
             oDumpStream.Addline('* %d 0x%02x' % (countRLE, countRLE * self.dumplinelength))
         oDumpStream.Addline(self.CombineHexAscii(position + hexDump, asciiDump))
@@ -838,7 +846,9 @@ def Sections(data, options):
         if not 'yara' in sys.modules:
             print('Error: option yara requires the YARA Python module.')
             return
-        rules = YARACompile(options.yara)
+        rules, rulesVerbose = YARACompile(options.yara)
+        if options.verbose:
+            print(rulesVerbose)
 
     for section in pe.sections:
         sectionname = SectionNameToString(section.Name)
@@ -995,13 +1005,13 @@ def SingleFile(filename, signatures, options):
             if overlayOffset == None:
                 print('No overlay')
             else:
-                StdoutWriteChunked(DumpFunction(str(pe.write()[overlayOffset:])))
+                StdoutWriteChunked(DumpFunction(C2SIP2(pe.write()[overlayOffset:])))
         elif options.getdata == 's': # strip
             overlayOffset = Fixed_get_overlay_data_start_offset(pe)
             if overlayOffset == None:
-                StdoutWriteChunked(DumpFunction(str(pe.write())))
+                StdoutWriteChunked(DumpFunction(C2SIP2(pe.write())))
             else:
-                StdoutWriteChunked(DumpFunction(str(pe.write()[:overlayOffset])))
+                StdoutWriteChunked(DumpFunction(C2SIP2(pe.write()[:overlayOffset])))
         else:
             parsed = ParseGetData(options.getdata)
             if parsed == None:
@@ -1121,6 +1131,7 @@ def Main():
     oParser.add_option('-S', '--strings', action='store_true', default=False, help='perform strings dump')
     oParser.add_option('-o', '--overview', type=str, default='', help='Accepted value: r for overview of resources, s for sections')
     oParser.add_option('-l', '--locate', type=str, default='', help='Locate PE files inside binary data (P for list of MZ/PE headers)')
+    oParser.add_option('-V', '--verbose', action='store_true', default=False, help='Verbose output with YARA rules')
     (options, args) = oParser.parse_args(GetArgumentsUpdatedWithEnvironmentVariable('PECHECK_OPTIONS'))
 
     if options.man:
