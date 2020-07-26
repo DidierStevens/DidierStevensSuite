@@ -589,7 +589,10 @@ def DumpFunctionStrings(data):
 #Fix for http://bugs.python.org/issue11395
 def StdoutWriteChunked(data):
     if sys.version_info[0] > 2:
-        sys.stdout.buffer.write(data)
+        if isinstance(data, str):
+            sys.stdout.write(data)
+        else:
+            sys.stdout.buffer.write(data)
     else:
         while data != '':
             sys.stdout.write(data[0:10000])
