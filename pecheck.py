@@ -588,13 +588,16 @@ def DumpFunctionStrings(data):
 
 #Fix for http://bugs.python.org/issue11395
 def StdoutWriteChunked(data):
-    while data != '':
-        sys.stdout.write(data[0:10000])
-        try:
-            sys.stdout.flush()
-        except IOError:
-            return
-        data = data[10000:]
+    if sys.version_info[0] > 2:
+        sys.stdout.buffer.write(data)
+    else:
+        while data != '':
+            sys.stdout.write(data[0:10000])
+            try:
+                sys.stdout.flush()
+            except IOError:
+                return
+            data = data[10000:]
 
 def IfWIN32SetBinary(io):
     if sys.platform == 'win32':
