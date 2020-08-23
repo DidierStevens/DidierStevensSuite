@@ -2,8 +2,8 @@
 
 __description__ = "Program to convert numbers into a string"
 __author__ = 'Didier Stevens'
-__version__ = '0.0.9'
-__date__ = '2019/12/08'
+__version__ = '0.0.10'
+__date__ = '2020/08/16'
 
 """
 
@@ -26,6 +26,7 @@ History:
   2019/09/25: 0.0.8 added option -b
   2019/11/02: added C2BIP3
   2019/12/08: 0.0.9 Python 3 bug fix
+  2020/08/16: 0.0.10 added option -v
 
 Todo:
 """
@@ -117,6 +118,8 @@ Output can be written to a file using option -o.
 Use option -b --binary when you expect the output to be binary data. This option will prevent linefeeds to be expanded to carriage return + linefeed on Windows (this tool produces text output by default).
 
 numbers-to-string.py needs at least 3 numbers per line to start extracting. Lines with less than 3 numbers are ignored. 3 numbers is the default minimum value, and can be changed using option -n.
+
+Use option -v --verbose to get more insight into the data processing done by this tool.
 
 Errors that occur when evaluating the Python expression will be silently ignored. To have the tool raise these errors, use option -e.
 
@@ -363,6 +366,10 @@ def NumbersToStringSingle(function, filenames, oOutput, options):
                     line = line[:position + len(options.end)]
                 results = oRE.findall(line)
                 if len(results) >= options.number:
+                    if options.verbose:
+                        oOutput.Line('Line: %s' % line)
+                        oOutput.Line('%d numbers: %s' % (len(results), repr(results)))
+                        oOutput.Line('Decoded:')
                     ChrFunction = lambda c: Chr(c, options, translation)
                     error = True
                     if Function == None:
@@ -415,6 +422,7 @@ https://DidierStevens.com'''
     oParser.add_option('-e', '--error', action='store_true', default=False, help='Generate error when error occurs in Python expression')
     oParser.add_option('-i', '--ignore', action='store_true', default=False, help='Ignore numbers greater than 255')
     oParser.add_option('-n', '--number', type=int, default=3, help='Minimum number of numbers (3 by default)')
+    oParser.add_option('-v', '--verbose', action='store_true', default=False, help='Verbose')
     oParser.add_option('-j', '--join', action='store_true', default=False, help='Join output')
     oParser.add_option('-S', '--statistics', action='store_true', default=False, help='Generate statistics')
     oParser.add_option('-t', '--table', type=str, default='', help='Translation table')
