@@ -2,8 +2,8 @@
 
 __description__ = 'VBA project stream plugin for oledump.py'
 __author__ = 'Didier Stevens'
-__version__ = '0.0.2'
-__date__ = '2020/07/20'
+__version__ = '0.0.3'
+__date__ = '2020/08/15'
 
 """
 
@@ -16,6 +16,7 @@ History:
   2020/07/17: added Hashcat hash
   2020/07/20: added option -w
   2020/07/21: refactor
+  2020/08/15: 0.0.3 bin bugfix
 
 Todo:
 """
@@ -3600,6 +3601,10 @@ def Decrypt(data):
 def IntegersToHex(integers):
     return ''.join(['%02x' % integer for integer in integers])
 
+def IntegerToBinary(value, bits):
+    binary = bin(value)[2:]
+    return '0' * (bits - len(binary)) + binary
+
 class cVBAProject(cPluginParent):
 
     macroOnly = False
@@ -3632,7 +3637,7 @@ class cVBAProject(cPluginParent):
 
         if decoded[0:4] == [29, 0, 0, 0]:
             data = []
-            for index, value in enumerate(bin(decoded[5] * 0x10000 + decoded[6] * 0x100 + decoded[7])[2:]):
+            for index, value in enumerate(IntegerToBinary(decoded[5] * 0x10000 + decoded[6] * 0x100 + decoded[7],24)):
                 data.append(decoded[8 + index] if value == '1' else 0x00)
             result.append('VBA project is password protected')
 #            result.append(' JtR hash: vbapassword:$dynamic_24$%s$HEX$%s' % (IntegersToHex(decoded[12:32]), IntegersToHex(decoded[8:12])))

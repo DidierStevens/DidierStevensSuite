@@ -2,8 +2,8 @@
 
 __description__ = 'Analyze OLE files (Compound Binary Files)'
 __author__ = 'Didier Stevens'
-__version__ = '0.0.52'
-__date__ = '2020/07/25'
+__version__ = '0.0.53'
+__date__ = '2020/08/30'
 
 """
 
@@ -98,6 +98,9 @@ History:
   2020/05/21: 0.0.50 fixed typos man page
   2020/07/18: 0.0.51 small fix ASCII dump: 0x7F is not printable
   2020/07/25: 0.0.52 added support for pyzipper
+  2020/08/??: 0.0.53 added ole plugin class 
+  2020/08/28: added support to select streams by name
+  2020/08/30: fixed & updated raw VBA decompression
 
 Todo:
   add support for pyzipper
@@ -213,6 +216,8 @@ C:\Demo>oledump.py -s 1 -d Book1.xls | pdfid.py -f
 If the raw dump needs to be processed by a string codec, like utf16, use option -t instead of -d and provide the codec:
 C:\Demo>oledump.py -s 1 -t utf16 Book1.xls
 You can also provide a Python string expression, like .decode('utf16').encode('utf8').
+
+Streams can also be selected by their full name (example: -s 'VBA/ThisWorkkbook').
 
 Option -C (--cut) allows for the partial selection of a stream. Use this option to "cut out" part of the stream.
 The --cut option takes an argument to specify which section of bytes to select from the stream. This argument is composed of 2 terms separated by a colon (:), like this:
@@ -864,7 +869,7 @@ def DecompressChunk(compressedChunk):
     data = compressedChunk[2:2 + size - 2]
 
     if flagCompressed == 0:
-        return data, compressedChunk[size:]
+        return data.decode(errors='ignore'), compressedChunk[size:]
 
     decompressedChunk = ''
     while len(data) != 0:
@@ -1029,8 +1034,12 @@ def ProcessAt(argument):
 
 def AddPlugin(cClass):
     global plugins
+    global pluginsOle
 
-    plugins.append(cClass)
+    if cClass.__mro__[1] == cPluginParent:
+        plugins.append(cClass)
+    else:
+        pluginsOle.append(cClass)
 
 def ExpandFilenameArguments(filenames):
     return list(collections.OrderedDict.fromkeys(sum(map(glob.glob, sum(map(ProcessAt, filenames), [])), [])))
@@ -1038,6 +1047,24 @@ def ExpandFilenameArguments(filenames):
 class cPluginParent():
     macroOnly = False
     indexQuiet = False
+
+class cPluginParentOle():
+    macroOnly = False
+    indexQuiet = False
+
+    def __init__(self, ole, data, options):
+        self.ole = ole
+        self.data = data
+        self.options = options
+
+    def PreProcess(self):
+        pass
+
+    def Process(self, name, stream):
+        pass
+
+    def PostProcess(self):
+        pass
 
 def GetScriptPath():
     if getattr(sys, 'frozen', False):
@@ -1714,8 +1741,9 @@ def ParseVBADIR(ole):
                             vbadirinfo.append(moduleinfo)
     return vbadirinfo
 
-def OLESub(ole, prefix, rules, options):
+def OLESub(ole, data, prefix, rules, options):
     global plugins
+    global pluginsOle
     global decoders
 
     returnCode = 1
@@ -1759,6 +1787,10 @@ def OLESub(ole, prefix, rules, options):
     if options.select == '':
         counter = 1
         vbaConcatenate = ''
+        objectsPluginOle = [cPluginOle(ole, data, options.pluginoptions) for cPluginOle in pluginsOle]
+        for oPluginOle in objectsPluginOle:
+            oPluginOle.PreProcess()
+
         for orphan, fname, entry_type, entry_clsid, stream in OLEGetStreams(ole, options.storages):
             indicator = ' '
             macroPresent = False
@@ -1835,6 +1867,10 @@ def OLESub(ole, prefix, rules, options):
                             else:
                                 for line in result:
                                     print('                 ' + MyRepr(line))
+
+            for oPluginOle in objectsPluginOle:
+                oPluginOle.Process(fname, stream)
+
             counter += 1
             if options.yara != None:
                 oDecoders = [cIdentity(stream, None)]
@@ -1858,6 +1894,7 @@ def OLESub(ole, prefix, rules, options):
                                     print('                %s' % repr(stringdata[2]))
             if indicator.lower() == 'm':
                 vbaConcatenate += SearchAndDecompress(stream) + '\n'
+
         if options.yara != None and vbaConcatenate != '':
             print('All VBA source code:')
             for result in rules.match(data=vbaConcatenate, externals={'streamname': '', 'VBA': True}):
@@ -1867,6 +1904,10 @@ def OLESub(ole, prefix, rules, options):
                         print('               %06x %s:' % (stringdata[0], stringdata[1]))
                         print('                %s' % binascii.hexlify(C2BIP3(stringdata[2])))
                         print('                %s' % repr(stringdata[2]))
+
+        for oPluginOle in objectsPluginOle:
+            oPluginOle.PostProcess()
+
     else:
         if len(decoders) > 1:
             print('Error: provide only one decoder when using option select')
@@ -1914,7 +1955,7 @@ def OLESub(ole, prefix, rules, options):
             selection = options.select
             part = ''
         for orphan, fname, entry_type, entry_clsid, stream in OLEGetStreams(ole, options.storages):
-            if selection == 'a' or ('%s%d' % (prefix, counter)) == selection.upper() or prefix == 'A' and str(counter) == selection:
+            if selection == 'a' or ('%s%d' % (prefix, counter)) == selection.upper() or prefix == 'A' and str(counter) == selection or PrintableName(fname).lower() == selection.lower():
                 StdoutWriteChunked(HeadTail(DumpFunction(DecompressFunction(DecodeFunction(decoders, options, CutData(SelectPart(stream, part, dModuleinfo.get(''.join([c + '\x00' for c in fname[-1]]), None)), options.cut)[0]))), options.headtail))
                 selectionCounter += 1
                 if selection != 'a':
@@ -1975,7 +2016,9 @@ def OLEDump(filename, options):
         return returnCode
 
     global plugins
+    global pluginsOle
     plugins = []
+    pluginsOle = []
     LoadPlugins(options.plugins, options.plugindir, True)
 
     global decoders
@@ -1992,10 +2035,18 @@ def OLEDump(filename, options):
         else:
             data = File2String(filename)
         if options.vbadecompress:
+            positions = FindAll(data, b'\x00Attribut\x00e ')
+            vba = ''
             if options.vbadecompresscorrupt:
-                vba = SearchAndDecompress(data, None, skipAttributes=options.vbadecompressskipattributes)
+                for position in positions:
+                    result = SearchAndDecompress(data[position - 3:], None, skipAttributes=options.vbadecompressskipattributes)
+                    if result != None:
+                        vba += result
             else:
-                vba = SearchAndDecompress(data, skipAttributes=options.vbadecompressskipattributes)
+                for position in positions:
+                    result = SearchAndDecompress(data[position - 3:], skipAttributes=options.vbadecompressskipattributes) + '\n\n'
+                    if result != None:
+                        vba += result
             if options.plugins == '':
                 print(vba)
                 return returnCode
@@ -2077,7 +2128,7 @@ def OLEDump(filename, options):
                     print('Wrong index, must be between 1 and %d' % len(locations))
                 else:
                     ole = olefile.OleFileIO(DataIO(filecontent[locations[int(options.find) -  1]:]))
-                    returnCode, selectionCounter = OLESub(ole, '', rules, options)
+                    returnCode, selectionCounter = OLESub(ole, b'', '', rules, options)
                     PrintWarningSelection(options.select, selectionCounter)
                     ole.close()
     else:
@@ -2085,7 +2136,8 @@ def OLEDump(filename, options):
         oStringIO.seek(0)
         if magic[0:4] == OLEFILE_MAGIC:
             ole = olefile.OleFileIO(oStringIO)
-            returnCode, selectionCounter = OLESub(ole, '', rules, options)
+            oStringIO.seek(0)
+            returnCode, selectionCounter = OLESub(ole, oStringIO.read(), '', rules, options)
             PrintWarningSelection(options.select, selectionCounter)
             ole.close()
         elif magic[0:2] == b'PK':
@@ -2106,7 +2158,7 @@ def OLEDump(filename, options):
                         if not options.quiet and not options.jsonoutput:
                             print('%s: %s' % (letter, info.filename))
                     ole = olefile.OleFileIO(DataIO(content))
-                    returnCode, selectionCounter = OLESub(ole, letter, rules, options)
+                    returnCode, selectionCounter = OLESub(ole, content, letter, rules, options)
                     selectionCounterTotal += selectionCounter
                     oleFileFound = True
                     ole.close()
@@ -2148,14 +2200,14 @@ def OLEDump(filename, options):
                                             break
                                     print('%s: %s' % (letter, nameValue))
                             ole = olefile.OleFileIO(DataIO(content))
-                            returnCode, selectionCounter = OLESub(ole, letter, rules, options)
+                            returnCode, selectionCounter = OLESub(ole, content, letter, rules, options)
                             PrintWarningSelection(options.select, selectionCounter)
                             ole.close()
             elif data.startswith(ACTIVEMIME_MAGIC):
                 content = HeuristicZlibDecompress(data)
                 if content[0:4] == OLEFILE_MAGIC:
                     ole = olefile.OleFileIO(DataIO(content))
-                    returnCode, selectionCounter = OLESub(ole, '', rules, options)
+                    returnCode, selectionCounter = OLESub(ole, content, '', rules, options)
                     PrintWarningSelection(options.select, selectionCounter)
                     ole.close()
             else:
