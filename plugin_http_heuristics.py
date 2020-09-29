@@ -2,8 +2,8 @@
 
 __description__ = 'HTTP Heuristics plugin for oledump.py'
 __author__ = 'Didier Stevens'
-__version__ = '0.0.12'
-__date__ = '2020/01/25'
+__version__ = '0.0.13'
+__date__ = '2020/08/16'
 
 """
 
@@ -30,6 +30,7 @@ History:
   2019/11/05: 0.0.11 Python 3 support
   2020/01/24: 0.0.12 added option -c
   2020/01/25: Python 3 bugfix; deduping of result
+  2020/08/16: 0.0.13 added option -s
 
 Todo:
 """
@@ -133,19 +134,23 @@ class cHTTPHeuristics(cPluginParent):
 
         return result
 
-    def PreProcess(self):
+    def PreProcess(self, options):
         self.stream = re.sub(r'(\(\s*(\d+|\d+\.\d+)\s*[+*/-]\s*(\d+|\d+\.\d+)\s*\))', ReplaceFunction, self.streamOriginal)
+        
+        if options.space:
+            self.stream = self.stream.replace(' ', '')
 
     def AnalyzeSub(self):
         global keywords
-
-        self.PreProcess()
 
         oParser = optparse.OptionParser()
         oParser.add_option('-e', '--extended', action='store_true', default=False, help='Use extended keywords')
         oParser.add_option('-k', '--keywords', type=str, default='', help='Provide keywords (separator is ,)')
         oParser.add_option('-c', '--contains', action='store_true', default=False, help='Check if string contains keyword')
+        oParser.add_option('-s', '--space', action='store_true', default=False, help='Ignore space characters')
         (options, args) = oParser.parse_args(self.options.split(' '))
+
+        self.PreProcess(options)
 
         if options.extended:
             keywords = keywords + extendedkeywords

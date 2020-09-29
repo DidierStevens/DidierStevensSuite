@@ -2,8 +2,8 @@
 
 __description__ = 'Analyze OLE files (Compound Binary Files)'
 __author__ = 'Didier Stevens'
-__version__ = '0.0.53'
-__date__ = '2020/08/30'
+__version__ = '0.0.54'
+__date__ = '2020/09/29'
 
 """
 
@@ -101,6 +101,8 @@ History:
   2020/08/??: 0.0.53 added ole plugin class 
   2020/08/28: added support to select streams by name
   2020/08/30: fixed & updated raw VBA decompression
+  2020/09/05: 0.0.54 added extra info parameter %MODULEINFO%
+  2020/09/29: bugfix for Python 2 (mro)
 
 Todo:
   add support for pyzipper
@@ -580,6 +582,7 @@ If you need more data than the MD5 of each stream, use option -E (extra). This o
                  number of high bytes
   %CLSID%: storage/stream class ID
   %CLSIDDESC%: storage/stream class ID description
+  %MODULEINFO%: for module streams: size of compiled code & size of compressed code; otherwise 'N/A' (you must use option -i)
 
 The parameter for -E may contain other text than the variables, which will be printed. Escape characters \\n and \\t are supported.
 Example displaying the MD5 and SHA256 hash per stream, separated by a space character:
@@ -1036,7 +1039,11 @@ def AddPlugin(cClass):
     global plugins
     global pluginsOle
 
-    if cClass.__mro__[1] == cPluginParent:
+    try:
+        test = cClass.__mro__[1] == cPluginParent
+    except AttributeError:
+        test = True
+    if test:
         plugins.append(cClass)
     else:
         pluginsOle.append(cClass)
@@ -1048,7 +1055,7 @@ class cPluginParent():
     macroOnly = False
     indexQuiet = False
 
-class cPluginParentOle():
+class cPluginParentOle(object):
     macroOnly = False
     indexQuiet = False
 
@@ -1599,7 +1606,7 @@ def ExtraInfoBYTESTATS(data):
     sumValues, entropy, countNullByte, countControlBytes, countWhitespaceBytes, countPrintableBytes, countHighBytes = CalculateByteStatistics(dPrevalence)
     return '%d,%d,%d,%d,%d' % (countNullByte, countControlBytes, countWhitespaceBytes, countPrintableBytes, countHighBytes)
 
-def GenerateExtraInfo(extra, index, indicator, name, entry_clsid, stream):
+def GenerateExtraInfo(extra, index, indicator, moduleinfo, name, entry_clsid, stream):
     if extra == '':
         return ''
     if extra.startswith('!'):
@@ -1607,8 +1614,11 @@ def GenerateExtraInfo(extra, index, indicator, name, entry_clsid, stream):
         prefix = ''
     else:
         prefix = ' '
-    if indicator == ' ':
-        indicator = ''
+#    if indicator == ' ':
+#        indicator = ''
+    moduleinfo = moduleinfo.strip()
+    if moduleinfo == '':
+        moduleinfo = 'N/A'
     if KNOWN_CLSIDS == {}:
         clsidDesc = '<oletools missing>'
     else:
@@ -1629,6 +1639,7 @@ def GenerateExtraInfo(extra, index, indicator, name, entry_clsid, stream):
                '%BYTESTATS%': ExtraInfoBYTESTATS,
                '%CLSID%': lambda x: entry_clsid,
                '%CLSIDDESC%': lambda x: clsidDesc,
+               '%MODULEINFO%': lambda x: moduleinfo,
               }
     for variable in dExtras:
         if variable in extra:
@@ -1831,7 +1842,7 @@ def OLESub(ole, data, prefix, rules, options):
                     line += ' %s' % hashlib.md5(streamForExtra).hexdigest()
                 if options.extra.startswith('!'):
                     line = ''
-                line += GenerateExtraInfo(options.extra, index, indicator, PrintableName(fname, orphan), entry_clsid, streamForExtra)
+                line += GenerateExtraInfo(options.extra, index, indicator, moduleinfo, PrintableName(fname, orphan), entry_clsid, streamForExtra)
                 print(line)
             for cPlugin in plugins:
                 try:
