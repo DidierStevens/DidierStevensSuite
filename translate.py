@@ -2,8 +2,8 @@
 
 __description__ = 'Translate bytes according to a Python expression'
 __author__ = 'Didier Stevens'
-__version__ = '2.5.8'
-__date__ = '2020/06/08'
+__version__ = '2.5.9'
+__date__ = '2020/10/17'
 
 """
 
@@ -41,6 +41,7 @@ History:
   2019/02/26: 2.5.6 updated help
   2020/01/06: 2.5.7 added Xor function
   2020/06/08: 2.5.8 Python 3 fix
+  2020/10/17: 2.5.9 Python 3 fix
 
 Todo:
 """
@@ -586,7 +587,7 @@ def Translate(filenameInput, commandPython, options):
         fOut = open(options.output, 'wb')
 
     if options.script != '':
-        execfile(options.script, globals())
+        exec(open(options.script, 'r').read(), globals())
 
     if options.execute != '':
         exec(options.execute, globals())
