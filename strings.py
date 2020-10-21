@@ -5,7 +5,7 @@ from __future__ import print_function
 __description__ = 'Strings command in Python'
 __author__ = 'Didier Stevens'
 __version__ = '0.0.5'
-__date__ = '2019/12/17'
+__date__ = '2020/10/21'
 
 """
 Source code put in the public domain by Didier Stevens, no Copyright
@@ -29,6 +29,7 @@ History:
   2019/04/14: Quote bugfix
   2019/08/05: bugfix #e#chr
   2019/12/17: 0.0.5 added option -P
+  2020/10/21: Python 3 fix in cBinaryFile
 
 Todo:
 """
@@ -99,7 +100,7 @@ To exclude known strings from "goodware", i.e. not malware, use option -g with y
 
 The selection of strings to output can be inverted with option -v.
 
-Option -P selects pascal strings. A pascal string is a string preceded by an integer with the number of characters in the string (a counter). Option -p takes a value that defines how to decode the counter, using the same syntax as the struct module.
+Option -P selects pascal strings. A pascal string is a string preceded by an integer with the number of characters in the string (a counter). Option -P takes a value that defines how to decode the counter, using the same syntax as the struct module.
 For example, to define the counter as a little-endian 32-bit unsigned integer, use '-P "<I"'. Use > for big-endian, B for 8-bit (byte) and H for 16-bit.
 
 Use option -f to prefix each string with the name of the file it was found it.
@@ -706,7 +707,7 @@ class cBinaryFile:
             return fRead.read(size)
 
     def Data(self):
-        data = self.fIn.read()
+        data = self.read()
         self.close()
         return data
 
