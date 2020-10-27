@@ -1,9 +1,9 @@
 #!/usr/bin/env python
 
-__description__ = 'Program to search VirusTotal reports with search terms (MD5, SHA1, SHA256) found in the argument file'
+__description__ = 'Program to search VirusTotal reports with search terms (MD5, SHA1, SHA256, URL) found in the argument file'
 __author__ = 'Didier Stevens'
-__version__ = '0.1.5'
-__date__ = '2019/01/07'
+__version__ = '0.1.6'
+__date__ = '2020/10/18'
 
 """
 
@@ -39,16 +39,18 @@ History:
   2015/08/11: 0.1.3 added option -s
   2016/01/17: 0.1.4 added support for stdin
   2019/01/07: 0.1.5 added option -e, -t
+  2020/10/18: 0.1.6 Python 3 update (Python 2 no longer supported)
 
 Todo:
 """
 
 import optparse
 import urllib
-import urllib2
+import urllib.request
+#import urllib2
 import time
 import sys
-import cPickle
+import pickle
 import os
 import traceback
 import hashlib
@@ -88,9 +90,9 @@ def Serialize(filename, object):
     except:
         return False
     try:
-        cPickle.dump(object, fPickle, -1)
+        pickle.dump(object, fPickle, -1)
     except:
-        print sys.exc_info()
+        print(sys.exc_info())
         return False
     finally:
         fPickle.close()
@@ -103,9 +105,9 @@ def SerializeDictionary(filename, dInput):
         return False
     try:
         for item in dInput.items():
-            cPickle.dump(item, fPickle, -1)
+            pickle.dump(item, fPickle, -1)
     except:
-        print sys.exc_info()
+        print(sys.exc_info())
         return False
     finally:
         fPickle.close()
@@ -120,7 +122,7 @@ def DeSerialize(filename):
         except:
             return None
         try:
-            object = cPickle.load(fPickle)
+            object = pickle.load(fPickle)
         except:
             return None
         finally:
@@ -140,12 +142,12 @@ def DeSerializeDictionary(filename):
             return None
         try:
             while True:
-                item = cPickle.load(fPickle)
+                item = pickle.load(fPickle)
                 dReturn[item[0]] = item[1]
         except EOFError:
             pass
         except:
-            print sys.exc_info()
+            print(sys.exc_info())
             return None
         finally:
             fPickle.close()
@@ -182,12 +184,12 @@ def VTHTTPReportRequest(searchTerm, type):
     global VIRUSTOTAL_API2_KEY
 
     statuscode = 0
-    req = urllib2.Request(VIRUSTOTAL_REPORT_URL[type], urllib.urlencode({'resource': searchTerm, 'apikey': VIRUSTOTAL_API2_KEY}))
+    req = urllib.request.Request(VIRUSTOTAL_REPORT_URL[type], urllib.parse.urlencode({'resource': searchTerm, 'apikey': VIRUSTOTAL_API2_KEY}).encode('utf-8'))
     try:
         if sys.hexversion >= 0x020601F0:
-            hRequest = urllib2.urlopen(req, timeout=15)
+            hRequest = urllib.request.urlopen(req, timeout=15)
         else:
-            hRequest = urllib2.urlopen(req)
+            hRequest = urllib.request.urlopen(req)
     except:
         return statuscode, None
     try:
@@ -334,7 +336,7 @@ def SetProxiesIfNecessary():
     if os.getenv('https_proxy') != None:
         dProxies['https'] = os.getenv('https_proxy')
     if dProxies != {}:
-        urllib2.install_opener(urllib2.build_opener(urllib2.ProxyHandler(dProxies)))
+        urllib.install_opener(urllib.build_opener(urllib.ProxyHandler(dProxies)))
 
 def GetPickleFile(globaldb):
     if globaldb:
