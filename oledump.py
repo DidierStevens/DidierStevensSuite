@@ -2,8 +2,8 @@
 
 __description__ = 'Analyze OLE files (Compound Binary Files)'
 __author__ = 'Didier Stevens'
-__version__ = '0.0.54'
-__date__ = '2020/09/29'
+__version__ = '0.0.55'
+__date__ = '2020/11/08'
 
 """
 
@@ -103,6 +103,7 @@ History:
   2020/08/30: fixed & updated raw VBA decompression
   2020/09/05: 0.0.54 added extra info parameter %MODULEINFO%
   2020/09/29: bugfix for Python 2 (mro)
+  2020/11/08: 0.0.5: added support for -v with --jsonoutput; added ! indicator
 
 Todo:
   add support for pyzipper
@@ -292,6 +293,7 @@ Attribute VB_Customizable = True
 
 If the VBA code contains other statements than Attribute or Options statements, then the indicator is a upper case letter M.
 This M/m indicator allows you to focus first on interesting VBA macros.
+A ! indicator means that the stream is a VBA module, but that no VBA code was detected that starts with one or more attributes.
 
 To decompress the macros and skip the initial attributes, use option --vbadecompressskipattributes.
 
@@ -632,7 +634,7 @@ zcat sample.gz | oledump.py
 
 With option -T (--headtail), output can be truncated to the first 10 lines and last 10 lines of output.
 
-With option -j, oledump will output the content of the ole file as a JSON object that can be piped into other tools that support this JSON format.
+With option -j, oledump will output the content of the ole file as a JSON object that can be piped into other tools that support this JSON format. When option -v is used together with option -j, the produced JSON object contains decompressed VBA code.
 
 The return codes of oledump are:
  -1 when an error occured
@@ -1783,9 +1785,16 @@ def OLESub(ole, data, prefix, rules, options):
     if options.jsonoutput:
         object = []
         counter = 1
-        for orphan, fname, entry_type, entry_clsid, stream in OLEGetStreams(ole, options.storages):
-            object.append({'id': counter, 'name': PrintableName(fname), 'content': C2SIP3(binascii.b2a_base64(stream)).strip('\n')})
-            counter += 1
+        if options.vbadecompress:
+            for orphan, fname, entry_type, entry_clsid, stream in OLEGetStreams(ole, options.storages):
+                vbacode = SearchAndDecompress(stream, '')
+                if vbacode != '':
+                    object.append({'id': counter, 'name': PrintableName(fname), 'content': C2SIP3(binascii.b2a_base64(vbacode.encode())).strip('\n')})
+                counter += 1
+        else:
+            for orphan, fname, entry_type, entry_clsid, stream in OLEGetStreams(ole, options.storages):
+                object.append({'id': counter, 'name': PrintableName(fname), 'content': C2SIP3(binascii.b2a_base64(stream)).strip('\n')})
+                counter += 1
         print(json.dumps({'version': 2, 'id': 'didierstevens.com', 'type': 'content', 'fields': ['id', 'name', 'content'], 'items': object}))
         return (returnCode, 0)
 
@@ -1829,6 +1838,8 @@ def OLESub(ole, data, prefix, rules, options):
                         indicator = 'M'
                         if MacrosContainsOnlyAttributesOrOptions(stream):
                             indicator = 'm'
+                elif not macroPresent and moduleinfodata != None:
+                    indicator = '!'
                 elif OLE10HeaderPresent(stream):
                     indicator = 'O'
             index = '%s%d' % (prefix, counter)

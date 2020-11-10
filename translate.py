@@ -2,8 +2,8 @@
 
 __description__ = 'Translate bytes according to a Python expression'
 __author__ = 'Didier Stevens'
-__version__ = '2.5.9'
-__date__ = '2020/10/17'
+__version__ = '2.5.10'
+__date__ = '2020/11/04'
 
 """
 
@@ -42,6 +42,7 @@ History:
   2020/01/06: 2.5.7 added Xor function
   2020/06/08: 2.5.8 Python 3 fix
   2020/10/17: 2.5.9 Python 3 fix
+  2020/11/04: 2.5.10 Python 3 fix
 
 Todo:
 """
@@ -521,6 +522,7 @@ def FilenameCheckHash(filename):
 
 def Transform(fIn, fIn2, fOut, commandPython):
     position = 0
+    isPython3 = sys.version_info[0] > 2
     while True:
         inbyte = fIn.read(1)
         if not inbyte:
@@ -531,7 +533,10 @@ def Transform(fIn, fIn2, fOut, commandPython):
             byte2 = ord(inbyte2)
         outbyte = eval(commandPython)
         if outbyte != None:
-            fOut.write(chr(outbyte))
+            if isPython3:
+                fOut.write(bytes([outbyte]))
+            else:
+                fOut.write(chr(outbyte))
         position += 1
 
 #Fix for http://bugs.python.org/issue11395
@@ -582,7 +587,10 @@ def Translate(filenameInput, commandPython, options):
         if sys.platform == 'win32':
             import msvcrt
             msvcrt.setmode(sys.stdout.fileno(), os.O_BINARY)
-        fOut = sys.stdout
+        try:
+            fOut = sys.stdout.buffer
+        except:
+            fOut = sys.stdout
     else:
         fOut = open(options.output, 'wb')
 
