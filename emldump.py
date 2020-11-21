@@ -320,6 +320,7 @@ def LoadDecoders(decoders, verbose):
                     scriptDecoder = os.path.join(scriptPath, decoder)
                     if os.path.exists(scriptDecoder):
                         decoder = scriptDecoder
+            exec(open(decoder, 'r').read(), globals(), globals())
         except Exception as e:
             print('Error loading decoder: %s' % decoder)
             if verbose:
@@ -560,6 +561,32 @@ def ExtraInfoSHA256(data):
     if data == None:
         return ''
     return hashlib.sha256(data).hexdigest()
+
+def CalculateByteStatistics(dPrevalence):
+    sumValues = sum(dPrevalence.values())
+    countNullByte = dPrevalence[0]
+    countControlBytes = 0
+    countWhitespaceBytes = 0
+    countUniqueBytes = 0
+    for iter in range(1, 0x21):
+        if chr(iter) in string.whitespace:
+            countWhitespaceBytes += dPrevalence[iter]
+        else:
+            countControlBytes += dPrevalence[iter]
+    countControlBytes += dPrevalence[0x7F]
+    countPrintableBytes = 0
+    for iter in range(0x21, 0x7F):
+        countPrintableBytes += dPrevalence[iter]
+    countHighBytes = 0
+    for iter in range(0x80, 0x100):
+        countHighBytes += dPrevalence[iter]
+    entropy = 0.0
+    for iter in range(0x100):
+        if dPrevalence[iter] > 0:
+            prevalence = float(dPrevalence[iter]) / float(sumValues)
+            entropy += - prevalence * math.log(prevalence, 2)
+            countUniqueBytes += 1
+    return sumValues, entropy, countUniqueBytes, countNullByte, countControlBytes, countWhitespaceBytes, countPrintableBytes, countHighBytes
 
 def ExtraInfoENTROPY(data):
     if data == None:
