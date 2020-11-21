@@ -2,8 +2,8 @@
 
 __description__ = 'EML dump utility'
 __author__ = 'Didier Stevens'
-__version__ = '0.0.10'
-__date__ = '2017/07/21'
+__version__ = '0.0.11'
+__date__ = '2020/11/21'
 
 """
 
@@ -29,6 +29,7 @@ History:
   2016/03/02: 0.0.8 extra deobfuscation code for option -f
   2016/04/13: 0.0.9 changed handling of obfuscating lines
   2017/07/21: 0.0.10 added filename to parts
+  2020/11/21: 0.0.11 Python 3 support
 
 Todo:
 """
@@ -237,6 +238,18 @@ def C2BIP3(string):
     else:
         return string
 
+def P23Ord(value):
+    if type(value) == int:
+        return value
+    else:
+        return ord(value)
+
+def P23Chr(value):
+    if type(value) == int:
+        return chr(value)
+    else:
+        return value
+
 def File2String(filename):
     try:
         f = open(filename, 'rb')
@@ -307,7 +320,6 @@ def LoadDecoders(decoders, verbose):
                     scriptDecoder = os.path.join(scriptPath, decoder)
                     if os.path.exists(scriptDecoder):
                         decoder = scriptDecoder
-            exec open(decoder, 'r') in globals(), globals()
         except Exception as e:
             print('Error loading decoder: %s' % decoder)
             if verbose:
@@ -371,7 +383,7 @@ def HexDump(data):
         if i % dumplinelength == 0 and hexDump != '':
             oDumpStream.Addline(hexDump)
             hexDump = ''
-        hexDump += IFF(hexDump == '', '', ' ') + '%02X' % ord(b)
+        hexDump += IFF(hexDump == '', '', ' ') + '%02X' % P23Ord(b)
     oDumpStream.Addline(hexDump)
     return oDumpStream.Content()
 
@@ -390,17 +402,26 @@ def HexAsciiDump(data):
                 oDumpStream.Addline(CombineHexAscii(hexDump, asciiDump))
             hexDump = '%08X:' % i
             asciiDump = ''
-        hexDump+= ' %02X' % ord(b)
-        asciiDump += IFF(ord(b) >= 32, b, '.')
+        hexDump+= ' %02X' % P23Ord(b)
+        asciiDump += IFF(P23Ord(b) >= 32 and P23Ord(b) < 127, P23Chr(b), '.')
     oDumpStream.Addline(CombineHexAscii(hexDump, asciiDump))
     return oDumpStream.Content()
 
 #Fix for http://bugs.python.org/issue11395
 def StdoutWriteChunked(data):
-    while data != '':
-        sys.stdout.write(data[0:10000])
-        sys.stdout.flush()
-        data = data[10000:]
+    if sys.version_info[0] > 2:
+        if isinstance(data, str):
+            sys.stdout.write(data)
+        else:
+            sys.stdout.buffer.write(data)
+    else:
+        while data != '':
+            sys.stdout.write(data[0:10000])
+            try:
+                sys.stdout.flush()
+            except IOError:
+                return
+            data = data[10000:]
 
 CUTTERM_NOTHING = 0
 CUTTERM_POSITION = 1
@@ -540,65 +561,41 @@ def ExtraInfoSHA256(data):
         return ''
     return hashlib.sha256(data).hexdigest()
 
-def CalculateByteStatistics(dPrevalence):
-    sumValues = sum(dPrevalence.values())
-    countNullByte = dPrevalence[0]
-    countControlBytes = 0
-    countWhitespaceBytes = 0
-    for iter in range(1, 0x21):
-        if chr(iter) in string.whitespace:
-            countWhitespaceBytes += dPrevalence[iter]
-        else:
-            countControlBytes += dPrevalence[iter]
-    countControlBytes += dPrevalence[0x7F]
-    countPrintableBytes = 0
-    for iter in range(0x21, 0x7F):
-        countPrintableBytes += dPrevalence[iter]
-    countHighBytes = 0
-    for iter in range(0x80, 0x100):
-        countHighBytes += dPrevalence[iter]
-    entropy = 0.0
-    for iter in range(0x100):
-        if dPrevalence[iter] > 0:
-            prevalence = float(dPrevalence[iter]) / float(sumValues)
-            entropy += - prevalence * math.log(prevalence, 2)
-    return sumValues, entropy, countNullByte, countControlBytes, countWhitespaceBytes, countPrintableBytes, countHighBytes
-
 def ExtraInfoENTROPY(data):
     if data == None:
         return ''
     dPrevalence = {iter: 0 for iter in range(0x100)}
     for char in data:
-        dPrevalence[ord(char)] += 1
-    sumValues, entropy, countNullByte, countControlBytes, countWhitespaceBytes, countPrintableBytes, countHighBytes = CalculateByteStatistics(dPrevalence)
+        dPrevalence[P23Ord(char)] += 1
+    sumValues, entropy, countUniqueBytes, countNullByte, countControlBytes, countWhitespaceBytes, countPrintableBytes, countHighBytes = CalculateByteStatistics(dPrevalence)
     return '%f' % entropy
 
 def ExtraInfoHEADHEX(data):
     if data == None:
         return ''
-    return binascii.hexlify(data[:16])
+    return binascii.hexlify(data[:16]).decode()
 
 def ExtraInfoHEADASCII(data):
     if data == None:
         return ''
-    return ''.join([IFF(ord(b) >= 32, b, '.') for b in data[:16]])
+    return ''.join([IFF(P23Ord(b) >= 32 and P23Ord(b) < 127, P23Chr(b), '.') for b in data[:16]])
 
 def ExtraInfoTAILHEX(data):
     if data == None:
         return ''
-    return binascii.hexlify(data[-16:])
+    return binascii.hexlify(data[-16:]).decode()
 
 def ExtraInfoTAILASCII(data):
     if data == None:
         return ''
-    return ''.join([IFF(ord(b) >= 32, b, '.') for b in data[-16:]])
+    return ''.join([IFF(P23Ord(b) >= 32 and P23Ord(b) < 127, P23Chr(b), '.') for b in data[-16:]])
 
 def ExtraInfoHISTOGRAM(data):
     if data == None:
         return ''
     dPrevalence = {iter: 0 for iter in range(0x100)}
     for char in data:
-        dPrevalence[ord(char)] += 1
+        dPrevalence[P23Ord(char)] += 1
     result = []
     count = 0
     minimum = None
@@ -625,8 +622,8 @@ def ExtraInfoBYTESTATS(data):
         return ''
     dPrevalence = {iter: 0 for iter in range(0x100)}
     for char in data:
-        dPrevalence[ord(char)] += 1
-    sumValues, entropy, countNullByte, countControlBytes, countWhitespaceBytes, countPrintableBytes, countHighBytes = CalculateByteStatistics(dPrevalence)
+        dPrevalence[P23Ord(char)] += 1
+    sumValues, entropy, countUniqueBytes, countNullByte, countControlBytes, countWhitespaceBytes, countPrintableBytes, countHighBytes = CalculateByteStatistics(dPrevalence)
     return '%d,%d,%d,%d,%d' % (countNullByte, countControlBytes, countWhitespaceBytes, countPrintableBytes, countHighBytes)
 
 def GenerateExtraInfo(extra, index, indicator, type, stream):
@@ -687,6 +684,8 @@ def EMLDump(emlfilename, options):
         oZipfile.close()
     else:
         data = File2String(emlfilename)
+
+    data = data.decode()
 
     global decoders
     decoders = []
