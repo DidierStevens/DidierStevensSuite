@@ -29,7 +29,7 @@ History:
   2016/03/02: 0.0.8 extra deobfuscation code for option -f
   2016/04/13: 0.0.9 changed handling of obfuscating lines
   2017/07/21: 0.0.10 added filename to parts
-  2020/11/21: 0.0.11 Python 3 support
+  2020/11/21: 0.0.11 Python 3 support; updated cutting; updated yara; added selection warning
 
 Todo:
 """
@@ -287,17 +287,34 @@ def IFF(expression, valueTrue, valueFalse):
 def IsNumeric(str):
     return re.match('^[0-9]+', str)
 
-def YARACompile(fileordirname):
-    dFilepaths = {}
-    if os.path.isdir(fileordirname):
-        for root, dirs, files in os.walk(fileordirname):
-            for file in files:
-                filename = os.path.join(root, file)
-                dFilepaths[filename] = filename
+def YARACompile(ruledata):
+    if ruledata.startswith('#'):
+        if ruledata.startswith('#h#'):
+            rule = binascii.a2b_hex(ruledata[3:])
+        elif ruledata.startswith('#b#'):
+            rule = binascii.a2b_base64(ruledata[3:])
+        elif ruledata.startswith('#s#'):
+            rule = 'rule string {strings: $a = "%s" ascii wide nocase condition: $a}' % ruledata[3:]
+        elif ruledata.startswith('#q#'):
+            rule = ruledata[3:].replace("'", '"')
+        elif ruledata.startswith('#x#'):
+            rule = 'rule hexadecimal {strings: $a = { %s } condition: $a}' % ruledata[3:]
+        elif ruledata.startswith('#r#'):
+            rule = 'rule regex {strings: $a = /%s/ ascii wide nocase condition: $a}' % ruledata[3:]
+        else:
+            rule = ruledata[1:]
+        return yara.compile(source=rule, externals={'streamname': '', 'VBA': False}), rule
     else:
-        for filename in ProcessAt(fileordirname):
-            dFilepaths[filename] = filename
-    return yara.compile(filepaths=dFilepaths)
+        dFilepaths = {}
+        if os.path.isdir(ruledata):
+            for root, dirs, files in os.walk(ruledata):
+                for file in files:
+                    filename = os.path.join(root, file)
+                    dFilepaths[filename] = filename
+        else:
+            for filename in ProcessAt(ruledata):
+                dFilepaths[filename] = filename
+        return yara.compile(filepaths=dFilepaths, externals={'streamname': '', 'VBA': False}), ','.join(dFilepaths.values())
 
 def AddDecoder(cClass):
     global decoders
@@ -435,6 +452,18 @@ def Replace(string, dReplacements):
     else:
         return string
 
+def ParseInteger(argument):
+    sign = 1
+    if argument.startswith('+'):
+        argument = argument[1:]
+    elif argument.startswith('-'):
+        argument = argument[1:]
+        sign = -1
+    if argument.startswith('0x'):
+        return sign * int(argument[2:], 16)
+    else:
+        return sign * int(argument)
+
 def ParseCutTerm(argument):
     if argument == '':
         return CUTTERM_NOTHING, None, ''
@@ -447,23 +476,28 @@ def ParseCutTerm(argument):
             value = -value
         return CUTTERM_POSITION, value, argument[len(oMatch.group(0)):]
     if oMatch == None:
-        oMatch = re.match(r'\[([0-9a-f]+)\](\d+)?([+-]\d+)?', argument, re.I)
+        oMatch = re.match(r'\[([0-9a-f]+)\](\d+)?([+-](?:0x[0-9a-f]+|\d+))?', argument, re.I)
     else:
         value = int(oMatch.group(1))
         if argument.startswith('-'):
             value = -value
         return CUTTERM_POSITION, value, argument[len(oMatch.group(0)):]
     if oMatch == None:
-        oMatch = re.match(r"\[\'(.+?)\'\](\d+)?([+-]\d+)?", argument)
+        oMatch = re.match(r"\[u?\'(.+?)\'\](\d+)?([+-](?:0x[0-9a-f]+|\d+))?", argument)
     else:
         if len(oMatch.group(1)) % 2 == 1:
             raise Exception("Uneven length hexadecimal string")
         else:
-            return CUTTERM_FIND, (binascii.a2b_hex(oMatch.group(1)), int(Replace(oMatch.group(2), {None: '1'})), int(Replace(oMatch.group(3), {None: '0'}))), argument[len(oMatch.group(0)):]
+            return CUTTERM_FIND, (binascii.a2b_hex(oMatch.group(1)), int(Replace(oMatch.group(2), {None: '1'})), ParseInteger(Replace(oMatch.group(3), {None: '0'}))), argument[len(oMatch.group(0)):]
     if oMatch == None:
         return None, None, argument
     else:
-        return CUTTERM_FIND, (oMatch.group(1), int(Replace(oMatch.group(2), {None: '1'})), int(Replace(oMatch.group(3), {None: '0'}))), argument[len(oMatch.group(0)):]
+        if argument.startswith("[u'"):
+            # convert ascii to unicode 16 byte sequence
+            searchtext = oMatch.group(1).decode('unicode_escape').encode('utf16')[2:]
+        else:
+            searchtext = oMatch.group(1)
+        return CUTTERM_FIND, (searchtext, int(Replace(oMatch.group(2), {None: '1'})), ParseInteger(Replace(oMatch.group(3), {None: '0'}))), argument[len(oMatch.group(0)):]
 
 def ParseCutArgument(argument):
     type, value, remainder = ParseCutTerm(argument.strip())
@@ -497,8 +531,8 @@ def ParseCutArgument(argument):
     else:
         return typeLeft, valueLeft, type, value
 
-def Find(data, value, nth):
-    position = -1
+def Find(data, value, nth, startposition=-1):
+    position = startposition
     while nth > 0:
         position = data.find(value, position + 1)
         if position == -1:
@@ -508,12 +542,12 @@ def Find(data, value, nth):
 
 def CutData(stream, cutArgument):
     if cutArgument == '':
-        return stream
+        return [stream, None, None]
 
     typeLeft, valueLeft, typeRight, valueRight = ParseCutArgument(cutArgument)
 
     if typeLeft == None:
-        return stream
+        return [stream, None, None]
 
     if typeLeft == CUTTERM_NOTHING:
         positionBegin = 0
@@ -522,7 +556,7 @@ def CutData(stream, cutArgument):
     elif typeLeft == CUTTERM_FIND:
         positionBegin = Find(stream, valueLeft[0], valueLeft[1])
         if positionBegin == -1:
-            return ''
+            return ['', None, None]
         positionBegin += valueLeft[2]
     else:
         raise Exception("Unknown value typeLeft")
@@ -536,16 +570,16 @@ def CutData(stream, cutArgument):
     elif typeRight == CUTTERM_LENGTH:
         positionEnd = positionBegin + valueRight
     elif typeRight == CUTTERM_FIND:
-        positionEnd = Find(stream, valueRight[0], valueRight[1])
+        positionEnd = Find(stream, valueRight[0], valueRight[1], positionBegin)
         if positionEnd == -1:
-            return ''
+            return ['', None, None]
         else:
             positionEnd += len(valueRight[0])
         positionEnd += valueRight[2]
     else:
         raise Exception("Unknown value typeRight")
 
-    return stream[positionBegin:positionEnd]
+    return [stream[positionBegin:positionEnd], positionBegin, positionEnd]
 
 def ExtraInfoMD5(data):
     if data == None:
@@ -696,6 +730,10 @@ def StartsWithWhitespace(line):
         return False
     return line[0] in ' \t'
 
+def PrintWarningSelection(select, selectionCounter):
+    if select != '' and selectionCounter == 0:
+        print('Warning: no part was selected with expression %s' % select)
+
 def EMLDump(emlfilename, options):
     FixPipe()
     if emlfilename == '':
@@ -722,7 +760,9 @@ def EMLDump(emlfilename, options):
         if not 'yara' in sys.modules:
             print('Error: option yara requires the YARA Python module.')
             return
-        rules = YARACompile(options.yara)
+        rules, rulesVerbose = YARACompile(options.yara)
+        if options.verbose:
+            print(rulesVerbose)
 
     counter = 0
     for line in data.splitlines():
@@ -827,14 +867,17 @@ def EMLDump(emlfilename, options):
         else:
             DumpFunction = HexAsciiDump
         counter = 1
+        selectionCounter = 0
         for oPart in oEML.walk():
             if IsNumeric(options.select) and counter == int(options.select) or not IsNumeric(options.select) and oPart.get_content_type() == options.select:
                 if not oPart.is_multipart():
-                    StdoutWriteChunked(DumpFunction(CutData(oPart.get_payload(decode=True), options.cut)))
+                    StdoutWriteChunked(DumpFunction(CutData(oPart.get_payload(decode=True), options.cut)[0]))
                 else:
                     print('Warning: you selected a multipart stream')
+                selectionCounter += 1
                 break
             counter += 1
+        PrintWarningSelection(options.select, selectionCounter)
 
 def OptionsEnvironmentVariables(options):
     if options.extra == '':
