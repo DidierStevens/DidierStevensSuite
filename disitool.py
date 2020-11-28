@@ -1,4 +1,4 @@
-#!/usr/bin/python
+#!/usr/bin/env python
 
 """
 tool to manipulate digital signatures in PE files
@@ -18,8 +18,9 @@ History:
  2007/12/21: added arguments
  2008/01/09: code review
  2008/03/26: added checksum correction
- 2009/01/17: V3.0 added inject, requested by H D Moore
+ 2009/01/17: V0.3 added inject, requested by H D Moore
  2009/01/18: --paddata option
+ 2020/11/27: 0.4 Python 3
 
 requires pefile:
  http://code.google.com/p/pefile/
@@ -31,24 +32,24 @@ import pefile
 from struct import *
 
 __author__ = 'Didier Stevens (https://DidierStevens.com)'
-__version__ = '0.3'
-__date__ = '2009/01/17'
+__version__ = '0.4'
+__date__ = '2020/11/27'
 
 def Usage():
     """Displays the usage of this tool
     """
     
-    print 'Usage: disitool command [options] file ...'
-    print '  disitool V%s %s, tool to manipulate digital signatures in PE files' % (__version__, __date__)
-    print '  commands:'
-    print '  - delete signed-file unsigned-file'
-    print '  - copy signed-source-file unsigned-file signed-file'
-    print '  - extract signed-file signature'
-    print '  - add signature unsigned-file signed-file'
-    print '  - inject [--paddata] signed-source-file data-file signed-destination-file'
-    print '  Source code put in the public domain by Didier Stevens, no Copyright'
-    print '  Use at your own risk'
-    print '  https://DidierStevens.com'
+    print('Usage: disitool command [options] file ...')
+    print('  disitool V%s %s, tool to manipulate digital signatures in PE files' % (__version__, __date__))
+    print('  commands:')
+    print('  - delete signed-file unsigned-file')
+    print('  - copy signed-source-file unsigned-file signed-file')
+    print('  - extract signed-file signature')
+    print('  - add signature unsigned-file signed-file')
+    print('  - inject [--paddata] signed-source-file data-file signed-destination-file')
+    print('  Source code put in the public domain by Didier Stevens, no Copyright')
+    print('  Use at your own risk')
+    print('  https://DidierStevens.com')
 
 def DeleteDigitalSignature(SignedFile, UnsignedFile=None):
     """Deletes the digital signature from file SignedFile
@@ -72,7 +73,7 @@ def DeleteDigitalSignature(SignedFile, UnsignedFile=None):
     new_file_data = peUnsignedFile.write()
 
     if UnsignedFile:
-        f = file(UnsignedFile, 'wb+')
+        f = open(UnsignedFile, 'wb+')
         f.write(new_file_data)
         f.close()
 
@@ -90,14 +91,14 @@ def CopyDigitalSignature(SignedSourceFile, UnsignedFile, SignedFile=None):
     size = peSignedSource.OPTIONAL_HEADER.DATA_DIRECTORY[pefile.DIRECTORY_ENTRY['IMAGE_DIRECTORY_ENTRY_SECURITY']].Size
 
     if address == 0:
-        print 'Error: source file not signed'
+        print('Error: source file not signed')
         return
 
     signature = peSignedSource.write()[address:]
 
     peUnsigned = DeleteDigitalSignature(UnsignedFile)
     
-    peSignedFileTemp = pefile.PE(data=''.join(list(peUnsigned) + list(signature)))
+    peSignedFileTemp = pefile.PE(data=peUnsigned + signature)
 
     peSignedFileTemp.OPTIONAL_HEADER.DATA_DIRECTORY[pefile.DIRECTORY_ENTRY['IMAGE_DIRECTORY_ENTRY_SECURITY']].VirtualAddress = len(peUnsigned)
     peSignedFileTemp.OPTIONAL_HEADER.DATA_DIRECTORY[pefile.DIRECTORY_ENTRY['IMAGE_DIRECTORY_ENTRY_SECURITY']].Size = size
@@ -108,7 +109,7 @@ def CopyDigitalSignature(SignedSourceFile, UnsignedFile, SignedFile=None):
     new_file_data = peSignedFile.write()
     
     if SignedFile:
-        f = file(SignedFile, 'wb+')
+        f = open(SignedFile, 'wb+')
         f.write(new_file_data)
         f.close()
 
@@ -126,13 +127,13 @@ def ExtractDigitalSignature(SignedFile, SignatureFile=None):
     size = pe.OPTIONAL_HEADER.DATA_DIRECTORY[pefile.DIRECTORY_ENTRY['IMAGE_DIRECTORY_ENTRY_SECURITY']].Size
 
     if address == 0:
-        print 'Error: source file not signed'
+        print('Error: source file not signed')
         return
     
     signature = pe.write()[address+8:]
     
     if SignatureFile:
-        f = file(SignatureFile, 'wb+')
+        f = open(SignatureFile, 'wb+')
         f.write(signature)
         f.close()
 
@@ -144,7 +145,7 @@ def AddDigitalSignature(SignatureFile, UnsignedFile, SignedFile=None):
        Returns the modified file as a PE file
     """
     
-    f = file(SignatureFile, 'rb')
+    f = open(SignatureFile, 'rb')
     signature = f.read()
     f.close()
     
@@ -152,7 +153,7 @@ def AddDigitalSignature(SignatureFile, UnsignedFile, SignedFile=None):
     
     peUnsigned = DeleteDigitalSignature(UnsignedFile)
     
-    peSignedFileTemp = pefile.PE(data=''.join(list(peUnsigned) + list(unpack('4c', pack('i', size))) + ['\x00', '\x02', '\x02', '\x00'] + list(signature)))
+    peSignedFileTemp = pefile.PE(data=peUnsigned + pack('<I', size) + b'\x00\x02\x02\x00' + signature)
 
     peSignedFileTemp.OPTIONAL_HEADER.DATA_DIRECTORY[pefile.DIRECTORY_ENTRY['IMAGE_DIRECTORY_ENTRY_SECURITY']].VirtualAddress = len(peUnsigned)
     peSignedFileTemp.OPTIONAL_HEADER.DATA_DIRECTORY[pefile.DIRECTORY_ENTRY['IMAGE_DIRECTORY_ENTRY_SECURITY']].Size = size
@@ -163,7 +164,7 @@ def AddDigitalSignature(SignatureFile, UnsignedFile, SignedFile=None):
     new_file_data = peSignedFile.write()
     
     if SignedFile:
-        f = file(SignedFile, 'wb+')
+        f = open(SignedFile, 'wb+')
         f.write(new_file_data)
         f.close()
 
@@ -182,25 +183,25 @@ def InjectDataInSignedExecutable(SignedSourceFile, DataFile, SignedFile=None, pa
     size = peSignedSource.OPTIONAL_HEADER.DATA_DIRECTORY[pefile.DIRECTORY_ENTRY['IMAGE_DIRECTORY_ENTRY_SECURITY']].Size
 
     if address == 0:
-        print 'Error: source file not signed'
+        print('Error: source file not signed')
         return
 
-    f = file(DataFile, 'rb')
+    f = open(DataFile, 'rb')
     DataToInject = f.read()
     f.close()
 
     if len(DataToInject) % 8 != 0:
         if paddata:
-            DataToInject = DataToInject + chr(0) * (8 - (len(DataToInject) % 8))
-            print 'Info: padded the data to inject'
+            DataToInject = DataToInject + b'\x00' * (8 - (len(DataToInject) % 8))
+            print('Info: padded the data to inject')
         else:
-            print 'Warning: the length of the data to inject is not a multiple of 8'
+            print('Warning: the length of the data to inject is not a multiple of 8')
     
     signature = peSignedSource.write()[address:]
 
     peUnsigned = peSignedSource.write()[:address]
 
-    peSignedFileTemp = pefile.PE(data=''.join(list(peUnsigned) + list(signature) + list(DataToInject)))
+    peSignedFileTemp = pefile.PE(data=peUnsigned + signature + DataToInject)
 
     peSignedFileTemp.OPTIONAL_HEADER.DATA_DIRECTORY[pefile.DIRECTORY_ENTRY['IMAGE_DIRECTORY_ENTRY_SECURITY']].Size = size + len(DataToInject)
 
@@ -210,7 +211,7 @@ def InjectDataInSignedExecutable(SignedSourceFile, DataFile, SignedFile=None, pa
     new_file_data = peSignedFile.write()
     
     if SignedFile:
-        f = file(SignedFile, 'wb+')
+        f = open(SignedFile, 'wb+')
         f.write(new_file_data)
         f.close()
 
