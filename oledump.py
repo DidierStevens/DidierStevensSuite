@@ -2,8 +2,8 @@
 
 __description__ = 'Analyze OLE files (Compound Binary Files)'
 __author__ = 'Didier Stevens'
-__version__ = '0.0.55'
-__date__ = '2020/11/08'
+__version__ = '0.0.56'
+__date__ = '2020/12/04'
 
 """
 
@@ -103,7 +103,8 @@ History:
   2020/08/30: fixed & updated raw VBA decompression
   2020/09/05: 0.0.54 added extra info parameter %MODULEINFO%
   2020/09/29: bugfix for Python 2 (mro)
-  2020/11/08: 0.0.5: added support for -v with --jsonoutput; added ! indicator
+  2020/11/08: 0.0.55: added support for -v with --jsonoutput; added ! indicator
+  2020/12/04: 0.0.56 Python 3 Fixes
 
 Todo:
   add support for pyzipper
@@ -1565,16 +1566,24 @@ def ExtraInfoENTROPY(data):
     return '%f' % entropy
 
 def ExtraInfoHEADHEX(data):
-    return binascii.hexlify(data[:16])
+    if data == None:
+        return ''
+    return binascii.hexlify(data[:16]).decode()
 
 def ExtraInfoHEADASCII(data):
-    return ''.join([IFF(P23Ord(b) >= 32, b, '.') for b in data[:16]])
+    if data == None:
+        return ''
+    return ''.join([IFF(P23Ord(b) >= 32 and P23Ord(b) < 127, P23Chr(b), '.') for b in data[:16]])
 
 def ExtraInfoTAILHEX(data):
-    return binascii.hexlify(data[-16:])
+    if data == None:
+        return ''
+    return binascii.hexlify(data[-16:]).decode()
 
 def ExtraInfoTAILASCII(data):
-    return ''.join([IFF(P23Ord(b) >= 32, b, '.') for b in data[-16:]])
+    if data == None:
+        return ''
+    return ''.join([IFF(P23Ord(b) >= 32 and P23Ord(b) < 127, P23Chr(b), '.') for b in data[-16:]])
 
 def ExtraInfoHISTOGRAM(data):
     dPrevalence = {iter: 0 for iter in range(0x100)}
