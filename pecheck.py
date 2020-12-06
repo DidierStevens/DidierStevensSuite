@@ -2,8 +2,8 @@
 
 __description__ = 'Tool for displaying PE file info'
 __author__ = 'Didier Stevens'
-__version__ = '0.7.11'
-__date__ = '2020/07/26'
+__version__ = '0.7.12'
+__date__ = '2020/10/22'
 
 """
 
@@ -50,6 +50,7 @@ History:
   2020/03/02: added TLSCallbacks
   2020/07/04: 0.7.11 fixed typo in man page
   2020/07/26: fixes Python 3 bug for overlays reported by Lenny Zeltser; fixed ASCII 128; added option --verbose
+  2020/10/22: 0.7.12 extra info (names) with -l P; Python 3 bug
 
 Todo:
 """
@@ -225,7 +226,10 @@ def ReadFile(filename):
         if sys.platform == "win32":
             import msvcrt
             msvcrt.setmode(sys.stdin.fileno(), os.O_BINARY)
-        data = sys.stdin.read()
+        if sys.version_info[0] > 2:
+            data = sys.stdin.buffer.read()
+        else:
+            data = sys.stdin.read()
     else:
         data = File2String(filename)
     return data
@@ -977,8 +981,16 @@ def GetInfoCarvedFile(data, position):
         info += ' 0x%08x %s 0x%08x' % (position + lengthStripped - 1, hashStripped, position + lengthWithOverlay - 1)
         if position + lengthWithOverlay == len(data):
             info += ' (EOF)'
+        versionInfo = GetVersionInfo(oPEtemp)
+        originalFilename = versionInfo.get(b'OriginalFilename', b'')
+        exportDLLName = b''
+        try:
+            exportDLLName = oPEtemp.DIRECTORY_ENTRY_EXPORT.name
+        except:
+            pass
+        info += ' %s %s' % (repr(originalFilename), repr(exportDLLName))
     except:
-        info += ' parsing error'
+        info += ' parsing error %s' % repr(sys.exc_info()[1])
     return info
 
 def SingleFile(filename, signatures, options):
@@ -1048,7 +1060,7 @@ def GetVersionInfo(oPE):
         return info
     for oFileInfoEntry in oFileInfo:
         try:
-            for oStringTableEntry in oFileInfoEntry.StringTable:
+            for oStringTableEntry in oFileInfoEntry[0].StringTable:
                 for key, value in oStringTableEntry.entries.items():
                     info[key] = value
         except:
