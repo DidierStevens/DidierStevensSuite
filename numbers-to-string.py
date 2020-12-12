@@ -2,8 +2,8 @@
 
 __description__ = "Program to convert numbers into a string"
 __author__ = 'Didier Stevens'
-__version__ = '0.0.10'
-__date__ = '2020/08/16'
+__version__ = '0.0.11'
+__date__ = '2020/12/10'
 
 """
 
@@ -27,6 +27,7 @@ History:
   2019/11/02: added C2BIP3
   2019/12/08: 0.0.9 Python 3 bug fix
   2020/08/16: 0.0.10 added option -v
+  2020/12/10: 0.0.11 Python 3 bug fix, added option -l
 
 Todo:
 """
@@ -297,7 +298,7 @@ class cGrep():
             return oMatch != None, line
 
 def CalculateStatistics(numbers):
-    numbers = map(int, numbers)
+    numbers = list(map(int, numbers))
     return (len(numbers), min(numbers), max(numbers), sum(numbers) / len(numbers))
 
 def Chr(number, options, translation):
@@ -342,7 +343,7 @@ def NumbersToStringSingle(function, filenames, oOutput, options):
             if totalResults != []:
                 oOutput.Line('Total      : count = %6d minimum = %6d maximum = %6d average = %6d' % CalculateStatistics(totalResults))
         else:
-            for line in ProcessFile(fIn, False):
+            for index, line in enumerate(ProcessFile(fIn, False)):
                 selected = True
                 if oGrep.dogrep:
                     selected, line = oGrep.Grep(line)
@@ -365,8 +366,9 @@ def NumbersToStringSingle(function, filenames, oOutput, options):
                         continue
                     line = line[:position + len(options.end)]
                 results = oRE.findall(line)
-                if len(results) >= options.number:
+                if options.line == '' and len(results) >= options.number or options.line == str(index + 1):
                     if options.verbose:
+                        oOutput.Line('Line number: %d' % (index + 1))
                         oOutput.Line('Line: %s' % line)
                         oOutput.Line('%d numbers: %s' % (len(results), repr(results)))
                         oOutput.Line('Decoded:')
@@ -428,6 +430,7 @@ https://DidierStevens.com'''
     oParser.add_option('-t', '--table', type=str, default='', help='Translation table')
     oParser.add_option('-T', '--begintable', type=str, default='', help='Begin translation table')
     oParser.add_option('-b', '--binary', action='store_true', default=False, help='Produce binary output')
+    oParser.add_option('-l', '--line', type=str, default='', help='Select line with given number')
     oParser.add_option('--grep', type=str, default='', help='Grep expression')
     oParser.add_option('--grepoptions', type=str, default='', help='Grep options')
     oParser.add_option('--begin', type=str, default='', help='Begin substring')

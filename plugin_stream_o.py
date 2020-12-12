@@ -2,8 +2,8 @@
 
 __description__ = '/o plugin for oledump.py'
 __author__ = 'Didier Stevens'
-__version__ = '0.0.1'
-__date__ = '2016/04/16'
+__version__ = '0.0.2'
+__date__ = '2020/12/10'
 
 """
 
@@ -13,11 +13,20 @@ Use at your own risk
 
 History:
   2016/04/16: start
+  2020/12/10: 0.0.2 refactoring
 
 Todo:
 """
 
 import struct
+
+def Unpack(format, data):
+    size = struct.calcsize(format)
+    if len(data) < size:
+        return None
+    result = list(struct.unpack(format, data[:size]))
+    result.append(data[size:])
+    return result
 
 class cFO(cPluginParent):
     macroOnly = False
@@ -34,23 +43,40 @@ class cFO(cPluginParent):
 
         if len(self.streamname) > 1 and self.streamname[-1] == 'o':
             self.ran = True
-            while len(self.stream) > 0:
-                code, length = struct.unpack("<HH", self.stream[0:4])
+            data = self.stream
+            foundCounter = 0
+            while len(data) > 0:
+                unpacked = Unpack('<HH', data)
+                if unpacked == None:
+                    break
+                code, length, data = unpacked
+                extraLength = 0
                 if code == 0x200:
-                    fieldtype = struct.unpack("<I", self.stream[4:8])[0]
+                    unpacked = Unpack('<I', data)
+                    if result == unpacked:
+                        break
+                    fieldtype, remainder = unpacked
                     if fieldtype == 0x80400101:
-                        lengthString = struct.unpack("<I", self.stream[0x10:0x14])[0] & 0x7FFFFFFF
-                        if self.options == '-d':
-                            result.append('%04x %04x %08x %s' % (code, length, fieldtype, self.stream[0x1C:0x1C + lengthString]))
+                        foundCounter += 1
+                        lengthString = struct.unpack("<I", remainder[0x08:0x0C])[0] & 0x7FFFFFFF
+                        if lengthString % 4 == 0:
+                            extraLength = lengthString
                         else:
-                            result.append(self.stream[0x1C:0x1C + lengthString])
+                            extraLength = lengthString + 4 - lengthString % 4
+                        if self.options == '-d':
+                            result.append('%04x %04x %08x %s' % (code, length, fieldtype, remainder[0x14:0x14 + lengthString]))
+                        else:
+                            result.append(remainder[0x14:0x14 + lengthString].decode())
                     else:
                         if self.options == '-d':
                             result.append('%04x %04x %08x' % (code, length, fieldtype))
                 else:
                     if self.options == '-d':
                         result.append('%04x %04x' % (code, length))
-                self.stream = self.stream[4 + length:]
+                data = data[length + extraLength:]
+
+            if foundCounter > 1:
+                result = ['Found: %d' % foundCounter] + result
 
         return result
 

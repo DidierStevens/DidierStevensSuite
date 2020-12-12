@@ -2,8 +2,8 @@
 
 __description__ = 'Analyze OLE files (Compound Binary Files)'
 __author__ = 'Didier Stevens'
-__version__ = '0.0.56'
-__date__ = '2020/12/04'
+__version__ = '0.0.57'
+__date__ = '2020/12/12'
 
 """
 
@@ -105,6 +105,7 @@ History:
   2020/09/29: bugfix for Python 2 (mro)
   2020/11/08: 0.0.55: added support for -v with --jsonoutput; added ! indicator
   2020/12/04: 0.0.56 Python 3 Fixes
+  2020/12/12: 0.0.57 refactoring Translate
 
 Todo:
   add support for pyzipper
@@ -219,7 +220,6 @@ C:\Demo>oledump.py -s 1 -d Book1.xls | pdfid.py -f
 
 If the raw dump needs to be processed by a string codec, like utf16, use option -t instead of -d and provide the codec:
 C:\Demo>oledump.py -s 1 -t utf16 Book1.xls
-You can also provide a Python string expression, like .decode('utf16').encode('utf8').
 
 Streams can also be selected by their full name (example: -s 'VBA/ThisWorkkbook').
 
@@ -798,12 +798,7 @@ def HexAsciiDump(data, rle=False):
     return cDump(data, dumplinelength=dumplinelength).HexAsciiDump(rle=rle)
 
 def Translate(expression):
-    try:
-        codecs.lookup(expression)
-        command = '.decode("%s")' % expression
-    except LookupError:
-        command = expression
-    return lambda x: eval('x' + command)
+    return lambda x: x.decode(expression)
 
 def ExtractStringsASCII(data):
     regex = REGEX_STANDARD + b'{%d,}'
