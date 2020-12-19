@@ -4,8 +4,8 @@ from __future__ import print_function
 
 __description__ = 'Strings command in Python'
 __author__ = 'Didier Stevens'
-__version__ = '0.0.5'
-__date__ = '2020/10/21'
+__version__ = '0.0.6'
+__date__ = '2020/12/10'
 
 """
 Source code put in the public domain by Didier Stevens, no Copyright
@@ -30,6 +30,7 @@ History:
   2019/08/05: bugfix #e#chr
   2019/12/17: 0.0.5 added option -P
   2020/10/21: Python 3 fix in cBinaryFile
+  2020/12/10: 0.0.6 added option -a
 
 Todo:
 """
@@ -107,6 +108,7 @@ Use option -f to prefix each string with the name of the file it was found it.
 
 To search for strings, use option -s. This search is case-insensitive, use option -c to make it case-ssensitive.
 
+To display statistics, use option -a.
 
 As stated at the beginning of this manual, this tool is very versatile when it comes to handling files. This will be explained now.
 
@@ -1561,7 +1563,7 @@ def ProcessBinaryFiles(filenames, oLogfile, options):
             oOutput.Filename(item['name'], index, len(items))
             index += 1
             result = ProcessBinaryFile(item['name'], item['content'], '', goodware, oLogfile, options)
-            if options.length:
+            if options.length or options.stats:
                 selectedStrings.extend([[string, item['name']] for string in result])
             else:
                 for extractedString in result:
@@ -1571,16 +1573,30 @@ def ProcessBinaryFiles(filenames, oLogfile, options):
             oOutput.Filename(filename, index, len(filenames))
             index += 1
             result = ProcessBinaryFile(filename, None, cutexpression, goodware, oLogfile, options)
-            if options.length:
+            if options.length or options.stats:
                 selectedStrings.extend([[string, filename] for string in result])
             else:
                 for extractedString in result:
                     StringsSub(extractedString, filename, oOutput, dUnique, oExtraSensical, options)
 
-    if options.length:
+    if options.length or options.stats:
         selectedStrings = sorted(selectedStrings, key=lambda x: len(x[0]))
-        for extractedString in selectedStrings:
-            StringsSub(extractedString[0], extractedString[1], oOutput, dUnique, oExtraSensical, options)
+
+        if options.length:
+            for extractedString in selectedStrings:
+                StringsSub(extractedString[0], extractedString[1], oOutput, dUnique, oExtraSensical, options)
+        else:
+            numberOfStrings = len(selectedStrings)
+            oOutput.Line('Number of strings: %d' % numberOfStrings)
+            if numberOfStrings > 0:
+                oOutput.Line('Length 10 shortest strings: %s' % ','.join(str(len(string)) for string, filename in selectedStrings[0:10]))
+                oOutput.Line('Length 10 longest strings: %s' % ','.join(str(len(string)) for string, filename in selectedStrings[-10:]))
+                oOutput.Line('Mean length: %f' % (sum([len(string) for string, filename in selectedStrings]) / numberOfStrings))
+                if (numberOfStrings % 2 == 0):
+                    median = (len(selectedStrings[numberOfStrings // 2 - 1][0]) + len(selectedStrings[numberOfStrings // 2][0])) / 2.0
+                else:
+                    median = len(selectedStrings[numberOfStrings // 2][0])
+                oOutput.Line('Median length: %f' % median)
 
     oOutput.Close()
 
@@ -1610,6 +1626,7 @@ https://DidierStevens.com'''
     oParser.add_option('-f', '--filename', action='store_true', default=False, help='Include filename (as prefix)')
     oParser.add_option('-T', '--trim', type=int, default=0, help='Trim strings to given maximum length')
     oParser.add_option('-P', '--pascal', default='', help='Counter format for pascal strings')
+    oParser.add_option('-a', '--stats', action='store_true', default=False, help='Produce statistics')
     oParser.add_option('--password', default='infected', help='The ZIP password to be used (default infected)')
     oParser.add_option('--noextraction', action='store_true', default=False, help='Do not extract from archive file')
     oParser.add_option('--literalfilenames', action='store_true', default=False, help='Do not interpret filenames')
