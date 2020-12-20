@@ -2,8 +2,8 @@
 
 __description__ = 'Translate bytes according to a Python expression'
 __author__ = 'Didier Stevens'
-__version__ = '2.5.10'
-__date__ = '2020/11/04'
+__version__ = '2.5.11'
+__date__ = '2020/12/20'
 
 """
 
@@ -43,6 +43,8 @@ History:
   2020/06/08: 2.5.8 Python 3 fix
   2020/10/17: 2.5.9 Python 3 fix
   2020/11/04: 2.5.10 Python 3 fix
+  2020/12/08: 2.5.11 Bug fix
+  2020/12/20: added shl and shr
 
 Todo:
 """
@@ -185,6 +187,12 @@ def rol(byte, count):
 
 def ror(byte, count):
     return (byte >> count | byte << (8- count)) & 0xFF
+
+def shl(bytes, count):
+    return (int.from_bytes(bytes, byteorder='big') << count).to_bytes(len(bytes) + 1, 'big')
+
+def shr(bytes, count):
+    return (int.from_bytes(bytes, byteorder='big') >> count).to_bytes(len(bytes) + 1, 'big')
 
 #Sanitize 1: Sanitize input: return space (0x20) for all control characters, except HT, LF and CR
 def Sani1(byte):
@@ -615,7 +623,7 @@ def Translate(filenameInput, commandPython, options):
                 regexvalue = options.filterregex.encode()
             else:
                 regexvalue = options.filterregex
-            Output(fOut, re.sub(regexvalue, eval(commandPython), ''.join([x.group() for x in re.finditer(options.filterregex, content)])))
+            Output(fOut, re.sub(regexvalue, eval(commandPython), b''.join([x.group() for x in re.finditer(regexvalue, content)])))
     else:
         Transform(fIn, fIn2, fOut, commandPython)
 
@@ -634,6 +642,8 @@ Example: translate.py -o svchost.exe.dec svchost.exe 'byte ^ 0x10'
 Extra functions:
   rol(byte, count)
   ror(byte, count)
+  shl(bytes, count)
+  shr(bytes, count)
   IFF(expression, valueTrue, valueFalse)
   Sani1(byte)
   Sani2(byte)
