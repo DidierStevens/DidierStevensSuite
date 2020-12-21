@@ -2,8 +2,8 @@
 
 __description__ = 'Cut a section of bytes out of a file'
 __author__ = 'Didier Stevens'
-__version__ = '0.0.12'
-__date__ = '2020/02/01'
+__version__ = '0.0.13'
+__date__ = '2020/12/08'
 
 """
 
@@ -30,6 +30,9 @@ History:
   2020/01/24: added #h# support for spaces
   2020/01/25: fix ascii dump 127
   2020/02/01: 0.0.12 added #u#
+  2020/02/18: 0.0.13 added #E#
+  2020/10/21: Python 3 fix in cBinaryFile
+  2020/12/08: base64dump fix
 
 Todo:
 """
@@ -45,6 +48,7 @@ import random
 import gzip
 import json
 import struct
+import codecs
 if sys.version_info[0] >= 3:
     from io import BytesIO as DataIO
 else:
@@ -159,6 +163,9 @@ Remark that the Python expression is evaluated with Python's eval function: this
 File arguments that start with #u# are a notational convention to download a file using an url.
 For example: #u#http://didierstevens.com
 
+File arguments that start with #E# are a notational convention for strings with escape characters.
+For example: #E#line1\nline2
+
 To process a file that starts with #, prefix it with a relative path to the current directory:
  cut-bytes.py : .\#data
 Output:
@@ -259,7 +266,7 @@ class cDump():
         return oDumpStream.Content()
 
     def Base64Dump(self, nowhitespace=False):
-        encoded = binascii.b2a_base64(self.data)
+        encoded = binascii.b2a_base64(self.data).decode().strip()
         if nowhitespace:
             return encoded
         oDumpStream = self.cDumpStream(self.prefix)
@@ -439,7 +446,10 @@ def CutData(stream, cutArgument):
 #Fix for http://bugs.python.org/issue11395
 def StdoutWriteChunked(data):
     if sys.version_info[0] > 2:
-        sys.stdout.buffer.write(data)
+        if isinstance(data, str):
+            sys.stdout.write(data)
+        else:
+            sys.stdout.buffer.write(data)
     else:
         while data != '':
             sys.stdout.write(data[0:10000])
@@ -726,6 +736,21 @@ FCH_FILENAME = 0
 FCH_DATA = 1
 FCH_ERROR = 2
 
+ESCAPE_SEQUENCE_RE = re.compile(r'''
+    ( \\U........      # 8-digit hex escapes
+    | \\u....          # 4-digit hex escapes
+    | \\x..            # 2-digit hex escapes
+    | \\[0-7]{1,3}     # Octal escapes
+    | \\N\{[^}]+\}     # Unicode characters by name
+    | \\[\\'"abfnrtv]  # Single-character escapes
+    )''', re.UNICODE | re.VERBOSE)
+
+def DecodeEscapes(str):
+    def DecodeMatch(match):
+        return codecs.decode(match.group(0), 'unicode-escape')
+
+    return ESCAPE_SEQUENCE_RE.sub(DecodeMatch, str)
+
 def DownloadFile(url):
     try:
         if sys.hexversion >= 0x020601F0:
@@ -773,6 +798,12 @@ def FilenameCheckHash(filename, literalfilename):
             return FCH_ERROR, 'url:' + error
         else:
             return FCH_DATA, result
+    elif filename.startswith('#E#'):
+        result = DecodeEscapes(filename[3:])
+        if result == None:
+            return FCH_ERROR, 'escapes'
+        else:
+            return FCH_DATA, C2BIP3(result)
     elif filename.startswith('#'):
         return FCH_DATA, C2BIP3(filename[1:])
     else:
@@ -830,7 +861,7 @@ class cBinaryFile:
             return fRead.read(size)
 
     def Data(self):
-        data = self.fIn.read()
+        data = self.read()
         self.close()
         return data
 
@@ -898,14 +929,14 @@ def CutBytes(expression, filename, options):
                 raise Exception('Error %s parsing prefix: %s' % (prefix, options.prefix))
             else:
                 data = prefix + data
-        
+
         if options.suffix != '':
             fch, suffix = FilenameCheckHash(options.suffix, False)
             if fch != FCH_DATA:
                 raise Exception('Error %s parsing suffix: %s' % (suffix, options.suffix))
             else:
                 data = data + suffix
-        
+
         StdoutWriteChunked(DumpFunction(data))
 
 def Main():

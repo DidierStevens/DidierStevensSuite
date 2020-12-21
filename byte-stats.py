@@ -2,8 +2,8 @@
 
 __description__ = 'Calculate byte statistics'
 __author__ = 'Didier Stevens'
-__version__ = '0.0.7'
-__date__ = '2017/11/01'
+__version__ = '0.0.8'
+__date__ = '2020/12/21'
 
 """
 Source code put in public domain by Didier Stevens, no Copyright
@@ -24,6 +24,7 @@ History:
   2017/08/12: 0.0.6 added option -r
   2017/09/13: 0.0.7 added average consecutive byte difference, refactoring (cCalculateByteStatistics)
   2017/11/01: added option -g
+  2020/12/21: 0.0.8 Python 3
 
 Todo:
 """
@@ -37,7 +38,13 @@ import math
 import string
 import textwrap
 import binascii
-import Tkinter
+import operator
+
+bPython3 = sys.version_info[0] > 2
+if bPython3:
+    import tkinter
+else:
+    import Tkinter as tkinter
 
 def PrintManual():
     manual = '''
@@ -370,6 +377,12 @@ def ProcessAt(argument):
 def ExpandFilenameArguments(filenames):
     return list(collections.OrderedDict.fromkeys(sum(map(glob.glob, sum(map(ProcessAt, filenames), [])), [])))
 
+def P23Ord(value):
+    if type(value) == int:
+        return value
+    else:
+        return ord(value)
+
 class cCalculateByteStatistics():
 
     def __init__(self):
@@ -377,7 +390,7 @@ class cCalculateByteStatistics():
         self.previous = None
         self.sumDifference = 0
         self.count = 0
-        
+
     def Process(self, byte):
         self.dPrevalence[byte] += 1
         if self.previous != None:
@@ -419,7 +432,7 @@ class cCalculateByteStatistics():
             countBASE64Bytes += self.dPrevalence[iter]
         for iter in range(0x61, 0x7B):
             countBASE64Bytes += self.dPrevalence[iter]
-        countBASE64Bytes += self.dPrevalence[ord('+')] + self.dPrevalence[ord('/')] + self.dPrevalence[ord('=')]
+        countBASE64Bytes += self.dPrevalence[P23Ord('+')] + self.dPrevalence[P23Ord('/')] + self.dPrevalence[P23Ord('=')]
         entropy = 0.0
         for iter in range(0x100):
             if self.dPrevalence[iter] > 0:
@@ -478,6 +491,25 @@ def MaximumAndPosition(buckets, index):
             positionMaximum = position
     return (valueMaximum, positionMaximum)
 
+def cmp_to_key(mycmp):
+    'Convert a cmp= function into a key= function'
+    class K:
+        def __init__(self, obj, *args):
+            self.obj = obj
+        def __lt__(self, other):
+            return mycmp(self.obj, other.obj) < 0
+        def __gt__(self, other):
+            return mycmp(self.obj, other.obj) > 0
+        def __eq__(self, other):
+            return mycmp(self.obj, other.obj) == 0
+        def __le__(self, other):
+            return mycmp(self.obj, other.obj) <= 0
+        def __ge__(self, other):
+            return mycmp(self.obj, other.obj) >= 0
+        def __ne__(self, other):
+            return mycmp(self.obj, other.obj) != 0
+    return K
+
 def ByteStats(args, options):
     if options.bucket < 2:
         print('Bucket size must be at least 2, not %d' % options.bucket)
@@ -493,14 +525,17 @@ def ByteStats(args, options):
         args = ExpandFilenameArguments(args)
     for file in args:
         if file == '':
-            fIn = sys.stdin
+            if bPython3:
+                fIn = sys.stdin.buffer
+            else:
+                fIn = sys.stdin
             if sys.platform == 'win32':
                 import msvcrt
                 msvcrt.setmode(sys.stdin.fileno(), os.O_BINARY)
         else:
             fIn = open(file, 'rb')
         for char in fIn.read():
-            value = ord(char)
+            value = P23Ord(char)
             countBytes += 1
             oCalculateByteStatistics.Process(value)
             oCalculateByteStatisticsBucket.Process(value)
@@ -522,8 +557,12 @@ def ByteStats(args, options):
             if countBytes % options.bucket == 0:
                 buckets.append([countBytes - options.bucket, oCalculateByteStatisticsBucket.Stats()])
                 oCalculateByteStatisticsBucket = cCalculateByteStatistics()
-        if fIn != sys.stdin:
-            fIn.close()
+        if bPython3:
+            if fIn != sys.stdin.buffer:
+                fIn.close()
+        else:
+            if fIn != sys.stdin:
+                fIn.close()
     if len(diffs) > 1:
         dDiffs[savPosition - 2] = values
 
@@ -549,7 +588,7 @@ def ByteStats(args, options):
             print('Unknown property: %s' % options.property)
             return
         index = dProperties[options.property]
-        oTk = Tkinter.Tk()
+        oTk = tkinter.Tk()
         oTk.title('byte-stats: property %s' % options.property)
         c_width = len(buckets)
         multiplier = 1
@@ -564,15 +603,15 @@ def ByteStats(args, options):
             maximum = max(properties[index] for position, properties in buckets)
             c_height = 301
             multiplier = float(c_height - 1) / float(maximum)
-        oCanvas = Tkinter.Canvas(oTk, width=c_width, height=c_height, bg= 'white')
+        oCanvas = tkinter.Canvas(oTk, width=c_width, height=c_height, bg= 'white')
         oCanvas.pack()
-        list = []
+        points = []
         counter = 0
         for position, properties in buckets:
-            list.append(counter)
-            list.append(c_height - int(properties[index] * multiplier))
+            points.append(counter)
+            points.append(c_height - int(properties[index] * multiplier))
             counter += 1
-        oCanvas.create_line(list)
+        oCanvas.create_line(points)
         oTk.mainloop()
     else:
         listCount = oCalculateByteStatistics.Prevalence().items()
@@ -580,7 +619,11 @@ def ByteStats(args, options):
             index = 0
         else:
             index = 1
-        listCount.sort(lambda x, y:cmp(x[index], y[index]), reverse=options.descending)
+        if bPython3:
+            listCount = list(listCount)
+            listCount.sort(key=operator.itemgetter(index), reverse=options.descending)
+        else:
+            listCount.sort(lambda x, y:cmp(x[index], y[index]), reverse=options.descending)
         lineCounter = 0
         dotsPrinted = False
         print('Byte ASCII Count     Pct')
@@ -642,12 +685,20 @@ def ByteStats(args, options):
         if options.keys:
             sequences = sorted(dDiffs.items())
         else:
-            sequences = sorted(dDiffs.items(), cmp=lambda x, y: IFF(len(x[1]) == len(y[1]), cmp(y[0], x[0]), cmp(len(x[1]), len(y[1]))), reverse=True)
+            if bPython3:
+                def MyCmp(a, b):
+                    return (a > b) - (a < b)
+                sequences = sorted(dDiffs.items(), key=cmp_to_key(lambda x, y: IFF(len(x[1]) == len(y[1]), MyCmp(y[0], x[0]), MyCmp(len(x[1]), len(y[1])))), reverse=True)
+            else:
+                sequences = sorted(dDiffs.items(), cmp=lambda x, y: IFF(len(x[1]) == len(y[1]), cmp(y[0], x[0]), cmp(len(x[1]), len(y[1]))), reverse=True)
         if not options.all:
             sequences = sequences[:10]
         for sequence in sequences:
             if len(sequence[1]) >= options.filter:
-                print('0x%08x: %6d %4d 0x%s' % (sequence[0], len(sequence[1]), ByteSub(sequence[1][1], sequence[1][0]), TruncateString(binascii.hexlify(''.join([chr(c) for c in sequence[1]])), 40)))
+                if bPython3:
+                    print('0x%08x: %6d %4d 0x%s' % (sequence[0], len(sequence[1]), ByteSub(sequence[1][1], sequence[1][0]), TruncateString(binascii.hexlify((''.join([chr(c) for c in sequence[1]])).encode()).decode(), 40)))
+                else:
+                    print('0x%08x: %6d %4d 0x%s' % (sequence[0], len(sequence[1]), ByteSub(sequence[1][1], sequence[1][0]), TruncateString(binascii.hexlify(''.join([chr(c) for c in sequence[1]])), 40)))
 
     def Chr(number):
         return IFF(number >= 0x20 and number < 0x7F, chr(number), '.')
