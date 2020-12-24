@@ -2,8 +2,8 @@
 
 __description__ = 'ZIP dump utility'
 __author__ = 'Didier Stevens'
-__version__ = '0.0.20'
-__date__ = '2020/07/23'
+__version__ = '0.0.21'
+__date__ = '2020/11/21'
 
 """
 
@@ -51,6 +51,9 @@ History:
   2020/04/13: 0.0.18 added option info
   2020/04/29: 0.0.19 added support for AES with pyzipper
   2020/07/23: 0.0.20 added PK record data descriptor (PK 07 08)
+  2020/08/16: 0.0.21 Python 3 fixes
+  2020/10/21: Python 3 fix in cBinaryFile
+  2020/11/21: Python 3 fix extra info
 
 Todo:
 """
@@ -442,6 +445,12 @@ def P23Ord(value):
     else:
         return ord(value)
 
+def P23Chr(value):
+    if type(value) == int:
+        return chr(value)
+    else:
+        return value
+
 def FixPipe():
     try:
         signal.signal(signal.SIGPIPE, signal.SIG_DFL)
@@ -587,7 +596,7 @@ class cDump():
             if i % self.dumplinelength == self.dumplinelength / 2:
                 hexDump += ' '
             hexDump += ' %02X' % b
-            asciiDump += IFF(b >= 32 and b <= 127, chr(b), '.')
+            asciiDump += IFF(b >= 32 and b < 127, chr(b), '.')
         oDumpStream.Addline(self.CombineHexAscii(hexDump, asciiDump))
         return oDumpStream.Content()
 
@@ -1007,7 +1016,7 @@ class cBinaryFile:
             return fRead.read(size)
 
     def Data(self):
-        data = self.fIn.read()
+        data = self.read()
         self.close()
         return data
 
@@ -1031,11 +1040,11 @@ def Magic(data):
     magicHex = ''
     for iter in range(4):
         if len(data) >= iter + 1:
-            if ord(data[iter]) >= 0x20 and ord(data[iter]) < 0x7F:
-                magicPrintable += data[iter]
+            if P23Ord(data[iter]) >= 0x20 and P23Ord(data[iter]) < 0x7F:
+                magicPrintable += P23Chr(data[iter])
             else:
                 magicPrintable += '.'
-            magicHex += '%02x' % ord(data[iter])
+            magicHex += '%02x' % P23Ord(data[iter])
     return magicPrintable, magicHex
 
 def CalculateByteStatistics(dPrevalence):
@@ -1069,7 +1078,7 @@ def CalculateFileMetaData(data):
     for iter in range(256):
         dPrevalence[iter] = 0
     for char in data:
-        dPrevalence[ord(char)] += 1
+        dPrevalence[P23Ord(char)] += 1
 
     fileSize, entropy, countUniqueBytes, countNullByte, countControlBytes, countWhitespaceBytes, countPrintableBytes, countHighBytes = CalculateByteStatistics(dPrevalence)
     magicPrintable, magicHex = Magic(data[0:4])
@@ -1273,36 +1282,36 @@ def ExtraInfoENTROPY(data):
         return ''
     dPrevalence = {iter: 0 for iter in range(0x100)}
     for char in data:
-        dPrevalence[ord(char)] += 1
+        dPrevalence[P23Ord(char)] += 1
     sumValues, entropy, countUniqueBytes, countNullByte, countControlBytes, countWhitespaceBytes, countPrintableBytes, countHighBytes = CalculateByteStatistics(dPrevalence)
     return '%f' % entropy
 
 def ExtraInfoHEADHEX(data):
     if data == None:
         return ''
-    return binascii.hexlify(data[:16])
+    return binascii.hexlify(data[:16]).decode()
 
 def ExtraInfoHEADASCII(data):
     if data == None:
         return ''
-    return ''.join([IFF(ord(b) >= 32, b, '.') for b in data[:16]])
+    return ''.join([IFF(P23Ord(b) >= 32 and P23Ord(b) < 127, P23Chr(b), '.') for b in data[:16]])
 
 def ExtraInfoTAILHEX(data):
     if data == None:
         return ''
-    return binascii.hexlify(data[-16:])
+    return binascii.hexlify(data[-16:]).decode()
 
 def ExtraInfoTAILASCII(data):
     if data == None:
         return ''
-    return ''.join([IFF(ord(b) >= 32, b, '.') for b in data[-16:]])
+    return ''.join([IFF(P23Ord(b) >= 32 and P23Ord(b) < 127, P23Chr(b), '.') for b in data[-16:]])
 
 def ExtraInfoHISTOGRAM(data):
     if data == None:
         return ''
     dPrevalence = {iter: 0 for iter in range(0x100)}
     for char in data:
-        dPrevalence[ord(char)] += 1
+        dPrevalence[P23Ord(char)] += 1
     result = []
     count = 0
     minimum = None
@@ -1329,7 +1338,7 @@ def ExtraInfoBYTESTATS(data):
         return ''
     dPrevalence = {iter: 0 for iter in range(0x100)}
     for char in data:
-        dPrevalence[ord(char)] += 1
+        dPrevalence[P23Ord(char)] += 1
     sumValues, entropy, countUniqueBytes, countNullByte, countControlBytes, countWhitespaceBytes, countPrintableBytes, countHighBytes = CalculateByteStatistics(dPrevalence)
     return '%d,%d,%d,%d,%d' % (countNullByte, countControlBytes, countWhitespaceBytes, countPrintableBytes, countHighBytes)
 
@@ -5051,7 +5060,7 @@ def ZIPDump(zipfilename, options, data=None):
             file = oZipfile.open(oZipInfo, 'r', C2BIP3(zippassword))
             filecontent = file.read()
             file.close()
-            object.append({'id': counter, 'name': oZipInfo.filename, 'content': binascii.b2a_base64(filecontent).strip('\n')})
+            object.append({'id': counter, 'name': oZipInfo.filename, 'content': binascii.b2a_base64(filecontent).decode().strip('\n')})
             counter += 1
         Print(json.dumps({'version': 2, 'id': 'didierstevens.com', 'type': 'content', 'fields': ['id', 'name', 'content'], 'items': object}), fOut)
         if fOut:
