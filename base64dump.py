@@ -2,8 +2,8 @@
 
 __description__ = 'Extract base64 strings from file'
 __author__ = 'Didier Stevens'
-__version__ = '0.0.12'
-__date__ = '2020/07/02'
+__version__ = '0.0.13'
+__date__ = '2020/12/25'
 
 """
 
@@ -30,6 +30,7 @@ History:
   2018/05/23: 0.0.10: added zxle and zxbe encoding; added option --ignore
   2018/07/23: 0.0.11: added option -I
   2020/07/02: 0.0.12: added zxc encoding, verbose YARACompile, updated CutData, option -A, selection warning, DSS_DEFAULT_HASH_ALGORITHMS, option --jsonoutput, option -T, option -p
+  2020/12/25: 0.0.13 added dec encoding; Translate refactoring
 
 Todo:
 """
@@ -48,6 +49,7 @@ import string
 import codecs
 import zlib
 import json
+import operator
 try:
     import yara
 except:
@@ -99,6 +101,7 @@ ah
 zxle
 zxbe
 zxc
+dec
 
 bu stands for "backslash UNICODE" (\\u), it looks like this: \\u9090\\ueb77...
 pu stands for "percent UNICODE" (%u), it looks like this: %u9090%ueb77...
@@ -108,6 +111,7 @@ ah stands for "ampersand hexadecimal" (&H), it looks like this: &H90&H90...
 zxle stands for "zero hexadecimal little-endian" (0x), it looks like this: 0x909090900xeb77...
 zxbe stands for "zero hexadecimal big-endian" (0x), it looks like this: 0x909090900x77eb...
 zxc stands for "zero hexadecimal comma" (0x), it looks like this: 0x90,0x90,0x90,0x90...
+dec stands for "decimal", it looks like this: 80;75;3;4...
 
 zxle and zxbe encoding looks for 1 to 8 hexadecimal characters after the prefix 0x. If the number of hexadecimal characters is uneven, a 0 (digit zero) will be prefixed to have an even number of hexadecimal digits.
 
@@ -733,12 +737,7 @@ def HeadTail(data, apply):
         return data
 
 def Translate(expression):
-    try:
-        codecs.lookup(expression)
-        command = '.decode("%s")' % expression
-    except LookupError:
-        command = expression
-    return lambda x: eval('x' + command)
+    return lambda x: x.decode(expression)
 
 def DecodeDataBase64(data, ProcessFunction):
     for base64string in re.findall(b'[ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/]+={0,2}', data):
@@ -837,6 +836,22 @@ def DecodeDataZXC(data, ProcessFunction):
         except:
             continue
 
+def DecodeDataDecimal(data, ProcessFunction):
+    #find decimal numbers separated by a single character that is not a digit
+    for decimals in re.findall(br'(?:[0123456789]{1,3}[^0123456789])+[0123456789]{1,3}', data):
+        dBytes = {}
+        for byte in decimals:
+            if byte < 0x30 or byte > 0x39:
+                dBytes[byte] = dBytes.get(byte, 0) + 1
+        if len(dBytes) > 0:
+            # take the most frequent non-digit character as separator
+            separator = bytes([sorted(dBytes.items(), key=operator.itemgetter(1), reverse=True)[0][0]])
+            for decimalstring in re.findall(br'(?:[0123456789]{1,3}' + separator + br')+[0123456789]{1,3}', decimals):
+                try:
+                    yield (decimalstring, bytes([int(decimal) for decimal in decimalstring.split(separator)]))
+                except:
+                    continue
+
 def YARACompile(ruledata):
     if ruledata.startswith('#'):
         if ruledata.startswith('#h#'):
@@ -932,25 +947,21 @@ def L4(data):
     else:
         return data[:-modulus]
 
+def AvailableEncodings():
+    global dEncodings
+
+    result = ['Available encodings (use "all" to try all encodings):']
+    for key, value in dEncodings.items():
+        result.append(' %s -> %s' % (key, value[0]))
+    return result
+
 def BASE64Dump(filename, options):
     global decoders
-
-    dEncodings = {
-        'b64': ('BASE64, example: TVqQAAMAAAAEAAAA...', DecodeDataBase64),
-        'bu': ('\\u UNICODE, example: \\u9090\\ueb77...', DecodeDataBU),
-        'pu': ('% UNICODE, example: %u9090%ueb77...', DecodeDataPU),
-        'hex': ('hexadecimal, example: 6D6573736167652C...', DecodeDataHex),
-        'bx': ('\\x hexadecimal, example: \\x90\\x90...', DecodeDataBX),
-        'ah': ('&H hexadecimal, example: &H90&H90...', DecodeDataAH),
-        'zxle': ('0x hexadecimal little-endian, example: 0x909090900xeb77...', DecodeDataZXLittleEndian),
-        'zxbe': ('0x hexadecimal big-endian, example: 0x909090900x77eb...', DecodeDataZXBigEndian),
-        'zxc': ('0x hexadecimal 2 digits, comma-separated, example: 0x90,0x90,0x90,0x90...', DecodeDataZXC),
-    }
+    global dEncodings
 
     if options.encoding == '?' :
-        print('Available encodings:')
-        for key, value in dEncodings.items():
-            print(' %s -> %s' % (key, value[0]))
+        for line in AvailableEncodings():
+            print(line)
         return
 
     if options.encoding != 'all' and not options.encoding in dEncodings:
@@ -1050,7 +1061,7 @@ def BASE64Dump(filename, options):
                 if options.unique and decodeddata in dDecodedData:
                     continue
                 dDecodedData[decodeddata] = True
-                line = '%3s: %7d %-16s %-16s %s' % (encoding, len(encodeddata), encodeddata[0:16].decode(), AsciiDump(decodeddata[0:16]), CalculateChosenHash(decodeddata)[0])
+                line = '%3s: %7d %-16s %-16s %s' % (encoding, len(encodeddata), encodeddata[0:16].decode('latin'), AsciiDump(decodeddata[0:16]), CalculateChosenHash(decodeddata)[0])
                 oDecoders = [cIdentity(decodeddata, None)]
                 for cDecoder in decoders:
                     try:
@@ -1083,7 +1094,7 @@ def BASE64Dump(filename, options):
                 if options.unique and decodeddata in dDecodedData:
                     continue
                 dDecodedData[decodeddata] = True
-                report.append([len(encodeddata), '%3s: %7d %-16s %-16s %s' % (encoding, len(encodeddata), encodeddata[0:16].decode(), AsciiDump(decodeddata[0:16]), CalculateChosenHash(decodeddata)[0])])
+                report.append([len(encodeddata), '%3s: %7d %-16s %-16s %s' % (encoding, len(encodeddata), encodeddata[0:16].decode('latin'), AsciiDump(decodeddata[0:16]), CalculateChosenHash(decodeddata)[0])])
         for key, value in sorted(report):
             print(value)
     else:
@@ -1096,16 +1107,16 @@ def BASE64Dump(filename, options):
             dDecodedData[decodeddata] = True
             if options.select == '':
                 if options.jsonoutput:
-                    jsonObject.append({'id': counter, 'name': encodeddata[0:16].decode(), 'content': binascii.b2a_base64(decodeddata).strip(b'\n').decode()})
+                    jsonObject.append({'id': counter, 'name': encodeddata[0:16].decode('latin'), 'content': binascii.b2a_base64(decodeddata).strip(b'\n').decode()})
                 else:
-                    print('%2d: %7d %-16s %-16s %s' % (counter, len(encodeddata), encodeddata[0:16].decode(), AsciiDump(decodeddata[0:16]), CalculateChosenHash(decodeddata)[0]))
+                    print('%2d: %7d %-16s %-16s %s' % (counter, len(encodeddata), encodeddata[0:16].decode('latin'), AsciiDump(decodeddata[0:16]), CalculateChosenHash(decodeddata)[0]))
             elif ('%s' % counter) == options.select or options.select == 'a':
                 if len(decoders) > 1:
                     print('Error: provide only one decoder when using option select')
                     return
                 selectionCounter += 1
                 if options.jsonoutput:
-                    jsonObject.append({'id': counter, 'name': encodeddata[0:16].decode(), 'content': binascii.b2a_base64(decodeddata).strip(b'\n').decode()})
+                    jsonObject.append({'id': counter, 'name': encodeddata[0:16].decode('latin'), 'content': binascii.b2a_base64(decodeddata).strip(b'\n').decode()})
                 elif DumpFunction == None:
                     filehash, magicPrintable, magicHex, fileSize, entropy, countUniqueBytes, countNullByte, countControlBytes, countWhitespaceBytes, countPrintableBytes, countHighBytes = CalculateFileMetaData(CutData(decodeddata, options.cut)[0])
                     print('Info:')
@@ -1132,9 +1143,25 @@ def BASE64Dump(filename, options):
     return 0
 
 def Main():
-    oParser = optparse.OptionParser(usage='usage: %prog [options] [file]\n' + __description__, version='%prog ' + __version__)
+    global dEncodings
+
+    dEncodings = {
+        'b64': ('BASE64, example: TVqQAAMAAAAEAAAA...', DecodeDataBase64),
+        'bu': ('\\u UNICODE, example: \\u9090\\ueb77...', DecodeDataBU),
+        'pu': ('% UNICODE, example: %u9090%ueb77...', DecodeDataPU),
+        'hex': ('hexadecimal, example: 6D6573736167652C...', DecodeDataHex),
+        'bx': ('\\x hexadecimal, example: \\x90\\x90...', DecodeDataBX),
+        'ah': ('&H hexadecimal, example: &H90&H90...', DecodeDataAH),
+        'zxle': ('0x hexadecimal little-endian, example: 0x909090900xeb77...', DecodeDataZXLittleEndian),
+        'zxbe': ('0x hexadecimal big-endian, example: 0x909090900x77eb...', DecodeDataZXBigEndian),
+        'zxc': ('0x hexadecimal 2 digits, comma-separated, example: 0x90,0x90,0x90,0x90...', DecodeDataZXC),
+        'dec': ('decimal numbers, separated by an arbitrary separator, example: 80;75;3;4...', DecodeDataDecimal),
+    }
+
+    helpEncodings = '\n'.join(AvailableEncodings())
+    oParser = optparse.OptionParser(usage='usage: %prog [options] [file]\n' + __description__  + '\n' + helpEncodings, version='%prog ' + __version__)
     oParser.add_option('-m', '--man', action='store_true', default=False, help='Print manual')
-    oParser.add_option('-e', '--encoding', default='b64', help='select encoding to use (default base64)')
+    oParser.add_option('-e', '--encoding', default='b64', help='select encoding to use, use "all" to try all encodings (default base64)')
     oParser.add_option('-s', '--select', default='', help='select item nr for dumping (a for all)')
     oParser.add_option('-d', '--dump', action='store_true', default=False, help='perform dump')
     oParser.add_option('-x', '--hexdump', action='store_true', default=False, help='perform hex dump')
