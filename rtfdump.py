@@ -43,7 +43,6 @@ import optparse
 import sys
 import os
 import zipfile
-import cStringIO
 import binascii
 import textwrap
 import re
@@ -373,7 +372,7 @@ def ExtractHex(data):
         print(repr(data[0:40]))
     backslash = False
     backslashtext = ''
-    hexstring = [cStringIO.StringIO()]
+    hexstring = [StringIO()]
     countUnexpectedCharacters = 0
     binstatus = 0
     binnumber = ''
@@ -402,7 +401,7 @@ def ExtractHex(data):
                     if binint == 0:
                         binstatus = 0
                         hexstring.append(['bin', bintext])
-                        hexstring.append(cStringIO.StringIO())
+                        hexstring.append(StringIO())
                         binnumber = ''
                         bintext = ''
         elif backslash:
@@ -874,15 +873,15 @@ def RTFDump(filename, options):
 
     if filename == '':
         IfWIN32SetBinary(sys.stdin)
-        oStringIO = cStringIO.StringIO(sys.stdin.read())
+        oStringIO = StringIO(sys.stdin.read())
     elif filename.lower().endswith('.zip'):
         oZipfile = zipfile.ZipFile(filename, 'r')
         oZipContent = oZipfile.open(oZipfile.infolist()[0], 'r', C2BIP3(MALWARE_PASSWORD))
-        oStringIO = cStringIO.StringIO(oZipContent.read())
+        oStringIO = StringIO(oZipContent.read())
         oZipContent.close()
         oZipfile.close()
     else:
-        oStringIO = cStringIO.StringIO(open(filename, 'rb').read())
+        oStringIO = StringIO(open(filename, 'rb').read())
 
     returnCode = RTFSub(oStringIO, '', rules, options)
 
