@@ -50,6 +50,9 @@ import re
 import string
 import hashlib
 import json
+import glob
+import collections
+
 if sys.version_info[0] >= 3:
     from io import StringIO
 else:
