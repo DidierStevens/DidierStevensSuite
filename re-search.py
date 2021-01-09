@@ -2,8 +2,8 @@
 
 __description__ = "Program to use Python's re.findall on files"
 __author__ = 'Didier Stevens'
-__version__ = '0.0.13'
-__date__ = '2019/03/06'
+__version__ = '0.0.14'
+__date__ = '2021/01/05'
 
 """
 
@@ -40,6 +40,8 @@ History:
   2018/08/28: 0.0.13 added support for user library in the current directory
   2018/09/19: Updated Quote
   2019/03/06: changed URL regex
+  2020/12/08: 0.0.14 added domaintld
+  2021/01/05: added -n all-
 
 Todo:
   add hostname to header
@@ -77,6 +79,7 @@ dLibrary = {
             'str-eu': r'"([^"]*)"',
             'btc': r'(?#extra=P:BTCValidate)\b[13][a-km-zA-HJ-NP-Z1-9]{25,34}\b',
             'onion': r'[a-zA-Z2-7]{16}\.onion',
+            'domaintld': r'(?#extra=P:DomainTLDValidate)\b[a-zA-Z0-9.-]+\.[a-zA-Z-]+\b',
            }
 
 excludeRegexesForAll = ['str', 'str-e', 'str-u', 'str-eu', 'url-domain', 'email-domain']
@@ -127,6 +130,16 @@ http://www.microsoft.com
 http://ahsnvyetdhfkg.com
 
 Here is a list of build-in regular expressions:\n''' + ListLibraryNames() + '''
+The following command will use all build-in regular expressions marked with *:
+re-search.py -n all file
+
+It's possible to exclude one or more build-in regular expressions when using -n all:
+Here is an example to use all regular expressions except url:
+re-search.py -n all-url file
+
+And here is an example to use all regular expressions except url and email:
+re-search.py -n all-url,email file
+
 You can also use a capture group in your regular expression. The selected text will be extracted from the first capture group:
 re-search.py ([a-z]+)\.com list.txt
 
@@ -431,6 +444,8 @@ def DumpFunctionStrings(data):
 def RESearchSingle(regex, filenames, oOutput, options):
     if options.name and regex == 'all':
         regexes = [CompileRegex(name, options) for name in LibraryAllNames() if not name in excludeRegexesForAll]
+    elif options.name and regex.startswith('all-'):
+        regexes = [CompileRegex(name, options) for name in LibraryAllNames() if not name in excludeRegexesForAll and not name in regex[4:].split(',')]
     else:
         regexes = [CompileRegex(regex, options)]
     for filename in filenames:

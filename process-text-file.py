@@ -4,8 +4,8 @@ from __future__ import print_function
 
 __description__ = "Template for text file processing"
 __author__ = 'Didier Stevens'
-__version__ = '0.0.2'
-__date__ = '2020/02/22'
+__version__ = '0.0.3'
+__date__ = '2020/11/11'
 
 """
 
@@ -26,6 +26,7 @@ History:
   2018/10/08: added %ru% to cOutput; added search and replace
   2018/10/20: added eol to cOutput.Line
   2020/02/22: 0.0.2 added option --context
+  2020/11/11: 0.0.3 added option --encoding
 
 Todo:
 """
@@ -49,6 +50,8 @@ Manual:
 
 Errors occuring when opening a file are reported (and logged if logging is turned on), and the program moves on to the next file.
 Errors occuring when reading & processing a file are reported (and logged if logging is turned on), and the program stops unless option ignoreprocessingerrors is used.
+
+Option --encoding can be used to specify the encoding of the text file to be read. For example, to read a 16-bit Unicode text file, use option "--encoding utf-16".
 
 Option --grep can be used to select (grep) lines that have to be processed.
 If this option is not used, all lines will be processed.
@@ -577,8 +580,10 @@ def AnalyzeFileError(filename):
         pass
 
 @contextmanager
-def TextFile(filename, oLogfile):
+def TextFile(filename, oLogfile, options):
     if filename == '':
+        if options.encoding != '':
+            sys.stdin.reconfigure(encoding=options.encoding)
         fIn = sys.stdin
     elif os.path.splitext(filename)[1].lower() == '.gz':
         try:
@@ -587,9 +592,16 @@ def TextFile(filename, oLogfile):
             AnalyzeFileError(filename)
             oLogfile.LineError('Opening file %s %s' % (filename, repr(sys.exc_info()[1])))
             fIn = None
-    else:
+    elif options.encoding == '':
         try:
             fIn = open(filename, 'r')
+        except:
+            AnalyzeFileError(filename)
+            oLogfile.LineError('Opening file %s %s' % (filename, repr(sys.exc_info()[1])))
+            fIn = None
+    else:
+        try:
+            fIn = open(filename, 'r', encoding=options.encoding)
         except:
             AnalyzeFileError(filename)
             oLogfile.LineError('Opening file %s %s' % (filename, repr(sys.exc_info()[1])))
@@ -607,7 +619,7 @@ def TextFile(filename, oLogfile):
             fIn.close()
 
 def ProcessTextFile(filename, oBeginGrep, oGrep, oEndGrep, context, oOutput, oLogfile, options):
-    with TextFile(filename, oLogfile) as fIn:
+    with TextFile(filename, oLogfile, options) as fIn:
         try:
             for line in ProcessFile(fIn, oBeginGrep, oGrep, oEndGrep, context, options, False):
                 # ----- Put your line processing code here -----
@@ -706,6 +718,7 @@ https://DidierStevens.com'''
     oParser.add_option('--logfile', type=str, default='', help='Create logfile with given keyword')
     oParser.add_option('--logcomment', type=str, default='', help='A string with comments to be included in the log file')
     oParser.add_option('--ignoreprocessingerrors', action='store_true', default=False, help='Ignore errors during file processing')
+    oParser.add_option('--encoding', type=str, default='', help='Encoding for file open')
     (options, args) = oParser.parse_args()
 
     if options.man:

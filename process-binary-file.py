@@ -4,8 +4,8 @@ from __future__ import print_function
 
 __description__ = 'Template binary file argument'
 __author__ = 'Didier Stevens'
-__version__ = '0.0.2'
-__date__ = '2020/02/05'
+__version__ = '0.0.3'
+__date__ = '2020/12/27'
 
 """
 Source code put in the public domain by Didier Stevens, no Copyright
@@ -41,6 +41,10 @@ History:
   2020/01/24: added #h# support for spaces
   2020/01/25: fix ascii dump 127
   2020/02/05: added WriteBinary to cOutput
+  2020/10/21: 0.0.3 Python 3 fix in cBinaryFile
+  2020/12/08: base64dump fix
+  2020/12/09: added CSVWriteRow
+  2020/12/27: added Unpack
 
 Todo:
   Document flag arguments in man page
@@ -63,6 +67,7 @@ import math
 import fnmatch
 import json
 import time
+import csv
 if sys.version_info[0] >= 3:
     from io import BytesIO as DataIO
 else:
@@ -708,7 +713,7 @@ class cBinaryFile:
             return fRead.read(size)
 
     def Data(self):
-        data = self.fIn.read()
+        data = self.read()
         self.close()
         return data
 
@@ -1104,10 +1109,9 @@ class cDump():
         return oDumpStream.Content()
 
     def Base64Dump(self, nowhitespace=False):
-        encoded = binascii.b2a_base64(self.data)
+        encoded = binascii.b2a_base64(self.data).decode().strip()
         if nowhitespace:
             return encoded
-        encoded = encoded.strip()
         oDumpStream = self.cDumpStream(self.prefix)
         length = 64
         for i in range(0, len(encoded), length):
@@ -1142,7 +1146,10 @@ def IfWIN32SetBinary(io):
 #Fix for http://bugs.python.org/issue11395
 def StdoutWriteChunked(data):
     if sys.version_info[0] > 2:
-        sys.stdout.buffer.write(data)
+        if isinstance(data, str):
+            sys.stdout.write(data)
+        else:
+            sys.stdout.buffer.write(data)
     else:
         while data != '':
             sys.stdout.write(data[0:10000])
@@ -1181,6 +1188,7 @@ class cOutput():
         self.tail = False
         self.tailQueue = []
         self.fOut = None
+        self.oCsvWriter = None
         self.rootFilenames = {}
         self.binary = binary
         if self.binary:
@@ -1276,6 +1284,16 @@ class cOutput():
         else:
             IfWIN32SetBinary(sys.stdout)
             StdoutWriteChunked(data)
+
+    def CSVWriteRow(self, row):
+        if self.oCsvWriter == None:
+            self.StringIOCSV = StringIO()
+#            self.oCsvWriter = csv.writer(self.fOut)
+            self.oCsvWriter = csv.writer(self.StringIOCSV)
+        self.oCsvWriter.writerow(row)
+        self.Line(self.StringIOCSV.getvalue(), '')
+        self.StringIOCSV.truncate(0)
+        self.StringIOCSV.seek(0)
 
     def Filename(self, filename, index, total):
         self.separateFilename = filename
@@ -1421,11 +1439,17 @@ def CalculateByteStatistics(dPrevalence=None, data=None):
             countUniqueBytes += 1
     return sumValues, entropy, countUniqueBytes, countNullByte, countControlBytes, countWhitespaceBytes, countPrintableBytes, countHighBytes, countHexadecimalBytes, countBASE64Bytes, averageConsecutiveByteDifference
 
+def Unpack(format, data):
+    size = struct.calcsize(format)
+    result = list(struct.unpack(format, data[:size]))
+    result.append(data[size:])
+    return result
+
 def InstantiateCOutput(options):
     filenameOption = None
     if options.output != '':
         filenameOption = options.output
-    return cOutput(filenameOption)
+    return cOutput(filenameOption, binary=options.dump)
 
 def ProcessBinaryFile(filename, content, cutexpression, flag, oOutput, oLogfile, options, oParserFlag):
     if content == None:
@@ -1449,10 +1473,11 @@ def ProcessBinaryFile(filename, content, cutexpression, flag, oOutput, oLogfile,
 
     try:
         # ----- Put your data processing code here -----
-        oOutput.Line('File: %s%s' % (filename, IFF(oBinaryFile.extracted, ' (extracted)', '')))
-        if flagoptions.length:
-            oOutput.Line('%s len(data) = %d' % (filename, len(data)))
-        oOutput.Line(cDump(data[0:0x100]).HexAsciiDump())
+#        oOutput.Line('File: %s%s' % (filename, IFF(oBinaryFile.extracted, ' (extracted)', '')))
+#        if flagoptions.length:
+#            oOutput.Line('%s len(data) = %d' % (filename, len(data)))
+#        oOutput.Line(cDump(data[0:0x100]).HexAsciiDump())
+        oOutput.CSVWriteRow([filename, len(data)])
         # ----------------------------------------------
     except:
         oLogfile.LineError('Processing file %s %s' % (filename, repr(sys.exc_info()[1])))

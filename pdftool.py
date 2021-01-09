@@ -2,10 +2,10 @@
 
 from __future__ import print_function
 
-__description__ = 'Strings command in Python'
+__description__ = 'Tool to process PDFs'
 __author__ = 'Didier Stevens'
-__version__ = '0.0.7'
-__date__ = '2021/01/05'
+__version__ = '0.0.1'
+__date__ = '2021/01/08'
 
 """
 Source code put in the public domain by Didier Stevens, no Copyright
@@ -13,27 +13,15 @@ https://DidierStevens.com
 Use at your own risk
 
 History:
-  2015/07/02: start
-  2015/07/07: continue
-  2015/07/28: continue
-  2015/10/24: added option -L
-  2016/03/24: fix -S bug
-  2016/08/03: added support for unicode; option r
-  2017/01/22: added option -p
-  2017/01/28: added option -g
-  2018/07/21: 0.0.2 refactoring with binary template; added option -c
-  2018/09/14: 0.0.3 added option -f
-  2018/09/19: updated Quote
-  2018/12/01: added ParseCutTerm, cDump, cOutput, manual, added #h# and #t# to cOutput
-  2018/12/12: 0.0.4 added option -T
-  2019/04/14: Quote bugfix
-  2019/08/05: bugfix #e#chr
-  2019/12/17: 0.0.5 added option -P
+  2020/08/22: start
+  2020/08/22: continue
   2020/10/21: Python 3 fix in cBinaryFile
-  2020/12/10: 0.0.6 added option -a
-  2021/01/05: 0.0.7 added : to option -P
+  2021/01/06: man page
+  2021/01/07: DataIO
+  2021/01/08: sync with template; man
 
 Todo:
+
 """
 
 import optparse
@@ -53,7 +41,8 @@ import math
 import fnmatch
 import json
 import time
-import pickle
+import hashlib
+import csv
 if sys.version_info[0] >= 3:
     from io import BytesIO as DataIO
 else:
@@ -67,54 +56,107 @@ def PrintManual():
     manual = r'''
 Manual:
 
-This tool is like the *nix string command: it extracts strings from binary files.
+pdftool.py is a tool to process PDFs.
 
-It reads one or more files or stdin and extracts strings. This tool is very versatile when it comes to handling files, later full details will be provided.
+For the moment, it has one command: iu (incremental updates).
 
-This Python script was developed with Python 2.7 and tested with Python 2.7 and 3.5.
+Command iu can be used to analyze PDFs with incremental updates.
 
-Sequences of printable characters are extracted from the binary data given to this tool.
-By default, ASCII and UNICODE (e.g. ASCII converted to UTF16) strings are extracted. Option -t can be used to change this default.
+When a PDF without incremental updates is analyzed by this tool, one or two "versions" will be listed.
+Each "version" is prefixed with a number (starting from 1) allowing selection of an update for further processing.
 
-Extracting strings from binary files, especially executables, will often generate a lot of strings that are not actually strings found in the source code of the executable, but sequences of instructions that are printable strings.
-These "unwanted" strings clutter-up the output and can make it difficult to identify relevant strings.
-To help with the identification of relevant strings, several features (activated via options) are present in this strings tool. This features will be discussed now.
+For a non-linearized PDF without incremental updates, only one "version" will be listed:
 
-A sequences has to be at least 4 characters long. This can be changed with option -n.
+pdftool.py iu hello.pdf
 
-Strings are outputed in the order they are found in the binary file (ASCII strings first, UNICODE strings second). Longer strings tend to be more interesting than short strings.
-Option -L sorts the strings by string length: shortest strings are outputed first and longest strings last.
-Long strings can be trimmed with option -T, for example -T 80, to trim strings to a maximum length of 80 characters. This is useful in combination with option -L, to avoid long strings taking up the whole screen.
+File: hello.pdf
+1: objects= 6 length= 859 difference= 859 MD5= 8433a21e2ab8d9cb6655dec30aea1c2a
 
-Identical strings can appear more than once in binary files. To output only the first occurence of strings that appear more than once, uce option -u.
+For a linearized PDF without incremental updates, two "versions" will be listed:
 
-By default, the only whitespace characters considered as printable characters are the TAB and SPACE character. Use option -w to included all whitespace characters (like NEWLINE, ...).
+pdftool.py iu hello-linearized.pdf
 
-Option -l can be used to specify how many consecutive letters must be present in a string to be selected for output (0 by default).
+File: hello-linearized.pdf
+1: objects= 1 (Linearized) length= 500 difference= 500 MD5= f8a1feff9f47b0bfacaacad1303ab1e2
+2: objects= 7 length= 1367 difference= 867 MD5= e0331685b60664a10f405325473541c5
 
-Option -S can be be used to select only strings that are "sensical", i.e. that look like strings of a natural language. By default, strings uses a module trained with an English text. Consult the documentation of re-search.py for more information.
+Notice "(Linearized)" for the first "version": this indicates that this is a linearized PDF.
 
-You can also provide your own regular expression to specify which character sequences you want to match (option -r).
+For a non-linearized PDF with incremental updates, at least two "versions" will be listed:
 
-Option -p excludes all import strings found in PE files (this requires module pefile).
+pdftool.py iu pdf-puzzle.pdf
 
-To exclude known strings from "goodware", i.e. not malware, use option -g with yarGEN's database.
+File: pdf-puzzle.pdf
+1: objects= 6 length= 933 difference= 933 MD5= 489a96a2621f9abe13156b22afca5fcf
+2: objects= 1 length= 1243 difference= 310 MD5= dabe6cb9c5fe3d213a08fb75f8d33ac4
 
-The selection of strings to output can be inverted with option -v.
 
-Option -P selects pascal strings. A pascal string is a string preceded by an integer with the number of characters of the string (a counter). Option -P takes a value that defines how to decode the counter, using the same syntax as the struct module.
-For example, to define the counter as a little-endian 32-bit unsigned integer, use '-P "<I"'. Use > for big-endian, B for 8-bit (byte) and H for 16-bit.
-In case the preceding number needs a calculation to match the length of the found string, let the format value of option -P be followed by a colon (:) and an integer (positive or negative) to calculate the length.
-For example strings in compiled Lua 5.2 code are preceded by a 32-bit little-endian integer that is equal to the length of the string (including the 0x00 terminator). Since strings.py does not take NUL characters (0x00) into account, the length needs to be adapted with a calculation: -1.
-Like this: '-P "<I:-1"'.
+And for a linearized PDF with incremental updates, at least three "versions" will be listed:
 
-Use option -f to prefix each string with the name of the file it was found it.
+pdftool.py iu data.pdf.zip
 
-To search for strings, use option -s. This search is case-insensitive, use option -c to make it case-ssensitive.
+File: data.pdf.zip (extracted)
+1: objects= 1 (Linearized) length= 672 difference= 672 MD5= 9c818e7a9ecd864e3bae97f5c3fa0816
+2: objects= 35 length= 8535 difference= 7863 MD5= e0e44d544ac922c3d64c7408944bf60b
+3: objects= 6 length= 14241 difference= 5706 MD5= 4943ccbe72c8ba2e81e5bc030b730f69
+4: objects= 5 length= 19639 difference= 5398 MD5= be45f57e2056745d6da0569b5f154ac2
+5: objects= 5 length= 25042 difference= 5403 MD5= 69953f5809e74cad3f3e63323f990cae
+6: objects= 6 length= 30658 difference= 5616 MD5= 1a8e5242f21727959683fa8cc7aa94ad
 
-To display statistics, use option -a.
+"Versions" can be selected with option -s.
 
-As stated at the beginning of this manual, this tool is very versatile when it comes to handling files. This will be explained now.
+For example:
+
+pdftool.py -s 1 iu pdf-puzzle.pdf
+
+00000000: 25 50 44 46 2D 31 2E 31  0D 0A 0D 0A 31 20 30 20  %PDF-1.1....1 0 
+00000010: 6F 62 6A 0D 0A 3C 3C 0D  0A 20 2F 54 79 70 65 20  obj..<<.. /Type 
+00000020: 2F 43 61 74 61 6C 6F 67  0D 0A 20 2F 4F 75 74 6C  /Catalog.. /Outl
+00000030: 69 6E 65 73 20 32 20 30  20 52 0D 0A 20 2F 50 61  ines 2 0 R.. /Pa
+00000040: 67 65 73 20 33 20 30 20  52 0D 0A 3E 3E 0D 0A 65  ges 3 0 R..>>..e
+...
+00000360: 30 20 6E 0D 0A 74 72 61  69 6C 65 72 0D 0A 3C 3C  0 n..trailer..<<
+00000370: 0D 0A 20 2F 53 69 7A 65  20 37 0D 0A 20 2F 52 6F  .. /Size 7.. /Ro
+00000380: 6F 74 20 31 20 30 20 52  0D 0A 3E 3E 0D 0A 73 74  ot 1 0 R..>>..st
+00000390: 61 72 74 78 72 65 66 0D  0A 37 31 38 0D 0A 25 25  artxref..718..%%
+000003A0: 45 4F 46 0D 0A                                    EOF..
+
+By default, a selected version is dumped as an hexadecimal & ascii dump.
+This output format can be changed to pure hexadecimal (-x), binary (-d) or run-length compressed hexadecimal & ascii dump (-A).
+The default hexadecimal & ascii dump is -a.
+
+When a version is selected, the complete PDF for the version is produced. If the desired output is the difference between the selected version and the previous version, suffix d (delta) must be used.
+In this example, -s 2d selects the delta between version 1 and 2:
+
+pdftool.py -s 2d iu pdf-puzzle.pdf
+
+00000000: 0D 0A 35 20 30 20 6F 62  6A 0D 0A 3C 3C 0D 0A 20  ..5 0 obj..<<.. 
+00000010: 2F 4C 65 6E 67 74 68 20  38 39 0D 0A 20 2F 46 69  /Length 89.. /Fi
+00000020: 6C 74 65 72 20 2F 41 53  43 49 49 38 35 44 65 63  lter /ASCII85Dec
+00000030: 6F 64 65 0D 0A 3E 3E 0D  0A 73 74 72 65 61 6D 0D  ode..>>..stream.
+00000040: 0A 36 3C 23 27 5C 37 50  51 23 40 31 61 23 62 30  .6<#'\7PQ#@1a#b0
+00000050: 2B 3E 47 51 28 2B 3F 28  75 2E 2B 42 32 6B 6F 2D  +>GQ(+?(u.+B2ko-
+00000060: 72 61 6B 6B 2B 45 31 62  31 46 29 59 66 35 40 3C  rakk+E1b1F)Yf5@<
+00000070: 36 21 26 42 6C 62 44 21  3D 42 4A 5B 2D 3D 42 4A  6!&BlbD!=BJ[-=BJ
+00000080: 5B 2D 3D 42 4A 5B 2D 3D  42 4A 5B 2D 3D 42 49 21  [-=BJ[-=BJ[-=BI!
+00000090: 70 3C 2C 2A 4F 45 3B 75  7E 3E 0D 0A 65 6E 64 73  p<,*OE;u~>..ends
+000000A0: 74 72 65 61 6D 0D 0A 65  6E 64 6F 62 6A 0D 0A 0D  tream..endobj...
+000000B0: 0A 78 72 65 66 0D 0A 30  20 31 0D 0A 30 30 30 30  .xref..0 1..0000
+000000C0: 30 30 30 30 30 30 20 36  35 35 33 35 20 66 0D 0A  000000 65535 f..
+000000D0: 35 20 31 0D 0A 30 30 30  30 30 30 30 39 33 35 20  5 1..0000000935 
+000000E0: 30 30 30 30 30 20 6E 0D  0A 74 72 61 69 6C 65 72  00000 n..trailer
+000000F0: 0D 0A 3C 3C 0D 0A 20 2F  53 69 7A 65 20 37 0D 0A  ..<<.. /Size 7..
+00000100: 20 2F 52 6F 6F 74 20 31  20 30 20 52 0D 0A 20 2F   /Root 1 0 R.. /
+00000110: 50 72 65 76 20 37 31 38  0D 0A 3E 3E 0D 0A 73 74  Prev 718..>>..st
+00000120: 61 72 74 78 72 65 66 0D  0A 31 31 31 30 0D 0A 25  artxref..1110..%
+00000130: 25 45 4F 46 0D 0A                                 %EOF..
+
+
+
+Output can also be directed to a file using option -o.
+
+
+This tool is very versatile when it comes to handling files. This will be explained now.
 
 This tool reads files in binary mode. It can read files from disk, from standard input (stdin) and from "generated" files via the command line.
 It can also partially read files (this is done with the cut operator).
@@ -165,6 +207,7 @@ File arguments that start with character # have special meaning. These are not p
 
 File arguments that start with #, #h#, #b# or #e# are used to "generate" the file content.
 Arguments that start with #c# are not file arguments, but cut operators (explained later).
+Arguments that start with #f# are not file arguments, but flags (explained later).
 
 Generating the file content with a # file argument means that the file content is not read from disk, but generated in memory based on the characteristics provided via the file argument.
 
@@ -211,6 +254,11 @@ For example, #e#repeat(3, 'AB') generates byte sequence ABABAB.
 When more than one function needs to be used, the byte sequences generated by the functions can be concatenated with the + operator.
 For example, #e#repeat(10,0xFF)+random(100) will generate a byte sequence of 10 FF bytes followed by 100 random bytes.
 
+File arguments that start with #p# are a notational convention to pack a Python expression to generate data (using Python module struct).
+The string after #p# must contain 2 expressions separated by a # character, like #p#I#123456.
+The first expression (I in this example) is the format string for the Python struct.pack function, and the second expression (123456 in this example) is a Python expression that needs to be packed by struct.pack.
+In this example, format string I represents an unsigned, 32-bit, little-endian integer, and thus #p#I#123456 generates byte sequence 40E20100 (hexadecimal).
+
 The cut argument (or cut operator) allows for the partial selection of the content of a file. This argument starts with #c# followed by a "cut-expression". Use this expression to "cut out" part of the content.
 The cut-argument must be put in front of a file argument, like in this example:
 
@@ -236,7 +284,8 @@ termA and termB can be:
 - nothing (an empty string)
 - a positive decimal number; example: 10
 - an hexadecimal number (to be preceded by 0x); example: 0x10
-- a case sensitive string to search for (surrounded by square brackets and single quotes); example: ['MZ']
+- a case sensitive ASCII string to search for (surrounded by square brackets and single quotes); example: ['MZ']
+- a case sensitive UNICODE string to search for (surrounded by square brackets and single quotes prefixed with u); example: [u'User']
 - an hexadecimal string to search for (surrounded by square brackets); example: [d0cf11e0]
 If termA is nothing, then the cut section of bytes starts with the byte at position 0.
 If termA is a number, then the cut section of bytes starts with the byte at the position given by the number (first byte has index 0).
@@ -247,12 +296,19 @@ When termB is a number, it can have suffix letter l. This indicates that the num
 termB can also be a negative number (decimal or hexademical): in that case the position is counted from the end of the file. For example, :-5 selects the complete file except the last 5 bytes.
 If termB is a string to search for, then the cut section of bytes ends with the last byte at the position where the string is first found. If the string is not found, the cut is empty (0 bytes).
 No checks are made to assure that the position specified by termA is lower than the position specified by termB. This is left up to the user.
-Search string expressions (ASCII and hexadecimal) can be followed by an instance (a number equal to 1 or greater) to indicate which instance needs to be taken. For example, ['ABC']2 will search for the second instance of string 'ABC'. If this instance is not found, then nothing is selected.
-Search string expressions (ASCII and hexadecimal) can be followed by an offset (+ or - a number) to add (or substract) an offset to the found instance. This number can be a decimal or hexadecimal (prefix 0x) value. For example, ['ABC']+3 will search for the first instance of string 'ABC' and then select the bytes after ABC (+ 3).
-Finally, search string expressions (ASCII and hexadecimal) can be followed by an instance and an offset.
+Search string expressions (ASCII, UNICODE and hexadecimal) can be followed by an instance (a number equal to 1 or greater) to indicate which instance needs to be taken. For example, ['ABC']2 will search for the second instance of string 'ABC'. If this instance is not found, then nothing is selected.
+Search string expressions (ASCII, UNICODE and hexadecimal) can be followed by an offset (+ or - a number) to add (or substract) an offset to the found instance. This number can be a decimal or hexadecimal (prefix 0x) value. For example, ['ABC']+3 will search for the first instance of string 'ABC' and then select the bytes after ABC (+ 3).
+Finally, search string expressions (ASCII, UNICODE and hexadecimal) can be followed by an instance and an offset.
 Examples:
 This cut-expression can be used to dump the first 256 bytes of a PE file located inside the file content: ['MZ']:0x100l
 This cut-expression can be used to dump the OLE file located inside the file content: [d0cf11e0]:
+
+A flag argument starts with #f# and is passed on for all files that are provided after the flag argument. It can be used to change the behavior of the tool for certain files.
+Example:
+
+tool.py data-1.bin #f#-l data-2.bin
+
+data-2.bin will be processed differently (using flag option -l) than file data-1.bin.
 
 With option --jsoninput, the tool will parse the output produced by another tool using option --jsonoutput.
 Example:
@@ -305,9 +361,6 @@ Most options can be combined, like #ps# for example.
 
 DEFAULT_SEPARATOR = ','
 QUOTE = '"'
-REGEX_STANDARD = '[\x09\x20-\x7E]'
-REGEX_WHITESPACE = '[\x09-\x0D\x20-\x7E]'
-FILENAME_GOODWAREDB = 'good-strings.db'
 
 def PrintError(*args, **kwargs):
     print(*args, file=sys.stderr, **kwargs)
@@ -613,6 +666,14 @@ def Interpret(expression):
             return None
     return decoded
 
+def ParsePackExpression(data):
+    try:
+        packFormat, pythonExpression = data.split('#', 1)
+        data = struct.pack(packFormat, int(pythonExpression))
+        return data
+    except:
+        return None
+
 FCH_FILENAME = 0
 FCH_DATA = 1
 FCH_ERROR = 2
@@ -621,7 +682,7 @@ def FilenameCheckHash(filename, literalfilename):
     if literalfilename:
         return FCH_FILENAME, filename
     elif filename.startswith('#h#'):
-        result = Hex2Bytes(filename[3:])
+        result = Hex2Bytes(filename[3:].replace(' ', ''))
         if result == None:
             return FCH_ERROR, 'hexadecimal'
         else:
@@ -635,6 +696,12 @@ def FilenameCheckHash(filename, literalfilename):
         result = Interpret(filename[3:])
         if result == None:
             return FCH_ERROR, 'expression'
+        else:
+            return FCH_DATA, C2BIP3(result)
+    elif filename.startswith('#p#'):
+        result = ParsePackExpression(filename[3:])
+        if result == None:
+            return FCH_ERROR, 'pack'
         else:
             return FCH_DATA, result
     elif filename.startswith('#'):
@@ -735,6 +802,18 @@ def File2Strings(filename):
         if f != sys.stdin:
             f.close()
 
+def File2String(filename):
+    try:
+        f = open(filename, 'rb')
+    except:
+        return None
+    try:
+        return f.read()
+    except:
+        return None
+    finally:
+        f.close()
+
 def ProcessAt(argument):
     if argument.startswith('@'):
         strings = File2Strings(argument[1:])
@@ -753,29 +832,33 @@ def Glob(filename):
         return filenames
 
 class cExpandFilenameArguments():
-    def __init__(self, filenames, literalfilenames=False, recursedir=False, checkfilenames=False, expressionprefix=None):
+    def __init__(self, filenames, literalfilenames=False, recursedir=False, checkfilenames=False, expressionprefix=None, flagprefix=None):
         self.containsUnixShellStyleWildcards = False
         self.warning = False
         self.message = ''
-        self.filenameexpressions = []
+        self.filenameexpressionsflags = []
         self.expressionprefix = expressionprefix
+        self.flagprefix = flagprefix
         self.literalfilenames = literalfilenames
 
         expression = ''
+        flag = ''
         if len(filenames) == 0:
-            self.filenameexpressions = [['', '']]
+            self.filenameexpressionsflags = [['', '', '']]
         elif literalfilenames:
-            self.filenameexpressions = [[filename, ''] for filename in filenames]
+            self.filenameexpressionsflags = [[filename, '', ''] for filename in filenames]
         elif recursedir:
             for dirwildcard in filenames:
                 if expressionprefix != None and dirwildcard.startswith(expressionprefix):
                     expression = dirwildcard[len(expressionprefix):]
+                elif flagprefix != None and dirwildcard.startswith(flagprefix):
+                    flag = dirwildcard[len(flagprefix):]
                 else:
                     if dirwildcard.startswith('@'):
                         for filename in ProcessAt(dirwildcard):
-                            self.filenameexpressions.append([filename, expression])
+                            self.filenameexpressionsflags.append([filename, expression, flag])
                     elif os.path.isfile(dirwildcard):
-                        self.filenameexpressions.append([dirwildcard, expression])
+                        self.filenameexpressionsflags.append([dirwildcard, expression, flag])
                     else:
                         if os.path.isdir(dirwildcard):
                             dirname = dirwildcard
@@ -786,19 +869,21 @@ class cExpandFilenameArguments():
                                 dirname = '.'
                         for path, dirs, files in os.walk(dirname):
                             for filename in fnmatch.filter(files, basename):
-                                self.filenameexpressions.append([os.path.join(path, filename), expression])
+                                self.filenameexpressionsflags.append([os.path.join(path, filename), expression, flag])
         else:
             for filename in list(collections.OrderedDict.fromkeys(sum(map(self.Glob, sum(map(ProcessAt, filenames), [])), []))):
                 if expressionprefix != None and filename.startswith(expressionprefix):
                     expression = filename[len(expressionprefix):]
+                elif flagprefix != None and filename.startswith(flagprefix):
+                    flag = filename[len(flagprefix):]
                 else:
-                    self.filenameexpressions.append([filename, expression])
-            self.warning = self.containsUnixShellStyleWildcards and len(self.filenameexpressions) == 0
+                    self.filenameexpressionsflags.append([filename, expression, flag])
+            self.warning = self.containsUnixShellStyleWildcards and len(self.filenameexpressionsflags) == 0
             if self.warning:
                 self.message = "Your filename argument(s) contain Unix shell-style wildcards, but no files were matched.\nCheck your wildcard patterns or use option literalfilenames if you don't want wildcard pattern matching."
                 return
-        if self.filenameexpressions == [] and expression != '':
-            self.filenameexpressions = [['', expression]]
+        if self.filenameexpressionsflags == [] and (expression != '' or flag != ''):
+            self.filenameexpressionsflags = [['', expression, flag]]
         if checkfilenames:
             self.CheckIfFilesAreValid()
 
@@ -812,21 +897,21 @@ class cExpandFilenameArguments():
         valid = []
         doesnotexist = []
         isnotafile = []
-        for filename, expression in self.filenameexpressions:
+        for filename, expression, flag in self.filenameexpressionsflags:
             hashfile = False
             try:
                 hashfile = FilenameCheckHash(filename, self.literalfilenames)[0] == FCH_DATA
             except:
                 pass
             if filename == '' or hashfile:
-                valid.append([filename, expression])
+                valid.append([filename, expression, flag])
             elif not os.path.exists(filename):
                 doesnotexist.append(filename)
             elif not os.path.isfile(filename):
                 isnotafile.append(filename)
             else:
-                valid.append([filename, expression])
-        self.filenameexpressions = valid
+                valid.append([filename, expression, flag])
+        self.filenameexpressionsflags = valid
         if len(doesnotexist) > 0:
             self.warning = True
             self.message += 'The following files do not exist and will be skipped: ' + ' '.join(doesnotexist) + '\n'
@@ -836,9 +921,9 @@ class cExpandFilenameArguments():
 
     def Filenames(self):
         if self.expressionprefix == None:
-            return [filename for filename, expression in self.filenameexpressions]
+            return [filename for filename, expression, flag in self.filenameexpressionsflags]
         else:
-            return self.filenameexpressions
+            return self.filenameexpressionsflags
 
 def CheckJSON(stringJSON):
     try:
@@ -926,7 +1011,7 @@ def ParseCutTerm(argument):
             value = -value
         return CUTTERM_POSITION, value, argument[len(oMatch.group(0)):]
     if oMatch == None:
-        oMatch = re.match(r"\[\'(.+?)\'\](\d+)?([+-](?:0x[0-9a-f]+|\d+))?", argument)
+        oMatch = re.match(r"\[u?\'(.+?)\'\](\d+)?([+-](?:0x[0-9a-f]+|\d+))?", argument)
     else:
         if len(oMatch.group(1)) % 2 == 1:
             raise Exception("Uneven length hexadecimal string")
@@ -935,7 +1020,12 @@ def ParseCutTerm(argument):
     if oMatch == None:
         return None, None, argument
     else:
-        return CUTTERM_FIND, (oMatch.group(1), int(Replace(oMatch.group(2), {None: '1'})), ParseInteger(Replace(oMatch.group(3), {None: '0'}))), argument[len(oMatch.group(0)):]
+        if argument.startswith("[u'"):
+            # convert ascii to unicode 16 byte sequence
+            searchtext = oMatch.group(1).decode('unicode_escape').encode('utf16')[2:]
+        else:
+            searchtext = oMatch.group(1)
+        return CUTTERM_FIND, (searchtext, int(Replace(oMatch.group(2), {None: '1'})), ParseInteger(Replace(oMatch.group(3), {None: '0'}))), argument[len(oMatch.group(0)):]
 
 def ParseCutArgument(argument):
     type, value, remainder = ParseCutTerm(argument.strip())
@@ -969,8 +1059,8 @@ def ParseCutArgument(argument):
     else:
         return typeLeft, valueLeft, type, value
 
-def Find(data, value, nth):
-    position = -1
+def Find(data, value, nth, startposition=-1):
+    position = startposition
     while nth > 0:
         position = data.find(value, position + 1)
         if position == -1:
@@ -980,12 +1070,12 @@ def Find(data, value, nth):
 
 def CutData(stream, cutArgument):
     if cutArgument == '':
-        return stream
+        return [stream, None, None]
 
     typeLeft, valueLeft, typeRight, valueRight = ParseCutArgument(cutArgument)
 
     if typeLeft == None:
-        return stream
+        return [stream, None, None]
 
     if typeLeft == CUTTERM_NOTHING:
         positionBegin = 0
@@ -994,7 +1084,7 @@ def CutData(stream, cutArgument):
     elif typeLeft == CUTTERM_FIND:
         positionBegin = Find(stream, valueLeft[0], valueLeft[1])
         if positionBegin == -1:
-            return ''
+            return ['', None, None]
         positionBegin += valueLeft[2]
     else:
         raise Exception("Unknown value typeLeft")
@@ -1008,16 +1098,16 @@ def CutData(stream, cutArgument):
     elif typeRight == CUTTERM_LENGTH:
         positionEnd = positionBegin + valueRight
     elif typeRight == CUTTERM_FIND:
-        positionEnd = Find(stream, valueRight[0], valueRight[1])
+        positionEnd = Find(stream, valueRight[0], valueRight[1], positionBegin)
         if positionEnd == -1:
-            return ''
+            return ['', None, None]
         else:
             positionEnd += len(valueRight[0])
         positionEnd += valueRight[2]
     else:
         raise Exception("Unknown value typeRight")
 
-    return stream[positionBegin:positionEnd]
+    return [stream[positionBegin:positionEnd], positionBegin, positionEnd]
 
 #-BEGINCODE cDump------------------------------------------------------------------------------------
 #import binascii
@@ -1079,14 +1169,14 @@ class cDump():
             if i % self.dumplinelength == self.dumplinelength / 2:
                 hexDump += ' '
             hexDump += ' %02X' % b
-            asciiDump += IFF(b >= 32 and b < 128, chr(b), '.')
+            asciiDump += IFF(b >= 32 and b < 127, chr(b), '.')
         if countRLE > 0:
             oDumpStream.Addline('* %d 0x%02x' % (countRLE, countRLE * self.dumplinelength))
         oDumpStream.Addline(self.CombineHexAscii(position + hexDump, asciiDump))
         return oDumpStream.Content()
 
     def Base64Dump(self, nowhitespace=False):
-        encoded = binascii.b2a_base64(self.data)
+        encoded = binascii.b2a_base64(self.data).decode().strip()
         if nowhitespace:
             return encoded
         oDumpStream = self.cDumpStream(self.prefix)
@@ -1123,7 +1213,10 @@ def IfWIN32SetBinary(io):
 #Fix for http://bugs.python.org/issue11395
 def StdoutWriteChunked(data):
     if sys.version_info[0] > 2:
-        sys.stdout.buffer.write(data)
+        if isinstance(data, str):
+            sys.stdout.write(data)
+        else:
+            sys.stdout.buffer.write(data)
     else:
         while data != '':
             sys.stdout.write(data[0:10000])
@@ -1151,7 +1244,7 @@ class cVariables():
         return astring
 
 class cOutput():
-    def __init__(self, filenameOption=None):
+    def __init__(self, filenameOption=None, binary=False):
         self.starttime = time.time()
         self.filenameOption = filenameOption
         self.separateFiles = False
@@ -1162,13 +1255,19 @@ class cOutput():
         self.tail = False
         self.tailQueue = []
         self.fOut = None
+        self.oCsvWriter = None
         self.rootFilenames = {}
+        self.binary = binary
+        if self.binary:
+            self.fileoptions = 'wb'
+        else:
+            self.fileoptions = 'w'
         if self.filenameOption:
             if self.ParseHash(self.filenameOption):
                 if not self.separateFiles and self.filename != '':
-                    self.fOut = open(self.filename, 'w')
+                    self.fOut = open(self.filename, self.fileoptions)
             elif self.filenameOption != '':
-                self.fOut = open(self.filenameOption, 'w')
+                self.fOut = open(self.filenameOption, self.fileoptions)
 
     def ParseHash(self, option):
         if option.startswith('#'):
@@ -1245,6 +1344,24 @@ class cOutput():
     def LineTimestamped(self, line):
         self.Line('%s: %s' % (self.FormatTime(), line))
 
+    def WriteBinary(self, data):
+        if self.fOut != None:
+            self.fOut.write(data)
+            self.fOut.flush()
+        else:
+            IfWIN32SetBinary(sys.stdout)
+            StdoutWriteChunked(data)
+
+    def CSVWriteRow(self, row):
+        if self.oCsvWriter == None:
+            self.StringIOCSV = StringIO()
+#            self.oCsvWriter = csv.writer(self.fOut)
+            self.oCsvWriter = csv.writer(self.StringIOCSV)
+        self.oCsvWriter.writerow(row)
+        self.Line(self.StringIOCSV.getvalue(), '')
+        self.StringIOCSV.truncate(0)
+        self.StringIOCSV.seek(0)
+
     def Filename(self, filename, index, total):
         self.separateFilename = filename
         if self.progress:
@@ -1266,7 +1383,7 @@ class cOutput():
             oFilenameVariables.SetVariable('e', extension)
 
             self.Close()
-            self.fOut = open(oFilenameVariables.Instantiate(self.filename), 'w')
+            self.fOut = open(oFilenameVariables.Instantiate(self.filename), self.fileoptions)
 
     def Close(self):
         if self.head and self.tail and len(self.tailQueue) > 0:
@@ -1389,130 +1506,105 @@ def CalculateByteStatistics(dPrevalence=None, data=None):
             countUniqueBytes += 1
     return sumValues, entropy, countUniqueBytes, countNullByte, countControlBytes, countWhitespaceBytes, countPrintableBytes, countHighBytes, countHexadecimalBytes, countBASE64Bytes, averageConsecutiveByteDifference
 
+def Unpack(format, data):
+    size = struct.calcsize(format)
+    result = list(struct.unpack(format, data[:size]))
+    result.append(data[size:])
+    return result
+
 def InstantiateCOutput(options):
     filenameOption = None
     if options.output != '':
         filenameOption = options.output
-    return cOutput(filenameOption)
+    return cOutput(filenameOption, binary=options.dump)
 
-def ParsePascalOption(pascal):
-    splitResult = pascal.split(':', 1)
-    if len(splitResult) == 1:
-        structFormat = splitResult[0]
-        correction = 0
-    else:
-        structFormat = splitResult[0]
-        correction = int(splitResult[1])
-    return structFormat, correction
+def WhitespaceOnly(data):
+    for byte in data:
+        if not byte in [9, 10, 11, 12, 13, 32]:
+            return False
+    return True
 
-def ExtractStringsASCII(data, options):
-    if options.regex != '':
-        regex = options.regex + '{%d,}'
-    elif options.whitespace:
-        regex = REGEX_WHITESPACE + '{%d,}'
-    else:
-        regex = REGEX_STANDARD + '{%d,}'
-
-    if options.pascal == '':
-        return re.findall(C2BIP3(regex % options.bytes), data)
-    else:
-        structFormat, correction = ParsePascalOption(options.pascal)
-        structFormatLength = struct.calcsize(structFormat)
-        foundStrings = []
-
-        for oMatch in re.finditer(C2BIP3(regex % options.bytes), data):
-            if oMatch.start(0) >= structFormatLength:
-                foundString = oMatch.group(0)
-                if struct.unpack(structFormat, data[oMatch.start(0) - structFormatLength:oMatch.start(0)])[0] + correction == len(foundString):
-                    foundStrings.append(foundString)
-        return foundStrings
-
-def ExtractStringsUNICODE(data, options):
-    if options.regex != '':
-        regex = '((' + options.regex + '\x00){%d,})'
-    elif options.whitespace:
-        regex = '((' + REGEX_WHITESPACE + '\x00){%d,})'
-    else:
-        regex = '((' + REGEX_STANDARD + '\x00){%d,})'
-
-
-    if options.pascal == '':
-        return [foundunicodestring.replace(C2BIP3('\x00'), C2BIP3('')) for foundunicodestring, dummy in re.findall(C2BIP3(regex % options.bytes), data)]
-    else:
-        structFormat, correction = ParsePascalOption(options.pascal)
-        structFormatLength = struct.calcsize(structFormat)
-        foundStrings = []
-
-        for oMatch in re.finditer(C2BIP3(regex % options.bytes), data):
-            if oMatch.start(0) >= structFormatLength:
-                foundString = oMatch.group(0).replace(C2BIP3('\x00'), C2BIP3(''))
-                if struct.unpack(structFormat, data[oMatch.start(0) - structFormatLength:oMatch.start(0)])[0] + correction == len(foundString):
-                    foundStrings.append(foundString)
-        return foundStrings
-
-def ExtractStrings(data, options):
-    if options.type == 'all':
-        return ExtractStringsASCII(data, options) + ExtractStringsUNICODE(data, options)
-    elif options.type == 'ascii':
-        return ExtractStringsASCII(data, options)
-    elif options.type == 'unicode':
-        return ExtractStringsUNICODE(data, options)
-    else:
-        print('Unknown type option: %s' % options.type)
-        return []
-
-def ConsecutiveLettersLength(data):
-    return max([0] + [len(letters) for letters in re.findall(C2BIP3(r'[a-z]+'), data, re.I)])
-
-def TrimIfRequired(string, maxLength):
-    if maxLength == 0:
-        return string
-    else:
-        return string[0:maxLength]
-
-def StringsSub(extractedString, filename, oOutput, dUnique, oExtraSensical, options):
-    if options.casesensitive:
-        Case = lambda x: x
-    else:
-        Case = lambda x: x.lower()
-    if options.search == '' or Case(C2BIP3(options.search)) in Case(extractedString):
-        doPrint = True
-        if options.sensical:
-            doPrint = doPrint and oExtraSensical.Test(extractedString)
-        if options.letters:
-            doPrint = doPrint and ConsecutiveLettersLength(extractedString) >= options.letters
-        if options.unique:
-            doPrint = doPrint and not extractedString in dUnique
-            dUnique[extractedString] = True
-        if doPrint and not options.invert or not doPrint and options.invert:
-            if options.whitespace:
-                if options.filename:
-                    StdoutWriteChunked(DEFAULT_SEPARATOR.join([filename, extractedString]))
-                else:
-                    StdoutWriteChunked(extractedString)
+def PDFIncrementalUpdatesSub(data, oOutput, options):
+    accumulate = DataIO(b'')
+    token = b''
+    data += b'\x00'
+    dCounters = {}
+    versions = []
+    for iter in range(len(data)):
+        byte = data[iter:iter+1]
+        if token == b'':
+            if byte == b'%' or byte == b'/' or byte >= b'a' and byte <= b'z' or byte >= b'A' and byte <= b'Z':
+                token += byte
             else:
-                if options.filename:
-                    oOutput.Line(DEFAULT_SEPARATOR.join([filename, TrimIfRequired(extractedString.decode(), options.trim)]))
+                accumulate.write(byte)
+        elif token[0] == ord(b'%') and byte == b'%':
+            token += byte
+        elif byte >= b'a' and byte <= b'z' or byte >= b'A' and byte <= b'Z':
+            token += byte
+        elif token == b'%%EOF' and byte in [b'\x0a', b'\x0d']:
+            token += byte
+        elif token == b'%%EOF\x0d' and byte == b'\x0a':
+            token += byte
+        else:
+            accumulate.write(token)
+            if token[:5] == b'%%EOF':
+                dCounters[b'%%EOF'] = 1
+                if len(versions) == 0:
+                    offset = 0
                 else:
-                    oOutput.Line(TrimIfRequired(extractedString.decode(), options.trim))
+                    offset = len(versions[-1][1])
+                versions.append([dCounters, accumulate.getvalue(), accumulate.getvalue()[offset:]])
+                dCounters = {}
+            else:
+                if token in [b'obj', b'endobj', b'/Linearized']:
+                    dCounters[token] = dCounters.get(token, 0) + 1
+            token = b''
+            accumulate.write(byte)
+    data = data[:-1]
+    accumulate = accumulate.getvalue()[:-1]
+    if len(versions[-1][1]) != len(accumulate):
+        offset = len(versions[-1][1])
+        versions.append([dCounters, accumulate, accumulate[offset:]])
+    newVersions = []
+    for index, version in enumerate(versions):
+        index += 1
+        if b'obj' in version[0] and b'endobj' in version[0] and version[0][b'obj'] == version[0][b'endobj']:
+            info = 'objects= %d' % version[0][b'obj']
+            if b'/Linearized' in version[0]:
+                info += ' (Linearized)'
+        else:
+            info = repr(version[0])
+            if version[0] == {}:
+                info = 'no objects'
+                if WhitespaceOnly(version[2]):
+                    info = 'whitespace'
+        newVersions.append([index, info] + version)
+    return newVersions
 
-def Filter(extractedStrings, imported):
-    if imported == [] or imported == None:
-        return extractedStrings
-    return [extractedString for extractedString in extractedStrings if not extractedString in imported]
+def PDFIncrementalUpdates(data, oOutput, options):
+    newVersions = PDFIncrementalUpdatesSub(data, oOutput, options)
+    if options.select == '':
+        for version in newVersions:
+            oOutput.Line('%d: %s length= %d difference= %d MD5= %s' % (version[0], version[1], len(version[3]), len(version[4]), hashlib.md5(version[3]).hexdigest()))
+    else:
+        if options.select.endswith('d'):
+            indexData = 4
+            index = int(options.select[:-1])
+        else:
+            indexData = 3
+            index = int(options.select)
+        for version in newVersions:
+            if index == version[0]:
+                if options.dump:
+                    oOutput.WriteBinary(version[indexData])
+                elif options.hexdump:
+                    oOutput.Line(cDump(version[indexData]).HexDump())
+                elif options.asciidumprle:
+                    oOutput.Line(cDump(version[indexData]).HexAsciiDump(True))
+                else:
+                    oOutput.Line(cDump(version[indexData]).HexAsciiDump())
 
-def LoadGoodwareStrings():
-    filename = os.path.join(os.path.dirname(sys.argv[0]), FILENAME_GOODWAREDB)
-    try:
-        fDB = gzip.GzipFile(filename, 'rb')
-    except:
-        print('Error opening goodware strings DB file: %s' % filename)
-        return None
-    collection = pickle.loads(fDB.read())
-    fDB.close()
-    return collection
-
-def ProcessBinaryFile(filename, content, cutexpression, goodware, oLogfile, options):
+def ProcessBinaryFile(command, filename, content, cutexpression, flag, oOutput, oLogfile, options, oParserFlag):
     if content == None:
         try:
             oBinaryFile = cBinaryFile(filename, C2BIP3(options.password), options.noextraction, options.literalfilenames)
@@ -1525,50 +1617,29 @@ def ProcessBinaryFile(filename, content, cutexpression, goodware, oLogfile, opti
         except:
             oLogfile.LineError('Reading file %s %s' % (filename, repr(sys.exc_info()[1])))
             return
-        data = CutData(data, cutexpression)
+        data = CutData(data, cutexpression)[0]
         oBinaryFile.close()
     else:
         data = content
 
+    (flagoptions, flagargs) = oParserFlag.parse_args(flag.split(' '))
+
     try:
         # ----- Put your data processing code here -----
-        imported = []
-        if options.pefile:
-            try:
-                import pefile
-                oPE = pefile.PE(data=data)
-                for entry in oPE.DIRECTORY_ENTRY_IMPORT:
-                    imported.append(entry.dll)
-                    for imp in entry.imports:
-                        imported.append(imp.name)
-            except:
-                pass
-
-        selectedStrings = Filter(ExtractStrings(data, options), imported)
-        return Filter(selectedStrings, goodware)
+        if options.select == '':
+            oOutput.Line('File: %s%s' % (filename, IFF(oBinaryFile.extracted, ' (extracted)', '')))
+        PDFIncrementalUpdates(data, oOutput, options)
         # ----------------------------------------------
     except:
         oLogfile.LineError('Processing file %s %s' % (filename, repr(sys.exc_info()[1])))
         if not options.ignoreprocessingerrors:
             raise
 
-def ProcessBinaryFiles(filenames, oLogfile, options):
+#    data = CutData(cBinaryFile(filename, C2BIP3(options.password), options.noextraction, options.literalfilenames).Data(), cutexpression)[0]
+
+def ProcessBinaryFiles(command, filenames, oLogfile, options, oParserFlag):
     oOutput = InstantiateCOutput(options)
     index = 0
-
-    oExtraSensical = None
-    if options.sensical:
-        import reextra
-        oExtraSensical = reextra.cExtraSensical(True)
-    if options.whitespace:
-        IfWIN32SetBinary(sys.stdout)
-    dUnique = {}
-
-    goodware = None
-    if options.goodwarestrings:
-        goodware = LoadGoodwareStrings()
-
-    selectedStrings = []
     if options.jsoninput:
         items = CheckJSON(sys.stdin.read())
         if items == None:
@@ -1576,43 +1647,12 @@ def ProcessBinaryFiles(filenames, oLogfile, options):
         for item in items:
             oOutput.Filename(item['name'], index, len(items))
             index += 1
-            result = ProcessBinaryFile(item['name'], item['content'], '', goodware, oLogfile, options)
-            if options.length or options.stats:
-                selectedStrings.extend([[string, item['name']] for string in result])
-            else:
-                for extractedString in result:
-                    StringsSub(extractedString, item['name'], oOutput, dUnique, oExtraSensical, options)
+            ProcessBinaryFile(command, item['name'], item['content'], '', '', oOutput, oLogfile, options, oParserFlag)
     else:
-        for filename, cutexpression in filenames:
+        for filename, cutexpression, flag in filenames:
             oOutput.Filename(filename, index, len(filenames))
             index += 1
-            result = ProcessBinaryFile(filename, None, cutexpression, goodware, oLogfile, options)
-            if options.length or options.stats:
-                selectedStrings.extend([[string, filename] for string in result])
-            else:
-                for extractedString in result:
-                    StringsSub(extractedString, filename, oOutput, dUnique, oExtraSensical, options)
-
-    if options.length or options.stats:
-        selectedStrings = sorted(selectedStrings, key=lambda x: len(x[0]))
-
-        if options.length:
-            for extractedString in selectedStrings:
-                StringsSub(extractedString[0], extractedString[1], oOutput, dUnique, oExtraSensical, options)
-        else:
-            numberOfStrings = len(selectedStrings)
-            oOutput.Line('Number of strings: %d' % numberOfStrings)
-            if numberOfStrings > 0:
-                oOutput.Line('Length 10 shortest strings: %s' % ','.join(str(len(string)) for string, filename in selectedStrings[0:10]))
-                oOutput.Line('Length 10 longest strings: %s' % ','.join(str(len(string)) for string, filename in selectedStrings[-10:]))
-                oOutput.Line('Mean length: %f' % (sum([len(string) for string, filename in selectedStrings]) / numberOfStrings))
-                if (numberOfStrings % 2 == 0):
-                    median = (len(selectedStrings[numberOfStrings // 2 - 1][0]) + len(selectedStrings[numberOfStrings // 2][0])) / 2.0
-                else:
-                    median = len(selectedStrings[numberOfStrings // 2][0])
-                oOutput.Line('Median length: %f' % median)
-
-    oOutput.Close()
+            ProcessBinaryFile(command, filename, None, cutexpression, flag, oOutput, oLogfile, options, oParserFlag)
 
 def Main():
     moredesc = '''
@@ -1621,32 +1661,23 @@ Source code put in the public domain by Didier Stevens, no Copyright
 Use at your own risk
 https://DidierStevens.com'''
 
-    oParser = optparse.OptionParser(usage='usage: %prog [options] [[@]file|cut-expression ...]\n' + __description__ + moredesc, version='%prog ' + __version__)
+    oParserFlag = optparse.OptionParser(usage='\nFlag arguments start with #f#:')
+    oParserFlag.add_option('-l', '--length', action='store_true', default=False, help='Print length of files')
+
+    oParser = optparse.OptionParser(usage='usage: %prog [options] command [[@]file|cut-expression|flag-expression ...]\n' + __description__ + moredesc, version='%prog ' + __version__, epilog='This tool also accepts flag arguments (#f#), read the man page (-m) for more info.')
     oParser.add_option('-m', '--man', action='store_true', default=False, help='Print manual')
     oParser.add_option('-o', '--output', type=str, default='', help='Output to file (# supported)')
-    oParser.add_option('-n', '--bytes', type=int, default=4, help='Minimum string length (default 4)')
-    oParser.add_option('-w', '--whitespace', action='store_true', default=False, help='Include whitespace characters')
-    oParser.add_option('-s', '--search', default='', help='String to search for (not case-sensitive)')
-    oParser.add_option('-c', '--casesensitive', action='store_true', default=False, help='Make search -s case-sensitive')
-    oParser.add_option('-l', '--letters', type=int, default=0, help='Minimum amount of consecutive letters (default 0)')
-    oParser.add_option('-S', '--sensical', action='store_true', default=False, help='Output only sensical strings (e.g. no gibberish)')
-    oParser.add_option('-v', '--invert', action='store_true', default=False, help='Invert selection (does not apply to -s)')
-    oParser.add_option('-u', '--unique', action='store_true', default=False, help='Remove repeated strings')
-    oParser.add_option('-L', '--length', action='store_true', default=False, help='Sort by string length')
-    oParser.add_option('-t', '--type', default='all', help='Type of strings ascii, unicode or all (default)')
-    oParser.add_option('-r', '--regex', default='', help='Regex to be used to match characters')
-    oParser.add_option('-p', '--pefile', action='store_true', default=False, help='Parse file as PE file and remove imported symbols')
-    oParser.add_option('-g', '--goodwarestrings', action='store_true', default=False, help='Use the goodware strings db to filter out strings')
-    oParser.add_option('-f', '--filename', action='store_true', default=False, help='Include filename (as prefix)')
-    oParser.add_option('-T', '--trim', type=int, default=0, help='Trim strings to given maximum length')
-    oParser.add_option('-P', '--pascal', default='', help='Counter format for pascal strings')
-    oParser.add_option('-a', '--stats', action='store_true', default=False, help='Produce statistics')
-    oParser.add_option('--password', default='infected', help='The ZIP password to be used (default infected)')
-    oParser.add_option('--noextraction', action='store_true', default=False, help='Do not extract from archive file')
-    oParser.add_option('--literalfilenames', action='store_true', default=False, help='Do not interpret filenames')
-    oParser.add_option('--recursedir', action='store_true', default=False, help='Recurse directories (wildcards and here files (@...) allowed)')
+    oParser.add_option('-s', '--select', default='', help='select item nr for dumping (a for all)')
+    oParser.add_option('-d', '--dump', action='store_true', default=False, help='perform dump')
+    oParser.add_option('-x', '--hexdump', action='store_true', default=False, help='perform hex dump')
+    oParser.add_option('-a', '--asciidump', action='store_true', default=False, help='perform ascii dump')
+    oParser.add_option('-A', '--asciidumprle', action='store_true', default=False, help='perform ascii dump with RLE')
+    oParser.add_option('-p', '--password', default='infected', help='The ZIP password to be used (default infected)')
+    oParser.add_option('-n', '--noextraction', action='store_true', default=False, help='Do not extract from archive file')
+    oParser.add_option('-l', '--literalfilenames', action='store_true', default=False, help='Do not interpret filenames')
+    oParser.add_option('-r', '--recursedir', action='store_true', default=False, help='Recurse directories (wildcards and here files (@...) allowed)')
     oParser.add_option('--checkfilenames', action='store_true', default=False, help='Perform check if files exist prior to file processing')
-    oParser.add_option('--jsoninput', action='store_true', default=False, help='Consume JSON from stdin')
+    oParser.add_option('-j', '--jsoninput', action='store_true', default=False, help='Consume JSON from stdin')
     oParser.add_option('--logfile', type=str, default='', help='Create logfile with given keyword')
     oParser.add_option('--logcomment', type=str, default='', help='A string with comments to be included in the log file')
     oParser.add_option('--ignoreprocessingerrors', action='store_true', default=False, help='Ignore errors during file processing')
@@ -1654,7 +1685,23 @@ https://DidierStevens.com'''
 
     if options.man:
         oParser.print_help()
+        oParserFlag.print_help()
         PrintManual()
+        return
+
+    if len(args) == 0:
+        oParser.print_help()
+        return
+
+    command = args[0]
+    args = args[1:]
+
+    commands = ['iu']
+
+    if not command in commands:
+        print('Error: unknown command: %s' % command)
+        print('Available commands: %s' % ' '.join(commands))
+        oParser.print_help()
         return
 
     if len(args) != 0 and options.jsoninput:
@@ -1662,7 +1709,7 @@ https://DidierStevens.com'''
         return
 
     oLogfile = cLogfile(options.logfile, options.logcomment)
-    oExpandFilenameArguments = cExpandFilenameArguments(args, options.literalfilenames, options.recursedir, options.checkfilenames, '#c#')
+    oExpandFilenameArguments = cExpandFilenameArguments(args, options.literalfilenames, options.recursedir, options.checkfilenames, '#c#', '#f#')
     oLogfile.Line('FilesCount', str(len(oExpandFilenameArguments.Filenames())))
     oLogfile.Line('Files', repr(oExpandFilenameArguments.Filenames()))
     if oExpandFilenameArguments.warning:
@@ -1670,7 +1717,7 @@ https://DidierStevens.com'''
         PrintError(oExpandFilenameArguments.message)
         oLogfile.Line('Warning', repr(oExpandFilenameArguments.message))
 
-    ProcessBinaryFiles(oExpandFilenameArguments.Filenames(), oLogfile, options)
+    ProcessBinaryFiles(command, oExpandFilenameArguments.Filenames(), oLogfile, options, oParserFlag)
 
     if oLogfile.errors > 0:
         PrintError('Number of errors: %d' % oLogfile.errors)
