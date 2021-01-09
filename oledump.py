@@ -2,8 +2,8 @@
 
 __description__ = 'Analyze OLE files (Compound Binary Files)'
 __author__ = 'Didier Stevens'
-__version__ = '0.0.57'
-__date__ = '2020/12/12'
+__version__ = '0.0.58'
+__date__ = '2021/01/09'
 
 """
 
@@ -106,6 +106,7 @@ History:
   2020/11/08: 0.0.55: added support for -v with --jsonoutput; added ! indicator
   2020/12/04: 0.0.56 Python 3 Fixes
   2020/12/12: 0.0.57 refactoring Translate
+  2021/01/09: 0.0.58 updated man
 
 Todo:
   add support for pyzipper
@@ -636,6 +637,17 @@ zcat sample.gz | oledump.py
 With option -T (--headtail), output can be truncated to the first 10 lines and last 10 lines of output.
 
 With option -j, oledump will output the content of the ole file as a JSON object that can be piped into other tools that support this JSON format. When option -v is used together with option -j, the produced JSON object contains decompressed VBA code.
+
+Overview of indicators:
+ M: Macro (attributes and code)
+ m: macro (attributes without code)
+ E: Error (code that throws an error when decompressed)
+ !: Unusual macro (code without attributes)
+ O: object (embedded file)
+ .: storage
+ R: root entry
+
+More info: https://blog.didierstevens.com/2020/11/15/oledump-indicators/
 
 The return codes of oledump are:
  -1 when an error occured
