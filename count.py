@@ -2,8 +2,8 @@
 
 __description__ = 'count unique items'
 __author__ = 'Didier Stevens'
-__version__ = '0.2.0'
-__date__ = '2017/07/27'
+__version__ = '0.3.0'
+__date__ = '2021/01/15'
 
 """
 Source code put in public domain by Didier Stevens, no Copyright
@@ -23,6 +23,7 @@ History:
   2017/05/27: 0.1.1: new options -z --ranktop --rankbottom
   2017/06/02: 0.2.0: added support for sqlite3 with option -c
   2017/07/27: added option where
+  2021/01/15: 0.3.0 Python 3
 
 Todo:
 """
@@ -34,6 +35,8 @@ import pickle
 import os
 import collections
 import sqlite3
+
+bPython3 = sys.version_info[0] > 2
 
 PICKLE_FILE = 'count.pkl'
 
@@ -65,6 +68,28 @@ def DeSerialize(filename=PICKLE_FILE):
         return object
     else:
         return None
+
+def MyCmp(a, b):
+    return (a > b) - (a < b)
+
+def cmp_to_key(mycmp):
+    'Convert a cmp= function into a key= function'
+    class K:
+        def __init__(self, obj, *args):
+            self.obj = obj
+        def __lt__(self, other):
+            return mycmp(self.obj, other.obj) < 0
+        def __gt__(self, other):
+            return mycmp(self.obj, other.obj) > 0
+        def __eq__(self, other):
+            return mycmp(self.obj, other.obj) == 0
+        def __le__(self, other):
+            return mycmp(self.obj, other.obj) <= 0
+        def __ge__(self, other):
+            return mycmp(self.obj, other.obj) >= 0
+        def __ne__(self, other):
+            return mycmp(self.obj, other.obj) != 0
+    return K
 
 class cOutput():
     def __init__(self, filename=None, bothoutputs=False):
@@ -112,7 +137,11 @@ def PrintDictionary(dCount, options):
         index = 0
     else:
         index = 1
-    listCount.sort(lambda x, y:cmp(x[index], y[index]), reverse=options.descending)
+        
+    if bPython3:
+        listCount = sorted(listCount, key=cmp_to_key(lambda x, y:MyCmp(x[index], y[index])), reverse=options.descending)
+    else:
+        listCount.sort(lambda x, y:cmp(x[index], y[index]), reverse=options.descending)
     for key, value in listCount:
         if options.nocounts:
             line = key
