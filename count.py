@@ -2,8 +2,8 @@
 
 __description__ = 'count unique items'
 __author__ = 'Didier Stevens'
-__version__ = '0.1.0'
-__date__ = '2014/08/04'
+__version__ = '0.2.0'
+__date__ = '2017/07/27'
 
 """
 Source code put in public domain by Didier Stevens, no Copyright
@@ -20,6 +20,9 @@ History:
   2014/07/29: 0.1.0: speed and memory optimization, added option -b
   2014/08/03: added options inputseparator, outputseparator, rank
   2014/08/04: added option lowercase
+  2017/05/27: 0.1.1: new options -z --ranktop --rankbottom
+  2017/06/02: 0.2.0: added support for sqlite3 with option -c
+  2017/07/27: added option where
 
 Todo:
 """
@@ -30,6 +33,7 @@ import sys
 import pickle
 import os
 import collections
+import sqlite3
 
 PICKLE_FILE = 'count.pkl'
 
@@ -82,50 +86,117 @@ class cOutput():
             self.f.close()
             self.f = None
 
-def PrintDictionary(dCount, sortDescending, sortKeys, totals, nocounts, separator, header, percentage, rank, outputfile, bothoutputs):
-    oOutput = cOutput(outputfile, bothoutputs)
+def PrintDictionary(dCount, options):
+    oOutput = cOutput(options.output, options.bothoutputs)
 
-    if header:
-        if nocounts:
+    if options.header:
+        if options.nocounts:
             line = 'Element'
         else:
-            line = 'Element%sCount' % separator
-        if rank:
-            line = 'Rank%s%s' % (separator, line)
-        if percentage:
-            line = '%s%sCount%%' % (line, separator)
+            line = 'Element%sCount' % options.outputseparator
+        if options.rank:
+            line = 'Rank%s%s' % (options.outputseparator, line)
+        if options.percentage:
+            line = '%s%sCount%%' % (line, options.outputseparator)
         oOutput.Line(line)
 
-    if rank:
-        if sortDescending:
-            ranknumber = 1
-        else:
-            ranknumber = len(dCount.keys())
-    if percentage or totals:
+    uniques = len(dCount.keys())
+    if options.descending:
+        ranknumber = 1
+    else:
+        ranknumber = uniques
+    if options.percentage or options.totals:
         sumValues = sum(dCount.values())
     listCount = dCount.items()
-    if sortKeys:
+    if options.keys:
         index = 0
     else:
         index = 1
-    listCount.sort(lambda x, y:cmp(x[index], y[index]), reverse=sortDescending)
+    listCount.sort(lambda x, y:cmp(x[index], y[index]), reverse=options.descending)
     for key, value in listCount:
-        if nocounts:
+        if options.nocounts:
             line = key
         else:
-            line = '%s%s%d' % (key, separator, value)
-        if rank:
-            line = '%d%s%s' % (ranknumber, separator, line)
-            if sortDescending:
-                ranknumber += 1
-            else:
-                ranknumber -= 1
-        if percentage:
-            line = '%s%s%.2f%%' % (line, separator, float(value) / sumValues * 100.0)
+            line = '%s%s%d' % (key, options.outputseparator, value)
+        if options.rank:
+            line = '%d%s%s' % (ranknumber, options.outputseparator, line)
+        if options.percentage:
+            line = '%s%s%.2f%%' % (line, options.outputseparator, float(value) / sumValues * 100.0)
+        if options.ranktop == None and options.rankbottom == None:
+            oOutput.Line(line)
+        elif options.ranktop != None:
+            if ranknumber <= options.ranktop:
+                oOutput.Line(line)
+        elif options.rankbottom != None:
+            if uniques - ranknumber + 1 <= options.rankbottom:
+                oOutput.Line(line)
+        if options.descending:
+            ranknumber += 1
+        else:
+            ranknumber -= 1
+    if options.totals:
+        oOutput.Line('uniques%s%d' % (options.outputseparator, uniques))
+        oOutput.Line('total%s%d' % (options.outputseparator, sumValues))
+
+    oOutput.Close()
+
+def PrintSqlite3(connection, options):
+    oOutput = cOutput(options.output, options.bothoutputs)
+
+    if options.header:
+        if options.nocounts:
+            line = 'Element'
+        else:
+            line = 'Element%sCount' % options.outputseparator
+        if options.rank:
+            line = 'Rank%s%s' % (options.outputseparator, line)
+        if options.percentage:
+            line = '%s%sCount%%' % (line, options.outputseparator)
         oOutput.Line(line)
-    if totals:
-        oOutput.Line('uniques%s%d' % (separator, len(dCount.keys())))
-        oOutput.Line('total%s%d' % (separator, sumValues))
+
+#    for row in connection.execute('select * from count order by counter desc limit 10'):
+
+    if options.where != '':
+        where = ' where ' + options.where
+    else:
+        where = ''
+    uniques = connection.execute('select count(*) from count' + where).fetchone()[0]
+    if options.descending:
+        ranknumber = 1
+    else:
+        ranknumber = uniques
+    if options.percentage or options.totals:
+        sumValues = connection.execute('select sum(counter) from count' + where).fetchone()[0]
+    if options.keys:
+        selectStatement = 'select * from count' + where + ' order by key'
+    else:
+        selectStatement = 'select * from count' + where + ' order by counter'
+    if options.descending:
+        selectStatement += ' desc'
+    for key, value in connection.execute(selectStatement):
+        if options.nocounts:
+            line = key
+        else:
+            line = '%s%s%d' % (key, options.outputseparator, value)
+        if options.rank:
+            line = '%d%s%s' % (ranknumber, options.outputseparator, line)
+        if options.percentage:
+            line = '%s%s%.2f%%' % (line, options.outputseparator, float(value) / sumValues * 100.0)
+        if options.ranktop == None and options.rankbottom == None:
+            oOutput.Line(line)
+        elif options.ranktop != None:
+            if ranknumber <= options.ranktop:
+                oOutput.Line(line)
+        elif options.rankbottom != None:
+            if uniques - ranknumber + 1 <= options.rankbottom:
+                oOutput.Line(line)
+        if options.descending:
+            ranknumber += 1
+        else:
+            ranknumber -= 1
+    if options.totals:
+        oOutput.Line('uniques%s%d' % (options.outputseparator, uniques))
+        oOutput.Line('total%s%d' % (options.outputseparator, sumValues))
 
     oOutput.Close()
 
@@ -178,15 +249,56 @@ def CountDictionary(args, options):
             for element in elements:
                 if options.ignore == '' or options.ignore != element:
                     if not element in dCount:
-                        dCount[element] = 0
-                    dCount[element] += 1
-        fIn.close()
+                        dCount[element] = 1
+                    else:
+                        dCount[element] += 1
+        if fIn != sys.stdin:
+            fIn.close()
     if options.export:
         Serialize({'dCount': dCount}, options.export)
     return dCount
 
+def CountAndPrintSqlite3(args, options):
+    connection = sqlite3.connect(options.countingmethod)
+    connection.text_factory = str
+    connection.execute('pragma synchronous=off')
+    connection.execute('create table if not exists count (key text primary key, counter integer)')
+
+    if args != ['']:
+        args = ExpandFilenameArguments(args)
+    for file in args:
+        if file == '':
+            fIn = sys.stdin
+        else:
+            fIn = open(file, 'r')
+        for line in fIn:
+            line = line.strip('\n')
+            if options.lowercase:
+                line = line.lower()
+            if options.split:
+                elements = [x for x in line.split(options.inputseparator) if x != '']
+            else:
+                elements = [line]
+            for element in elements:
+                if options.ignore == '' or options.ignore != element:
+                    try:
+                        connection.execute('insert into count values (?, ?)', (element, 1))
+                    except sqlite3.IntegrityError:
+                        connection.execute('update count set counter = counter + 1 where key = ?', (element, ))
+        if fIn != sys.stdin:
+            fIn.close()
+
+    PrintSqlite3(connection, options)
+
+    if options.countingmethod != '' and options.countingmethod != ':memory:':
+        connection.commit()
+    connection.close()
+
 def Count(args, options):
-    PrintDictionary(CountDictionary(args, options), options.descending, options.keys, options.totals, options.nocounts, options.outputseparator, options.header, options.percentage, options.rank, options.output, options.bothoutputs)
+    if options.countingmethod == ':dictionary:':
+        PrintDictionary(CountDictionary(args, options), options)
+    else:
+        CountAndPrintSqlite3(args, options)
 
 def Main():
     moredesc = '''
@@ -211,14 +323,21 @@ https://DidierStevens.com'''
     oParser.add_option('-H', '--header', action='store_true', default=False, help='start with a header')
     oParser.add_option('-p', '--percentage', action='store_true', default=False, help='include percentage')
     oParser.add_option('-R', '--rank', action='store_true', default=False, help='include rank')
+    oParser.add_option('--ranktop', type=int, help='output only top ranked')
+    oParser.add_option('--rankbottom', type=int, help='output only bottom ranked')
     oParser.add_option('-i', '--ignore', default='', help='element to ignore')
     oParser.add_option('-o', '--output', default='', help='output file')
     oParser.add_option('-b', '--bothoutputs', action='store_true', default=False, help='if used together with option o, output is also displayed')
     oParser.add_option('-r', '--resume', default='', help='resume from saved data')
     oParser.add_option('-e', '--export', default='', help='export: save data')
+    oParser.add_option('-z', '--zeroinput', action='store_true', default=False, help='no input to process')
+    oParser.add_option('-c', '--countingmethod', default=':dictionary:', help='internal method used to count: :dictionary: or sqlite3 database name: :memory:, '', ...')
+    oParser.add_option('-w', '--where', default='', help='where clause for sqlite3 database')
     (options, args) = oParser.parse_args()
 
-    if len(args) == 0:
+    if options.zeroinput:
+        args = []
+    elif len(args) == 0:
         args = ['']
     Count(args, options)
 

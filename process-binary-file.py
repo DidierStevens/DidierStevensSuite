@@ -4,8 +4,8 @@ from __future__ import print_function
 
 __description__ = 'Template binary file argument'
 __author__ = 'Didier Stevens'
-__version__ = '0.0.3'
-__date__ = '2020/12/27'
+__version__ = '0.0.4'
+__date__ = '2021/01/17'
 
 """
 Source code put in the public domain by Didier Stevens, no Copyright
@@ -45,6 +45,7 @@ History:
   2020/12/08: base64dump fix
   2020/12/09: added CSVWriteRow
   2020/12/27: added Unpack
+  2021/01/17: 0.0.4 fix cOutput binary bug
 
 Todo:
   Document flag arguments in man page
@@ -1449,7 +1450,7 @@ def InstantiateCOutput(options):
     filenameOption = None
     if options.output != '':
         filenameOption = options.output
-    return cOutput(filenameOption, binary=options.dump)
+    return cOutput(filenameOption)
 
 def ProcessBinaryFile(filename, content, cutexpression, flag, oOutput, oLogfile, options, oParserFlag):
     if content == None:
@@ -1473,10 +1474,10 @@ def ProcessBinaryFile(filename, content, cutexpression, flag, oOutput, oLogfile,
 
     try:
         # ----- Put your data processing code here -----
-#        oOutput.Line('File: %s%s' % (filename, IFF(oBinaryFile.extracted, ' (extracted)', '')))
-#        if flagoptions.length:
-#            oOutput.Line('%s len(data) = %d' % (filename, len(data)))
-#        oOutput.Line(cDump(data[0:0x100]).HexAsciiDump())
+        oOutput.Line('File: %s%s' % (filename, IFF(oBinaryFile.extracted, ' (extracted)', '')))
+        if flagoptions.length:
+            oOutput.Line('%s len(data) = %d' % (filename, len(data)))
+        oOutput.Line(cDump(data[0:0x100]).HexAsciiDump())
         oOutput.CSVWriteRow([filename, len(data)])
         # ----------------------------------------------
     except:
