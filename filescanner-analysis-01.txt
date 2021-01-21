@@ -1,0 +1,26 @@
+# Last change 2021/01/16
+# exhaustive: process all rules, don't stop after the first match
+exhaustive
+# fullfileread: read the full content of files
+fullfileread
+# selectallfiles: also report files that didn't trigger rules
+selectallfiles
+# rules:
+PK:start:str=PK
+$META:icontent:str=MANIFEST.MF
+JAR:and:PK $META
+CLASS:start:CAFEBABE
+MZ:start:4D5A
+PDF:start:str=%PDF-
+OLE:start:D0CF11E0
+RAR:start:526172211A07
+$ATTRIBUT:content:00417474726962757400
+OLE-VBA:and:OLE $ATTRIBUT
+CAB:start:str=MSCF
+ARJ:start:EA60
+JFIF:start:FFD8FF
+PNG:start:89504E47
+$VBAPROJECT:content:str=vbaProject.bin
+PK-VBA:and:PK $VBAPROJECT
+$MSGATTACHMENT:content:uni=__attach_version1.0_
+OLE-MSG-ATTACHMENT:and:OLE $MSGATTACHMENT
