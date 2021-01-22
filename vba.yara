@@ -1,15 +1,18 @@
 /*
-  Version 0.0.1 2017/03/05
+  Version 0.0.2 2021/01/22
   Source code put in public domain by Didier Stevens, no Copyright
   https://DidierStevens.com
   Use at your own risk
 
   These are YARA rules to detect VBA code that might be malware.
+  They are designed to be used with oledump.py.
+  To use them with the YARA tool, you have to define variable VBA: yara32 -d VBA=1 vba.yara .
 
   Shortcomings, or todo's ;-) :
 
   History:
     2017/03/05: start
+    2021/01/22: 0.0.2 update description
 */
 
 rule VBA_Autorun

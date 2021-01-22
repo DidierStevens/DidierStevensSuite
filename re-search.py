@@ -2,8 +2,8 @@
 
 __description__ = "Program to use Python's re.findall on files"
 __author__ = 'Didier Stevens'
-__version__ = '0.0.14'
-__date__ = '2021/01/05'
+__version__ = '0.0.15'
+__date__ = '2021/01/22'
 
 """
 
@@ -42,6 +42,7 @@ History:
   2019/03/06: changed URL regex
   2020/12/08: 0.0.14 added domaintld
   2021/01/05: added -n all-
+  2021/01/22: added option -F
 
 Todo:
   add hostname to header
@@ -229,6 +230,9 @@ You can extend the library of regular expressions used by re-search without chan
 mac=[0-9A-F]{2}([-:]?)(?:[0-9A-F]{2}\1){4}[0-9A-F]{2}
 
 re-search.py requires module reextra, which is part of the re-search package.
+
+Option -F can be used to filter matched strings. Use option -F ? to get a list of available filters.
+
 '''
     for line in manual.split('\n'):
         print(textwrap.fill(line))
@@ -462,6 +466,7 @@ def RESearchSingle(regex, filenames, oOutput, options):
                 if options.display:
                     oOutput.Line('Regex: %s' % regex)
                 results = oREExtra.Findall(line)
+                results = ApplyFilter(results, options)
                 if options.grepall or options.grep:
                     if results != []:
                         oOutput.Line(Hex(line, options.hex))
@@ -510,6 +515,7 @@ def RESearchCSV(csvFilename, filenames, oOutput, options):
                 line = DumpFunctionStrings(line)
             for regex, (oREExtra, comment) in dRegex.items():
                 results = oREExtra.Findall(line)
+                results = ApplyFilter(results, options)
                 newRow = [regex]
                 if comment != None:
                     newRow.append(comment)
@@ -550,6 +556,27 @@ def RESearch(regex, filenames, options):
     else:
         RESearchSingle(regex, filenames, oOutput, options)
     oOutput.Close()
+
+def KeepOfficeURL(url):
+    url = url.lower()
+    for urlfilter in ['http://schemas.openxmlformats.org/', 'http://schemas.microsoft.com/', 'http://purl.org/', 'http://www.w3.org/']:
+        if url.startswith(urlfilter):
+            return False
+    return True
+
+def RemoveOfficeURLs(urls):
+    return [url for url in urls if KeepOfficeURL(url)]
+
+dFilters = {
+            'officeurls': ['Remove URLs that are common in OOXML Office documents', RemoveOfficeURLs]
+}
+
+def ApplyFilter(result, options):
+    if options.filter == '':
+        return result
+    if options.filter in dFilters:
+        return dFilters[options.filter][1](result)
+    raise Exception('Unknown filter: %' % options.filter)
 
 def Main():
     global dLibrary
@@ -593,6 +620,7 @@ https://DidierStevens.com'''
     oParser.add_option('-G', '--grepall', action='store_true', default=False, help='Do a full read of the input and a full write when there is a match, not line per line')
     oParser.add_option('-D', '--dotall', action='store_true', default=False, help='. matches newline too')
     oParser.add_option('-x', '--hex', action='store_true', default=False, help='output in hex format')
+    oParser.add_option('-F', '--filter', default='', help='Filter output')
     oParser.add_option('--script', default='', help='Python script file with definitions to include')
     oParser.add_option('--execute', default='', help='Python commands to execute')
     (options, args) = oParser.parse_args()
@@ -600,6 +628,14 @@ https://DidierStevens.com'''
     if options.man:
         oParser.print_help()
         PrintManual()
+        return
+
+    if options.filter != '' and not options.filter in dFilters:
+        if options.filter != '?':
+            print('Unknown filter: %s' % options.filter)
+        print('List of available filters:')
+        for key, [description, function] in dFilters.items():
+            print(' %s: %s' % (key, description))
         return
 
     if len(args) == 0:
