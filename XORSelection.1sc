@@ -3,13 +3,14 @@
 //
 //      File: XORSelection.1sc
 //   Authors: Didier Stevens
-//   Version: 5.0
+//   Version: 6.0
 //   Purpose: Xors the current selection with a set of bytes, 
 //            which causes the bytes to be encoded so they 
 //            cannot be read by a human. Run the Xor again on 
 //            the encoded selection to decode the data.
 //  Category: Binary
 //   History: 
+//   6.0   2020-11-04 D Stevens: added option c
 //   5.0   2020-05-07 D Stevens: added options
 //   4.0   2018-03-25 D Stevens: refactoring to handle keys with null bytes and hex keys with whitespace
 //   3.1   2016-02-10 SweetScape Software: Updated header for repository submission.
@@ -26,6 +27,8 @@
 unsigned int uiOptionsReverse = 0;
 unsigned int uiOptionsLiteral = 0;
 int iOptionsShift = 0;
+unsigned int uiOptionsChangeKeyWithValueBeforeXOR = 0;
+unsigned int uiOptionsChangeKeyWithValueAfterXOR = 0;
 
 int HexDigitToInt(int digit)
 {
@@ -65,6 +68,8 @@ unsigned int ParseOptions(string sInput)
     uiOptionsReverse = 0;
     uiOptionsLiteral = 0;
     iOptionsShift = 0;
+    uiOptionsChangeKeyWithValueBeforeXOR = 0;
+    uiOptionsChangeKeyWithValueAfterXOR = 0;
 
     while (sInput != "")
     {
@@ -91,6 +96,17 @@ unsigned int ParseOptions(string sInput)
             }
             iOptionsShift = iOptionsShift * iSign;
         }
+        else if ("c" == sOption)
+        {
+
+            if ('b' == sInput[0])
+                uiOptionsChangeKeyWithValueBeforeXOR = 1;
+            else if ('a' == sInput[0])
+                uiOptionsChangeKeyWithValueAfterXOR = 1;
+            else
+                uiReturn = 1;
+            sInput = SubStr(sInput, 1);
+        }
         else
             uiReturn = 1;
     }
@@ -103,6 +119,7 @@ void Main(void)
     int iIter, iStart, iSize, iKeyLength;
     string sKey;
     string sOptions;
+    uchar ucRead;
 
     // Check that a file is open
     if(FileCount() == 0)
@@ -133,7 +150,7 @@ void Main(void)
         }
         else if (sOptions == "h")
         {
-            MessageBox(idOk, TITLE, "r: reverse key\nl: literal key\ns: shift value (signed integer)");
+            MessageBox(idOk, TITLE, "r: reverse key\nl: literal key\ns: shift value (signed integer)\ncb: change key with value before XOR\nca: change key with value after XOR");
             return;
         }
         if (ParseOptions(sOptions))
@@ -195,8 +212,15 @@ void Main(void)
 
     // Modify the selection
     for (iIter = 0; iIter < iSize; iIter++)
+    {
         // Modify the current byte
-        WriteUByte(iStart + iIter, ReadUByte(iStart + iIter) ^ aucKey[CalculateKeyIndex(iIter, iKeyLength)]);
+        ucRead = ReadUByte(iStart + iIter);
+        WriteUByte(iStart + iIter, ucRead ^ aucKey[CalculateKeyIndex(iIter, iKeyLength)]);
+        if (1 == uiOptionsChangeKeyWithValueBeforeXOR)
+            aucKey[CalculateKeyIndex(iIter, iKeyLength)] = ucRead;
+        if (1 == uiOptionsChangeKeyWithValueAfterXOR)
+            aucKey[CalculateKeyIndex(iIter, iKeyLength)] = ucRead ^ aucKey[CalculateKeyIndex(iIter, iKeyLength)];
+    }
 }
 
 Main();
