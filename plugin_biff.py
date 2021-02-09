@@ -2,8 +2,8 @@
 
 __description__ = 'BIFF plugin for oledump.py'
 __author__ = 'Didier Stevens'
-__version__ = '0.0.20'
-__date__ = '2020/12/19'
+__version__ = '0.0.21'
+__date__ = '2021/02/09'
 
 """
 
@@ -45,8 +45,12 @@ History:
   2020/10/03: 0.0.18 improved FILEPASS record handling
   2020/12/03: 0.0.19 added detection of BIFF5/BIFF7 and FILEPASS record parsing
   2020/12/19: 0.0.20 added FILEPASS XOR Obfuscation password cracking (option -w)
+  2021/02/06: 0.0.21 added option --hexrecord, added option -D
+  2021/02/07: added key extraction for XOR obfuscation
+  2021/02/09: added recordsNotXORObfuscated
 
 Todo:
+  updated parsing of records for BIFF5 record format
 """
 
 import struct
@@ -1303,13 +1307,16 @@ def DecodeRKValue(data):
     else:
         return struct.unpack('<d', b'\x00\x00\x00\x00' + data)[0] / divider
 
-def ShortXLUnicodeString(data):
+def ShortXLUnicodeString(data, isBIFF8):
     cch = P23Ord(data[0])
-    highbyte = P23Ord(data[1])
-    if highbyte == 0:
-        return P23Decode(data[2:2 + cch])
+    if isBIFF8:
+        highbyte = P23Ord(data[1])
+        if highbyte == 0:
+            return P23Decode(data[2:2 + cch])
+        else:
+            return repr(data[2:2 + cch * 2])
     else:
-        return repr(data[2:2 + cch * 2])
+        return P23Decode(data[1:1 + cch])
 
 def GetDictionary(passwordfile):
     if passwordfile != '.':
@@ -4890,6 +4897,24 @@ def AnalyzeXORObfuscationStructure(data, passwordlistFilename):
             break
     return key, verifier, password
 
+def rol(byte, count):
+    return (byte << count | byte >> (8 - count)) & 0xFF
+
+def ror(byte, count):
+    return (byte >> count | byte << (8 - count)) & 0xFF
+
+def RorBytes(data, index):
+    return data[index:] + data[:index]
+
+def Xor(data, key):
+    if sys.version_info[0] > 2:
+        return bytes([byte ^ key[index % len(key)] for index, byte in enumerate(data)])
+    else:
+        return ''.join([chr(ord(char) ^ ord(key[index % len(key)])) for index, char in enumerate(data)])
+
+def XorDeobfuscate(data, key, position):
+    return bytes([ror(byte, 5) for byte in Xor(data, RorBytes(key, position % 16))])
+
 class cBIFF(cPluginParent):
     macroOnly = False
     name = 'BIFF plugin'
@@ -5166,6 +5191,16 @@ class cBIFF(cPluginParent):
             0x8ca: 'MKREXT : Extension information for markers in Mac Office 11'
         }
 
+        # https://docs.microsoft.com/en-us/openspecs/office_file_formats/ms-xls/0f2ea0a1-9fc8-468d-97aa-9d333b72d106?redirectedfrom=MSDN
+        recordsNotXORObfuscated = [ 0x2F, # FILEPASS
+                                    0xE1, # INTERFACEHDR
+                                   0x138, # RRDHEAD
+                                   0x194, # USREXCL
+                                   0x195, # FILELOCK
+                                   0x196, # RRDINFO
+                                   0x809, # BOF
+        ]
+
         if self.streamname in [['Workbook'], ['Book']]:
             self.ran = True
             stream = self.stream
@@ -5174,6 +5209,7 @@ class cBIFF(cPluginParent):
             oParser.add_option('-s', '--strings', action='store_true', default=False, help='Dump strings')
             oParser.add_option('-a', '--hexascii', action='store_true', default=False, help='Dump hex ascii')
             oParser.add_option('-X', '--hex', action='store_true', default=False, help='Dump hex without whitespace')
+            oParser.add_option('-R', '--hexrecord', action='store_true', default=False, help='Dump hex of complete record without whitespace')
             oParser.add_option('-b', '--formulabytes', action='store_true', default=False, help='Dump formula bytes')
             oParser.add_option('-d', '--dump', action='store_true', default=False, help='Dump')
             oParser.add_option('-x', '--xlm', action='store_true', default=False, help='Select all records relevant for Excel 4.0 macros')
@@ -5184,6 +5220,7 @@ class cBIFF(cPluginParent):
             oParser.add_option('-r', '--cellrefformat', type=str, default='rc', help='Cell reference format (RC, LN)')
             oParser.add_option('-S', '--statistics', action='store_true', default=False, help='Produce BIFF record statistics')
             oParser.add_option('-w', '--wordlist', type=str, default='', help='Try to crack password with provided passwordlist')
+            oParser.add_option('-D', '--xordeobfuscate', action='store_true', default=False, help='XOR Deobfuscate')
             (options, args) = oParser.parse_args(self.options.split(' '))
 
             if options.find.startswith('0x'):
@@ -5203,14 +5240,23 @@ class cBIFF(cPluginParent):
             definesNames = []
             currentSheetname = ''
             dOpcodeStatistics = {}
+            xorObfuscationKey = None
             while position < len(stream):
                 formatcodes = 'HH'
                 formatsize = struct.calcsize(formatcodes)
                 if len(stream[position:position + formatsize]) < formatsize:
                     break
-                opcode, length = struct.unpack(formatcodes, stream[position:position + formatsize])
+                header = stream[position:position + formatsize]
+                opcode, length = struct.unpack(formatcodes, header)
                 dOpcodeStatistics[opcode] = [dOpcodeStatistics.get(opcode, [0, 0])[0] + 1, dOpcodeStatistics.get(opcode, [0, 0])[1] + length]
                 data = stream[position + formatsize:position + formatsize + length]
+                if xorObfuscationKey != None and xorObfuscationKey != '?' and options.xordeobfuscate:
+                    if not opcode in recordsNotXORObfuscated:
+                        dataDeobfuscated = XorDeobfuscate(data, xorObfuscationKey, position + 4 + len(data))
+                        if opcode == 0x85: #BOUNDSHEET
+                            data = data[:4] + dataDeobfuscated[4:]
+                        else:
+                            data = dataDeobfuscated
                 positionBIFFRecord = position
                 position = position + formatsize + length
 
@@ -5275,6 +5321,11 @@ class cBIFF(cPluginParent):
                         key, verifier, password = AnalyzeXORObfuscationStructure(data, passwordlistFilename)
                         if password != None:
                             line += ' - password: ' + password
+                            if password == 'VelvetSweatshop':
+                                keyVelvetSweatshop = binascii.a2b_hex('87 6B 9A E2 1E E3 05 62 1E 69 96 60 98 6E 94 04'.replace(' ', ''))
+                                xorObfuscationKey = keyVelvetSweatshop
+                        else:
+                            xorObfuscationKey = '?'
                     elif len(data) >= 6:
                         formatcodes = '<HHH'
                         formatsize = struct.calcsize(formatcodes)
@@ -5284,21 +5335,35 @@ class cBIFF(cPluginParent):
                             key, verifier, password = AnalyzeXORObfuscationStructure(data[2:], passwordlistFilename)
                             if password != None:
                                 line += ' - password: ' + password
+                                if password == 'VelvetSweatshop':
+                                    keyVelvetSweatshop = binascii.a2b_hex('87 6B 9A E2 1E E3 05 62 1E 69 96 60 98 6E 94 04'.replace(' ', ''))
+                                    xorObfuscationKey = keyVelvetSweatshop
+                            else:
+                                xorObfuscationKey = '?'
                         elif encryptionMethod == 1:
                             line += ' - RC4'
                         else:
                             line += ' - unknown encryption method 0x%04x' % encryptionMethod
 
+                # WRITEACCESS record
+                if opcode == 0x5C and len(data) == 112 and xorObfuscationKey == '?' and data[-0x10:] == data[-0x20:-0x10]:
+                    # extract 16-byte long XOR obfuscation key from WRITEACCESS record that contains a username that is padded with space characters (0x20) to a length of 112 bytes
+                    keyextracted = [byte ^ rol(0x20, 5) for byte in data[-0x10:]]
+                    keyextracted = RorBytes(keyextracted, (positionBIFFRecord + 8 + len(data)) % 16)
+                    xorObfuscationKey = keyextracted
+                    if xorObfuscationKey != None and xorObfuscationKey != '?' and options.xordeobfuscate:
+                        data = XorDeobfuscate(data, xorObfuscationKey, positionBIFFRecord + 4 + len(data))
+
                 # BOUNDSHEET record
                 if opcode == 0x85 and len(data) >= 6:
-                    if not filepassFound:
+                    if not filepassFound or xorObfuscationKey != None and xorObfuscationKey != '?' and options.xordeobfuscate:
                         formatcodes = '<IBB'
                         formatsize = struct.calcsize(formatcodes)
                         positionBOF, sheetState, sheetType = struct.unpack(formatcodes, data[0:formatsize])
                         dSheetType = {0: 'worksheet or dialog sheet', 1: 'Excel 4.0 macro sheet', 2: 'chart', 6: 'Visual Basic module'}
                         if sheetType == 1:
                             macros4Found = True
-                        sheetName = ShortXLUnicodeString(data[6:])
+                        sheetName = ShortXLUnicodeString(data[6:], isBIFF8)
                         dSheetNames[positionBOF] = sheetName
                         sheetNames.append(sheetName)
 
@@ -5375,11 +5440,13 @@ class cBIFF(cPluginParent):
                                 result.append(' ' + dEncodings[encoding] + ':')
                                 result.extend('  ' + foundstring for foundstring in strings)
                     elif options.hex:
-                        result.append(binascii.b2a_hex(data))
+                        result.append(binascii.b2a_hex(data).decode('latin'))
+                    elif options.hexrecord:
+                        result.append(' ' + binascii.b2a_hex(header + data).decode('latin'))
                     elif options.dump:
                         result = data
 
-            if options.xlm and filepassFound:
+            if options.xlm and filepassFound and not (xorObfuscationKey != None and xorObfuscationKey != '?' and options.xordeobfuscate):
                 result = ['Warning: FILEPASS record found, file is password protected']
             elif options.statistics:
                 stats = []

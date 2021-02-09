@@ -2,8 +2,8 @@
 
 __description__ = 'Analyze OLE files (Compound Binary Files)'
 __author__ = 'Didier Stevens'
-__version__ = '0.0.58'
-__date__ = '2021/01/09'
+__version__ = '0.0.59'
+__date__ = '2021/02/06'
 
 """
 
@@ -103,13 +103,14 @@ History:
   2020/08/30: fixed & updated raw VBA decompression
   2020/09/05: 0.0.54 added extra info parameter %MODULEINFO%
   2020/09/29: bugfix for Python 2 (mro)
-  2020/11/08: 0.0.55: added support for -v with --jsonoutput; added ! indicator
+  2020/11/08: 0.0.55 added support for -v with --jsonoutput; added ! indicator
   2020/12/04: 0.0.56 Python 3 Fixes
   2020/12/12: 0.0.57 refactoring Translate
   2021/01/09: 0.0.58 updated man
+  2021/02/06: 0.0.59 small change to XML detection logic 
 
 Todo:
-  add support for pyzipper
+
 """
 
 import optparse
@@ -2208,7 +2209,7 @@ def OLEDump(filename, options):
         else:
             data = oStringIO.read()
             oStringIO.seek(0)
-            if b'<?xml' in data:
+            if b'<?xml' in data and not b"<assembly xmlns='urn:schemas-microsoft-com:asm.v1' manifestVersion='1.0'>" in data:
                 try:
                     oXML = xml.dom.minidom.parse(oStringIO)
                 except:
