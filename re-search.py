@@ -2,8 +2,8 @@
 
 __description__ = "Program to use Python's re.findall on files"
 __author__ = 'Didier Stevens'
-__version__ = '0.0.15'
-__date__ = '2021/01/22'
+__version__ = '0.0.16'
+__date__ = '2021/02/14'
 
 """
 
@@ -41,8 +41,10 @@ History:
   2018/09/19: Updated Quote
   2019/03/06: changed URL regex
   2020/12/08: 0.0.14 added domaintld
-  2021/01/05: added -n all-
+  2021/01/05: 0.0.15 added -n all-
   2021/01/22: added option -F
+  2021/02/06: 0.0.16 changed url and url-domain regexes for _ in hostname
+  2021/02/14: Fixed human language vulnerabilities
 
 Todo:
   add hostname to header
@@ -71,8 +73,8 @@ REGEX_STANDARD = '[\x09\x20-\x7E]'
 dLibrary = {
             'email': r'[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,6}',
             'email-domain': r'[a-zA-Z0-9._%+-]+@([a-zA-Z0-9.-]+\.[a-zA-Z]{2,6})',
-            'url': r'[a-zA-Z]+://[-a-zA-Z0-9.]+(?:/[-a-zA-Z0-9+&@#/%=~_|!:,.;]*)?(?:\?[-a-zA-Z0-9+&@#/%=~_|!:,.;]*)?',
-            'url-domain': r'[a-zA-Z]+://([-a-zA-Z0-9.]+)(?:/[-a-zA-Z0-9+&@#/%=~_|!:,.;]*)?(?:\?[-a-zA-Z0-9+&@#/%=~_|!:,.;]*)?',
+            'url': r'[a-zA-Z]+://[_-a-zA-Z0-9.]+(?:/[-a-zA-Z0-9+&@#/%=~_|!:,.;]*)?(?:\?[-a-zA-Z0-9+&@#/%=~_|!:,.;]*)?',
+            'url-domain': r'[a-zA-Z]+://([_-a-zA-Z0-9.]+)(?:/[-a-zA-Z0-9+&@#/%=~_|!:,.;]*)?(?:\?[-a-zA-Z0-9+&@#/%=~_|!:,.;]*)?',
             'ipv4': r'\b(?:(?:25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9])\.){3}(?:25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9])\b',
             'str': r'"[^"]+"',
             'str-e': r'"[^"]*"',
@@ -98,7 +100,7 @@ Manual:
 
 re-search is a program to match regular expressions. It is like grep -o, it will match regular expressions in text files, not the complete line.
 
-It has 2 major features: a small, extendable library of regular expressions selectable by name; and extra functionality like gibberish detection, whitelists/blacklists and Python functions.
+It has 2 major features: a small, extendable library of regular expressions selectable by name; and extra functionality like gibberish detection, enablelists/blocklists and Python functions.
 
 We will use this list of URLs in our examples:
 http://didierstevens.com
@@ -163,11 +165,11 @@ If you have a list of regular expressions to match, put them in a csv file, and 
 Example:
 re-search.py -vHrg -o result -S , -I " " -R PCRE -C pcre.csv logs
 
-Gibberish detection, whitelists/blacklists filtering and matching with Python functions is done by prefixing the regular expression with a comment. Regular expressions can contain comments, like programming languages. This is a comment for regular expressions: (?#comment).
+Gibberish detection, enablelists/blocklists filtering and matching with Python functions is done by prefixing the regular expression with a comment. Regular expressions can contain comments, like programming languages. This is a comment for regular expressions: (?#comment).
 If you use re-search with regular expression comments, nothing special happens:
 re-search.py "(?#comment)[a-z]+\.com" list.txt
 
-However, if your regular expression comment prefixes the regular expression, and the comment starts with keyword extra=, then you can use gibberish detection, whitelist/blacklist filtering and Python function matching.
+However, if your regular expression comment prefixes the regular expression, and the comment starts with keyword extra=, then you can use gibberish detection, enablelist/blocklist filtering and Python function matching.
 To use gibberisch detection, you use directive S (S stands for sensical). If you want to filter all strings that match the regular expression and are gibberish, you use the following regular expression comment: (?#extra=S:g). :g means that you want to filter for gibberish.
 
 Example to extract alphabetical .com domains from file list.txt with a regular expression that are gibberish:
@@ -188,10 +190,10 @@ didierstevens.com
 google.com
 microsoft.com
 
-Blacklists are defined via directive E (Exclude). If you want to filter all strings that match the regular expression and are not in the blacklist, you use the following regular expression comment: (?#extra=E:blacklist). blacklist is a textfile you provide containing all the strings to be blacklisted.
+Blocklists are defined via directive E (Exclude). If you want to filter all strings that match the regular expression and are not in the blocklist, you use the following regular expression comment: (?#extra=E:blocklist). Blocklist is a textfile you provide containing all the strings to be blocklisted.
 
-Example to extract alphabetical .com domains from file list.txt with a regular expression that are not in file blacklist (blacklist contains google.com):
-re-search.py "(?#extra=E:blacklist)[a-z]+\.com" list.txt
+Example to extract alphabetical .com domains from file list.txt with a regular expression that are not in file blocklist (blocklist contains google.com):
+re-search.py "(?#extra=E:blocklist)[a-z]+\.com" list.txt
 
 Output:
 didierstevens.com
@@ -200,10 +202,10 @@ ryzaocnsyvozkd.com
 microsoft.com
 ahsnvyetdhfkg.com
 
-Whitelists are defined via directive I (Include). If you want to filter all strings that match the regular expression and are in the whitelist, you use the following regular expression comment: (?#extra=I:whitelist). Whitelist is a textfile you provide containing all the strings to be whitelisted.
+Enablelists are defined via directive I (Include). If you want to filter all strings that match the regular expression and are in the enablelist, you use the following regular expression comment: (?#extra=I:enablelist). Enablelist is a textfile you provide containing all the strings to be enablelisted.
 
-Example to extract alphabetical .com domains from file list.txt with a regular expression that are in file whitelist (whitelist contains didierstevens.com):
-re-search.py "(?#extra=I:whitelistlist)[a-z]+\.com" list.txt
+Example to extract alphabetical .com domains from file list.txt with a regular expression that are in file enablelist (enablelist contains didierstevens.com):
+re-search.py "(?#extra=I:enablelist)[a-z]+\.com" list.txt
 
 Output:
 didierstevens.com
@@ -215,8 +217,8 @@ Example: Bitcoin address matching. Regular expression [13][a-km-zA-HJ-NP-Z1-9]{2
 
 You can use more than one directive in a regular expression. Directives are separated by the ; character.
 
-Example to extract alphabetical .com domains from file list.txt with a regular expression that are not gibberish and that are not blacklisted:
-re-search.py "(?#extra=S:s;E:blacklist)[a-z]+\.com" list.txt
+Example to extract alphabetical .com domains from file list.txt with a regular expression that are not gibberish and that are not blocklisted:
+re-search.py "(?#extra=S:s;E:blocklist)[a-z]+\.com" list.txt
 
 Output:
 didierstevens.com
