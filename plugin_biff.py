@@ -2,8 +2,8 @@
 
 __description__ = 'BIFF plugin for oledump.py'
 __author__ = 'Didier Stevens'
-__version__ = '0.0.21'
-__date__ = '2021/02/09'
+__version__ = '0.0.22'
+__date__ = '2021/02/23'
 
 """
 
@@ -48,6 +48,8 @@ History:
   2021/02/06: 0.0.21 added option --hexrecord, added option -D
   2021/02/07: added key extraction for XOR obfuscation
   2021/02/09: added recordsNotXORObfuscated
+  2021/02/21: 0.0.22 bug fix
+  2021/02/23: added PASSWORD record cracking
 
 Todo:
   updated parsing of records for BIFF5 record format
@@ -4915,6 +4917,12 @@ def Xor(data, key):
 def XorDeobfuscate(data, key, position):
     return bytes([ror(byte, 5) for byte in Xor(data, RorBytes(key, position % 16))])
 
+def FindOpcodeInLine(opcodes, line):
+    for opcode in opcodes.split(','):
+        if opcode.lower() in line.lower():
+            return True
+    return False
+
 class cBIFF(cPluginParent):
     macroOnly = False
     name = 'BIFF plugin'
@@ -5213,7 +5221,7 @@ class cBIFF(cPluginParent):
             oParser.add_option('-b', '--formulabytes', action='store_true', default=False, help='Dump formula bytes')
             oParser.add_option('-d', '--dump', action='store_true', default=False, help='Dump')
             oParser.add_option('-x', '--xlm', action='store_true', default=False, help='Select all records relevant for Excel 4.0 macros')
-            oParser.add_option('-o', '--opcode', type=str, default='', help='Opcode to filter for')
+            oParser.add_option('-o', '--opcode', type=str, default='', help='Opcode to filter for (use , to separate multiple opcodes')
             oParser.add_option('-f', '--find', type=str, default='', help='Content to search for')
             oParser.add_option('-c', '--csv', action='store_true', default=False, help='Produce CSV')
             oParser.add_option('-j', '--json', action='store_true', default=False, help='Produce JSON')
@@ -5242,6 +5250,7 @@ class cBIFF(cPluginParent):
             dOpcodeStatistics = {}
             xorObfuscationKey = None
             while position < len(stream):
+                decrypted = False
                 formatcodes = 'HH'
                 formatsize = struct.calcsize(formatcodes)
                 if len(stream[position:position + formatsize]) < formatsize:
@@ -5253,6 +5262,7 @@ class cBIFF(cPluginParent):
                 if xorObfuscationKey != None and xorObfuscationKey != '?' and options.xordeobfuscate:
                     if not opcode in recordsNotXORObfuscated:
                         dataDeobfuscated = XorDeobfuscate(data, xorObfuscationKey, position + 4 + len(data))
+                        decrypted = True
                         if opcode == 0x85: #BOUNDSHEET
                             data = data[:4] + dataDeobfuscated[4:]
                         else:
@@ -5267,6 +5277,22 @@ class cBIFF(cPluginParent):
                 line = '%04x %6d %s' % (opcode, length, opcodename)
 
                 csvrow = None
+
+                # PASSWORD record and PROT4REVPASS reconrd
+                if (opcode == 0x13 or opcode == 0x01bc) and len(data) == 2:
+                    if not filepassFound or decrypted:
+                        verifier = struct.unpack('<H', data)[0]
+                        if verifier == 0:
+                            line += ' - password not set'
+                        else:
+                            password = None
+                            for candidate in GetDictionary(passwordlistFilename):
+                                if CreatePasswordVerifier_Method1(candidate) == verifier:
+                                    password = candidate
+                                    line += ' - password: ' + password
+                                    break
+                            if password == None:
+                                    line += ' - password not recovered: verifier 0x%04x' % verifier
 
                 # FORMULA record
                 if opcode == 0x06 and len(data) >= 21:
@@ -5319,13 +5345,12 @@ class cBIFF(cPluginParent):
                     if len(data) == 4:
                         line += ' - XOR obfuscation < BIFF8'
                         key, verifier, password = AnalyzeXORObfuscationStructure(data, passwordlistFilename)
+                        xorObfuscationKey = '?'
                         if password != None:
                             line += ' - password: ' + password
                             if password == 'VelvetSweatshop':
                                 keyVelvetSweatshop = binascii.a2b_hex('87 6B 9A E2 1E E3 05 62 1E 69 96 60 98 6E 94 04'.replace(' ', ''))
                                 xorObfuscationKey = keyVelvetSweatshop
-                        else:
-                            xorObfuscationKey = '?'
                     elif len(data) >= 6:
                         formatcodes = '<HHH'
                         formatsize = struct.calcsize(formatcodes)
@@ -5353,6 +5378,7 @@ class cBIFF(cPluginParent):
                     xorObfuscationKey = keyextracted
                     if xorObfuscationKey != None and xorObfuscationKey != '?' and options.xordeobfuscate:
                         data = XorDeobfuscate(data, xorObfuscationKey, positionBIFFRecord + 4 + len(data))
+                        decrypted = True
 
                 # BOUNDSHEET record
                 if opcode == 0x85 and len(data) >= 6:
@@ -5423,7 +5449,7 @@ class cBIFF(cPluginParent):
                         line += ' - %s %f' % (cellref, value)
                         csvrow = [currentSheetname, cellref, '', '%.20f' % value]
 
-                if options.find == '' and options.opcode == '' and not options.xlm or options.opcode != '' and options.opcode.lower() in line.lower() or options.find != '' and options.find.encode() in data or options.xlm and opcode in [0x06, 0x18, 0x85, 0x207]:
+                if options.find == '' and options.opcode == '' and not options.xlm or options.opcode != '' and FindOpcodeInLine(options.opcode, line) or options.find != '' and options.find.encode() in data or options.xlm and opcode in [0x06, 0x18, 0x85, 0x207]:
                     if not options.hex and not options.dump:
                         if options.csv or options.json:
                             if csvrow != None:
