@@ -4,8 +4,8 @@ from __future__ import print_function
 
 __description__ = 'Analyze Cobalt Strike beacons'
 __author__ = 'Didier Stevens'
-__version__ = '0.0.4'
-__date__ = '2020/11/29'
+__version__ = '0.0.5'
+__date__ = '2021/03/06'
 
 """
 Source code put in the public domain by Didier Stevens, no Copyright
@@ -32,6 +32,8 @@ History:
   2020/11/16: added option -l
   2020/11/17: continue
   2020/11/29: added rule_shellcode_00_end
+  2021/02/13: 0.0.5 updated shellcode analysis (+ Python 3 fix); added XORChain analysis for PE sections; remove duplicate configs when dumping raw
+  2021/03/06: added option -c
 
 Todo:
   add JSON output
@@ -54,6 +56,7 @@ import math
 import fnmatch
 import json
 import time
+import hashlib
 if sys.version_info[0] >= 3:
     from io import BytesIO as DataIO
 else:
@@ -83,6 +86,8 @@ Option -l (--licenseid) is used to generate YARA rules to detect a beacon or she
 More than one license id can be provided: separate them by commas (,).
 Each license id can be previded by a name for the license is (use : as a separator).
 Example : 1768.py -l ATP_1:12345678,pentester_2:87654321
+
+Option -c (--csv) is used to output the config parameters in CSV format.
 
 It reads one or more files or stdin. This tool is very versatile when it comes to handling files, later full details will be provided.
 
@@ -312,6 +317,12 @@ def C2IIP2(data):
         return data
     else:
         return ord(data)
+
+def P23Ord(value):
+    if type(value) == int:
+        return value
+    else:
+        return ord(value)
 
 # CIC: Call If Callable
 def CIC(expression):
@@ -1471,6 +1482,17 @@ def GetDataSection(data):
             return None, section.get_data()
     return '.data section not found: ' + ' '.join(sectionnames), None
 
+def GetXorChainSection(data):
+    try:
+        oPE = pefile.PE(data=data)
+    except Exception as e:
+        return None, e.value
+    for section in oPE.sections:
+        extracted, messages = TryXORChainDecoding(section.get_data())
+        if messages != []:
+            return extracted, messages
+    return None, None
+
 def StatisticalSearch(payloadsectiondata, key):
     start = None
     end = None
@@ -1485,6 +1507,16 @@ def StatisticalSearch(payloadsectiondata, key):
                 end = position + 7
         position += 8
     return start, end
+
+def Bytes2IPv4(data):
+    return '%d.%d.%d.%d' % (P23Ord(data[0]), P23Ord(data[1]), P23Ord(data[2]), P23Ord(data[3]))
+
+def FindAF_INET_PORT(operand):
+    if P23Ord(operand[0]) != 2:
+        return ''
+    if P23Ord(operand[1]) != 0:
+        return ''
+    return '%d' % struct.unpack('>H', operand[2:4])[0]
 
 def AnalyzeShellcode(shellcode, oOutput):
     dInstructions = {b'\x68': 'push', b'\xB8': 'mov eax'}
@@ -1508,9 +1540,10 @@ def AnalyzeShellcode(shellcode, oOutput):
     for pushPosition in FindAllList(shellcode, dInstructions.keys()):
         if pushPosition + 5 <= len(shellcode):
             if position == -1:
-                oOutput.Line('%s: %d %d %d.%d.%d.%d %s' % (dInstructions[shellcode[pushPosition:pushPosition+1]], pushPosition, struct.unpack('<I', shellcode[pushPosition + 1:pushPosition + 5])[0], ord(shellcode[pushPosition + 1]), ord(shellcode[pushPosition + 2]), ord(shellcode[pushPosition + 3]), ord(shellcode[pushPosition + 4]), repr(shellcode[pushPosition:pushPosition + 5])))
+                operand = shellcode[pushPosition + 1:pushPosition + 5]
+                oOutput.Line('%-10s: %5d %10d %5s %-16s %s' % (dInstructions[shellcode[pushPosition:pushPosition+1]], pushPosition, struct.unpack('<I', operand)[0], FindAF_INET_PORT(operand), Bytes2IPv4(operand), repr(shellcode[pushPosition:pushPosition + 5])))
             elif shellcode[pushPosition + 3:pushPosition + 5] == b'\x00\x00':
-                oOutput.Line('%s: %d %d %s' % (dInstructions[shellcode[pushPosition:pushPosition+1]], pushPosition, struct.unpack('<H', shellcode[pushPosition + 1:pushPosition + 3])[0], repr(shellcode[pushPosition:pushPosition + 5])))
+                oOutput.Line('%-10s: %5d %10d %s' % (dInstructions[shellcode[pushPosition:pushPosition+1]], pushPosition, struct.unpack('<H', shellcode[pushPosition + 1:pushPosition + 3])[0], repr(shellcode[pushPosition:pushPosition + 5])))
 
     for str in ExtractStringsASCII(shellcode):
         if len(str) == 5 and str.startswith(b'/') or str.startswith(b'User-Agent: ') or str.startswith(b'Mozilla/'):
@@ -1580,7 +1613,8 @@ def GetJSONData():
         return {}
     return json.load(open(filename, 'r'))
     
-def AnalyzeEmbeddedPEFile(payloadsectiondata, oOutput, options):
+def AnalyzeEmbeddedPEFileSub(payloadsectiondata, options):
+    result = []
     xorKey = b'i'
     config, startconfig, endconfig = CutData(Xor(payloadsectiondata, xorKey), '[000100010002]:')
     if len(config) == 0:
@@ -1593,15 +1627,15 @@ def AnalyzeEmbeddedPEFile(payloadsectiondata, oOutput, options):
             xorKey = b'.'
             startconfig, endconfig = StatisticalSearch(payloadsectiondata, xorKey)
         if startconfig == None:
-            oOutput.Line('Error: config not found')
-            return
+            result.append('Error: config not found')
+            return result
         else:
-            oOutput.Line('Config found (statistical): xorkey %s 0x%08x 0x%08x' % (xorKey, startconfig, endconfig))
-            oOutput.Line(cDump(Xor(payloadsectiondata[startconfig:endconfig + 1], xorKey)).HexAsciiDump(rle=True))
-            return
-#                oOutput.Line('Config found: 0x%08x 0x%08x %s' % (startconfig, endconfig, ' '.join(['0x%08x' % position for position in FindAll(payloadsectiondata, '\xFF\xFF\xFF\xFF\xFF\xFF\xFF\xFF')])))
-#                oOutput.Line('Config found: 0x%08x 0x%08x %s' % (startconfig, endconfig, ' '.join(['0x%08x' % position for position in FindAll(payloadsectiondata, '\x90\x01\x00\x00')])))
-    oOutput.Line('Config found: xorkey %s 0x%08x 0x%08x' % (xorKey, startconfig, endconfig))
+            result.append('Config found (statistical): xorkey %s 0x%08x 0x%08x' % (xorKey, startconfig, endconfig))
+            result.append(cDump(Xor(payloadsectiondata[startconfig:endconfig + 1], xorKey)).HexAsciiDump(rle=True))
+            return result
+#                result.append('Config found: 0x%08x 0x%08x %s' % (startconfig, endconfig, ' '.join(['0x%08x' % position for position in FindAll(payloadsectiondata, '\xFF\xFF\xFF\xFF\xFF\xFF\xFF\xFF')])))
+#                result.append('Config found: 0x%08x 0x%08x %s' % (startconfig, endconfig, ' '.join(['0x%08x' % position for position in FindAll(payloadsectiondata, '\x90\x01\x00\x00')])))
+    result.append('Config found: xorkey %s 0x%08x 0x%08x' % (xorKey, startconfig, endconfig))
     data = config
     dConfigIdentifiers = {
         0x0001: 'payload type',
@@ -1674,7 +1708,7 @@ def AnalyzeEmbeddedPEFile(payloadsectiondata, oOutput, options):
         ntlBytes = data[0:struct.calcsize(formatNumber) + struct.calcsize(formatTypeLength)]
         number, data = Unpack(formatNumber, data)
         if number == 0:
-            oOutput.Line('0x%04x' % number)
+            result.append('0x%04x' % number)
             break
         type, length, data = Unpack(formatTypeLength, data)
         parameter, data = GetChunk(length, data)
@@ -1690,7 +1724,16 @@ def AnalyzeEmbeddedPEFile(payloadsectiondata, oOutput, options):
             info = InterpretValue('', number, parameter, dConfigValueInterpreter)
             if info == '':
                 info = Represent(C2SIP3(parameter))
-        oOutput.Line(('0x%04x %-' + str(max([len(value) for value in dConfigIdentifiers.values()])) + 's 0x%04x 0x%04x%s') % (number, dConfigIdentifiers.get(number, ''), type, length, PrefixIfNeeded(info)))
+
+        resultNumber = '0x%04x' % number
+        resultType = '0x%04x' % type
+        resultLength = '0x%04x' % length
+        resultID = dConfigIdentifiers.get(number, '')
+        if options.csv:
+            result.append(MakeCSVLine((resultNumber, resultID, resultType, resultLength, info), ',', '"'))
+        else:
+            resultID = ('%-' + str(max([len(value) for value in dConfigIdentifiers.values()])) + 's') % resultID
+            result.append('%s %s %s %s%s' % (resultNumber, resultID, resultType, resultLength, PrefixIfNeeded(info)))
         if type == 3 and number in [0x0c, 0x0d]:
 #            parameters = parameter
 #            while len(parameters) >= 8 and sum([C2IIP2(c) for c in parameters]) != 0:
@@ -1701,17 +1744,25 @@ def AnalyzeEmbeddedPEFile(payloadsectiondata, oOutput, options):
 #                else:
 #                    length = None
 #                if type == 3:
-#                    oOutput.Line('  0x%04x' % (type))
+#                    result.append('  0x%04x' % (type))
 #                else:
-#                    oOutput.Line('  0x%04x 0x%04x%s' % (type, length, PrefixIfNeeded(Represent(C2SIP3(parameter)))))
+#                    result.append('  0x%04x 0x%04x%s' % (type, length, PrefixIfNeeded(Represent(C2SIP3(parameter)))))
             for string in ExtractStringsASCII(parameter):
-                oOutput.Line('  %s' % (string))
+                if options.csv:
+                    result.append(MakeCSVLine(('', '', '', '', string.decode('utf8', 'surrogateescape')), ',', '"'))
+                else:
+                    result.append('  %s' % string.decode('utf8', 'surrogateescape'))
         if options.select != '':
             select = ParseInteger(options.select)
             if number == select:
-                oOutput.Line(' Decoded:     %s' % ToHexadecimal(ntlBytes + parameter))
-                oOutput.Line(" 'i'-encoded: %s" % ToHexadecimal(Xor(ntlBytes + parameter, b'i')))
-                oOutput.Line(" '.'-encoded: %s" % ToHexadecimal(Xor(ntlBytes + parameter, b'.')))
+                result.append(' Decoded:     %s' % ToHexadecimal(ntlBytes + parameter))
+                result.append(" 'i'-encoded: %s" % ToHexadecimal(Xor(ntlBytes + parameter, b'i')))
+                result.append(" '.'-encoded: %s" % ToHexadecimal(Xor(ntlBytes + parameter, b'.')))
+    return result
+
+def AnalyzeEmbeddedPEFile(payloadsectiondata, oOutput, options):
+    for line in AnalyzeEmbeddedPEFileSub(payloadsectiondata, options):
+        oOutput.Line(line)
 
 def DetectPEFile(data):
     if len(data) < 40:
@@ -1799,53 +1850,65 @@ def ProcessBinaryFile(filename, content, cutexpression, flag, oOutput, oLogfile,
         for message in messages:
             oOutput.Line(message)
         if data[0:2] == b'MZ' and not options.raw:
-            error, sectiondata = GetDataSection(data)
-            if error != None:
-                oOutput.Line('Error: PE file error: %s' % error)
-            elif len(sectiondata) < 16:
-                oOutput.Line('Error: section .data too small: %d' % len(sectiondata))
+            extracted, messages = GetXorChainSection(data)
+            if extracted != None:
+                for message in messages:
+                    oOutput.Line(message)
+                AnalyzeEmbeddedPEFile(extracted, oOutput, options)
             else:
-                payloadType, payloadSize, intxorkey, id2, sectiondata = Unpack('<IIII', sectiondata)
-                xorkey = struct.pack('<I', intxorkey)
-                oOutput.Line('payloadType: 0x%08x' % payloadType)
-                oOutput.Line('payloadSize: 0x%08x' % payloadSize)
-                oOutput.Line('intxorkey: 0x%08x' % intxorkey)
-                oOutput.Line('id2: 0x%08x' % id2)
-                if payloadSize > len(sectiondata):
-                    oOutput.Line('Error: payload size too large: 0x%08x' % payloadSize)
-                    oOutput.Line('.data section size: 0x%08x' % len(sectiondata))
-                    return
-    #            if payloadSize <= 0:
-    #                oOutput.Line('Error: payload size too small: 0x%08x' % payloadSize)
-    #                return
-                payload = Xor(sectiondata[:payloadSize], xorkey)
-                error, payloadsectiondata = GetDataSection(payload)
+                error, sectiondata = GetDataSection(data)
                 if error != None:
-                    positionMZ = payload.find(b'MZ')
-                    if positionMZ != 0:
-                        if b'ihihik' in sectiondata or b'././.,' in sectiondata:
-                            AnalyzeEmbeddedPEFile(data, oOutput, options)
-                        elif TestShellcodeHeuristic(payload):
-                            oOutput.Line('Probably found shellcode:')
-                            AnalyzeShellcode(payload, oOutput)
-                            oOutput.Line(cDump(payload).HexAsciiDump(rle=False))
-                        elif positionMZ >= 0 and positionMZ < 0x20:
-                            oOutput.Line('MZ header found position %d' % positionMZ)
-                            AnalyzeEmbeddedPEFile(payload[positionMZ:], oOutput, options)
-                        else:
-                            oOutput.Line('MZ header not found, truncated dump:')
-                            oOutput.Line(cDump(payload[:0x1000]).HexAsciiDump(rle=True))
-                    else:
-                        oOutput.Line('Error: embedded PE file error: %s' % error)
+                    oOutput.Line('Error: PE file error: %s' % error)
+                elif len(sectiondata) < 16:
+                    oOutput.Line('Error: section .data too small: %d' % len(sectiondata))
                 else:
-                    AnalyzeEmbeddedPEFile(payloadsectiondata, oOutput, options)
+                    payloadType, payloadSize, intxorkey, id2, sectiondata = Unpack('<IIII', sectiondata)
+                    xorkey = struct.pack('<I', intxorkey)
+                    oOutput.Line('payloadType: 0x%08x' % payloadType)
+                    oOutput.Line('payloadSize: 0x%08x' % payloadSize)
+                    oOutput.Line('intxorkey: 0x%08x' % intxorkey)
+                    oOutput.Line('id2: 0x%08x' % id2)
+                    if payloadSize > len(sectiondata):
+                        oOutput.Line('Error: payload size too large: 0x%08x' % payloadSize)
+                        oOutput.Line('.data section size: 0x%08x' % len(sectiondata))
+                        return
+        #            if payloadSize <= 0:
+        #                oOutput.Line('Error: payload size too small: 0x%08x' % payloadSize)
+        #                return
+                    payload = Xor(sectiondata[:payloadSize], xorkey)
+                    error, payloadsectiondata = GetDataSection(payload)
+                    if error != None:
+                        positionMZ = payload.find(b'MZ')
+                        if positionMZ != 0:
+                            if b'ihihik' in sectiondata or b'././.,' in sectiondata:
+                                AnalyzeEmbeddedPEFile(data, oOutput, options)
+                            elif TestShellcodeHeuristic(payload):
+                                oOutput.Line('Probably found shellcode:')
+                                AnalyzeShellcode(payload, oOutput)
+                                oOutput.Line(cDump(payload).HexAsciiDump(rle=False))
+                            elif positionMZ >= 0 and positionMZ < 0x20:
+                                oOutput.Line('MZ header found position %d' % positionMZ)
+                                AnalyzeEmbeddedPEFile(payload[positionMZ:], oOutput, options)
+                            else:
+                                oOutput.Line('MZ header not found, truncated dump:')
+                                oOutput.Line(cDump(payload[:0x1000]).HexAsciiDump(rle=True))
+                        else:
+                            oOutput.Line('Error: embedded PE file error: %s' % error)
+                    else:
+                        AnalyzeEmbeddedPEFile(payloadsectiondata, oOutput, options)
         elif TestShellcodeHeuristic(data):
             oOutput.Line('Probably found shellcode:')
             AnalyzeShellcode(data, oOutput)
             oOutput.Line(cDump(data).HexAsciiDump(rle=False))
         else:
+            dConfigs = {}
             for position in FindAll(data, b'ihihik') + FindAll(data, b'././.,'):
-                AnalyzeEmbeddedPEFile(data[position:position+0x10000], oOutput, options)
+                result = AnalyzeEmbeddedPEFileSub(data[position:position+0x10000], options)
+                configSha256 = hashlib.sha256(''.join(result).encode()).hexdigest()
+                if not configSha256 in dConfigs:
+                    dConfigs[configSha256] = True
+                    for line in result:
+                        oOutput.Line(line)
 
 #        oOutput.Line(cDump(data[0:0x100]).HexAsciiDump())
         # ----------------------------------------------
@@ -1870,74 +1933,74 @@ def SpaceEvery2Characters(string):
 
 def ProcessLicenseIDs(oOutput, oLogfile, options):
     rule_config = '''rule cs_%s_licenseid {
-	meta:
-		license_name = "%s"
-		license_id = "%d"
-		info = "rule generated by 1768.py on %s"
-	strings:
-		$a = { %s }
-	condition:
-		$a
+  meta:
+    license_name = "%s"
+    license_id = "%d"
+    info = "rule generated by 1768.py on %s"
+  strings:
+    $a = { %s }
+  condition:
+    $a
 }
 '''
 
     rule_config_i = '''rule cs_%s_licenseid_i {
-	meta:
-		license_name = "%s"
-		license_id = "%d"
-		info = "rule generated by 1768.py on %s"
-	strings:
-		$a = { %s }
-	condition:
-		$a
+  meta:
+    license_name = "%s"
+    license_id = "%d"
+    info = "rule generated by 1768.py on %s"
+  strings:
+    $a = { %s }
+  condition:
+    $a
 }
 '''
 
     rule_config_dot = '''rule cs_%s_licenseid_dot {
-	meta:
-		license_name = "%s"
-		license_id = "%d"
-		info = "rule generated by 1768.py on %s"
-	strings:
-		$a = { %s }
-	condition:
-		$a
+  meta:
+    license_name = "%s"
+    license_id = "%d"
+    info = "rule generated by 1768.py on %s"
+  strings:
+    $a = { %s }
+  condition:
+    $a
 }
 '''
 
     rule_shellcode = '''rule cs_%s_licenseid_shellcode {
-	meta:
-		license_name = "%s"
-		license_id = "%d"
-		info = "rule generated by 1768.py on %s"
-	strings:
-		$a = { %s }
-	condition:
-		$a and filesize < 10000
+  meta:
+    license_name = "%s"
+    license_id = "%d"
+    info = "rule generated by 1768.py on %s"
+  strings:
+    $a = { %s }
+  condition:
+    $a and filesize < 10000
 }
 '''
 
     rule_shellcode_00 = '''rule cs_%s_licenseid_shellcode_00 {
-	meta:
-		license_name = "%s"
-		license_id = "%d"
-		info = "rule generated by 1768.py on %s"
-	strings:
-		$a = { %s }
-	condition:
-		$a and filesize < 10000
+  meta:
+    license_name = "%s"
+    license_id = "%d"
+    info = "rule generated by 1768.py on %s"
+  strings:
+    $a = { %s }
+  condition:
+    $a and filesize < 10000
 }
 '''
 
     rule_shellcode_00_end = '''rule cs_%s_licenseid_shellcode_00_end {
-	meta:
-		license_name = "%s"
-		license_id = "%d"
-		info = "rule generated by 1768.py on %s"
-	strings:
-		$a = { %s }
-	condition:
-		$a and filesize < 10000 and $a at (filesize - 5)
+  meta:
+    license_name = "%s"
+    license_id = "%d"
+    info = "rule generated by 1768.py on %s"
+  strings:
+    $a = { %s }
+  condition:
+    $a and filesize < 10000 and $a at (filesize - 5)
 }
 '''
 
@@ -1994,6 +2057,7 @@ https://DidierStevens.com'''
     oParser.add_option('-s', '--select', default='', help='Field to select')
     oParser.add_option('-o', '--output', type=str, default='', help='Output to file (# supported)')
     oParser.add_option('-l', '--licenseids', default='', help='License ID(s)/Watermark(s) to generate YARA rules for')
+    oParser.add_option('-c', '--csv', action='store_true', default=False, help='Output config in CSV format')
     oParser.add_option('-p', '--password', default='infected', help='The ZIP password to be used (default infected)')
     oParser.add_option('-n', '--noextraction', action='store_true', default=False, help='Do not extract from archive file')
     oParser.add_option('--literalfilenames', action='store_true', default=False, help='Do not interpret filenames')

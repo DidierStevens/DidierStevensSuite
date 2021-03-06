@@ -2,8 +2,8 @@
 
 __description__ = 'NSRL tool'
 __author__ = 'Didier Stevens'
-__version__ = '0.0.2'
-__date__ = '2015/09/03'
+__version__ = '0.0.3'
+__date__ = '2021/03/04'
 
 """
 
@@ -16,8 +16,9 @@ History:
   2015/08/16: added .zip file support
   2015/08/29: continue
   2015/08/31: added man
-  2015/09/02: added ApplicationType
+  2015/09/02: 0.0.2 added ApplicationType
   2015/09/03: added FindNSRLFile
+  2021/03/04: 0.0.3 Python 3 and ZIP file layout change
 
 Todo:
 """
@@ -30,6 +31,7 @@ import time
 import gzip
 import zipfile
 import textwrap
+import io
 
 def PrintManual():
     manual = '''
@@ -46,7 +48,6 @@ The second argument given to nsrl.py is the NSRL database. This can be the NSRL 
 '''
     for line in manual.split('\n'):
         print(textwrap.fill(line))
-
 
 def Timestamp(epoch=None):
     if epoch == None:
@@ -90,7 +91,10 @@ def File2Strings(filename):
 def LoadProducts(fIn):
     dProducts = {}
     header = None
-    reader = csv.reader(fIn, delimiter=',', skipinitialspace=True)
+    if sys.version_info[0] >= 3:
+        reader = csv.reader(io.TextIOWrapper(fIn, encoding='utf8', errors='surrogateescape'), delimiter=',', skipinitialspace=True)
+    else:
+        reader = csv.reader(fIn, delimiter=',', skipinitialspace=True)
     for row in reader:
         if header == None:
             header = row
@@ -98,6 +102,12 @@ def LoadProducts(fIn):
             dProducts[row[0]] = row[6]
     fIn.close()
     return dProducts
+
+def GetFilename(oZipfile, filename):
+    for name in oZipfile.namelist():
+        if name.lower().endswith(filename.lower()):
+            return name
+    return None
 
 def HashSub(filenameHashes, filenameNSRL, options):
     dHashes = {}
@@ -107,14 +117,20 @@ def HashSub(filenameHashes, filenameNSRL, options):
     header = None
     if os.path.splitext(filenameNSRL)[1].lower() == '.zip':
         oZipfile = zipfile.ZipFile(filenameNSRL, 'r')
-        fIn = oZipfile.open('NSRLFile.txt', 'r')
-        dProducts = LoadProducts(oZipfile.open('NSRLProd.txt', 'r'))
+        fIn = oZipfile.open(GetFilename(oZipfile,'NSRLFile.txt'), 'r')
+        filenameProd = GetFilename(oZipfile, 'NSRLProd.txt')
+        if filenameProd != None:
+            dProducts = LoadProducts(oZipfile.open(filenameProd, 'r'))
         oZipfile.close()
     elif os.path.splitext(filenameNSRL)[1].lower() == '.gz':
         fIn = gzip.GzipFile(filenameNSRL, 'rb')
     else:
         fIn = open(filenameNSRL, 'rb')
-    reader = csv.reader(fIn, delimiter=',', skipinitialspace=True)
+
+    if sys.version_info[0] >= 3:
+        reader = csv.reader(io.TextIOWrapper(fIn, encoding='utf8', errors='surrogateescape'), delimiter=',', skipinitialspace=True)
+    else:
+        reader = csv.reader(fIn, delimiter=',', skipinitialspace=True)
     for row in reader:
         if header == None:
             header = row

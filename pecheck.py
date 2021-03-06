@@ -2,8 +2,8 @@
 
 __description__ = 'Tool for displaying PE file info'
 __author__ = 'Didier Stevens'
-__version__ = '0.7.12'
-__date__ = '2020/10/22'
+__version__ = '0.7.13'
+__date__ = '2021/02/25'
 
 """
 
@@ -51,6 +51,7 @@ History:
   2020/07/04: 0.7.11 fixed typo in man page
   2020/07/26: fixes Python 3 bug for overlays reported by Lenny Zeltser; fixed ASCII 128; added option --verbose
   2020/10/22: 0.7.12 extra info (names) with -l P; Python 3 bug
+  2021/02/25: 0.7.13 added signature hash
 
 Todo:
 """
@@ -313,6 +314,10 @@ def Signature(pe):
         print(' Extracted: %d bytes' % len(signature))
         print(' Expected: %d bytes' % (size - 8))
         return
+
+    print(' Signature size: 0x%06x' % len(signature))
+    hashvalue, hashalgo = CalculateChosenHash(signature)
+    print(' Signature %s hash: %s' % (hashalgo, hashvalue))
 
     try:
         from pyasn1.codec.der import decoder as der_decoder
