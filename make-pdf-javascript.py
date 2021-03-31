@@ -11,7 +11,7 @@
 #  
 #  2008/05/29: continue
 #  2008/11/09: cleanup for release
-
+#  2021/03/31: adapted for Python 3
 import mPDF
 import optparse
 
@@ -26,11 +26,11 @@ def Main():
 
     if len(args) != 1:
         parser.print_help()
-        print ''
-        print '  make-pdf-javascript, use it to create a PDF document with embedded JavaScript that will execute automatically when the document is opened'
-        print '  Source code put in the public domain by Didier Stevens, no Copyright'
-        print '  Use at your own risk'
-        print '  https://DidierStevens.com'
+        print('')
+        print('  make-pdf-javascript, use it to create a PDF document with embedded JavaScript that will execute automatically when the document is opened')
+        print('  Source code put in the public domain by Didier Stevens, no Copyright')
+        print('  Use at your own risk')
+        print('  https://DidierStevens.com')
     
     else:
         oPDF = mPDF.cPDF(args[0])
@@ -52,13 +52,13 @@ def Main():
             try:
                 fileJavasScript = open(options.javascriptfile, 'rb')
             except:
-                print "error opening file %s" % options.javascriptfile
+                print("error opening file %s".format(options.javascriptfile))
                 return
 
             try:
                 javascript = fileJavasScript.read()
             except:
-                print "error reading file %s" % options.javascriptfile
+                print("error reading file %s".format(options.javascriptfile))
                 return
             finally:
                 fileJavasScript.close()
