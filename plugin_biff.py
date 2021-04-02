@@ -1318,7 +1318,7 @@ def ShortXLUnicodeString(data, isBIFF8):
         else:
             return repr(data[2:2 + cch * 2])
     else:
-        return P23Decode(data[1:1 + cch])
+        return P23Decode(data[2:2 + cch])
 
 def GetDictionary(passwordfile):
     if passwordfile != '.':
