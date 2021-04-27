@@ -998,6 +998,8 @@ def ASCII85Decode(data):
   return out
 
 def ASCIIHexDecode(data):
+    if type(data) is bytes:
+        data = data.decode('ascii')
     return binascii.unhexlify(''.join([c for c in data if c not in ' \t\n\r']).rstrip('>'))
 
 # if inflating fails, we try to inflate byte per byte (sample 4da299d6e52bbb79c0ac00bad6a1d51d4d5fe42965a8d94e88a359e5277117e2)
