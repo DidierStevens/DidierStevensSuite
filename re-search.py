@@ -2,8 +2,8 @@
 
 __description__ = "Program to use Python's re.findall on files"
 __author__ = 'Didier Stevens'
-__version__ = '0.0.16'
-__date__ = '2021/02/14'
+__version__ = '0.0.17'
+__date__ = '2021/05/05'
 
 """
 
@@ -45,6 +45,9 @@ History:
   2021/01/22: added option -F
   2021/02/06: 0.0.16 changed url and url-domain regexes for _ in hostname
   2021/02/14: Fixed human language vulnerabilities
+  2021/03/11: 0.0.17 added gzip support and option --encoding
+  2021/04/04: fixes for binary mode
+  2021/05/05: added public ips filter
 
 Todo:
   add hostname to header
@@ -61,6 +64,7 @@ import math
 import textwrap
 import csv
 import binascii
+import gzip
 
 try:
     import reextra
@@ -68,7 +72,7 @@ except:
     print("This program requires module reextra (it is a part of the re-search package).\nMake sure it is installed in Python's module repository or the same folder where re-search.py is installed.")
     exit(-1)
 
-REGEX_STANDARD = '[\x09\x20-\x7E]'
+REGEX_STANDARD = b'[\x09\x20-\x7E]'
 
 dLibrary = {
             'email': r'[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,6}',
@@ -420,11 +424,13 @@ def CompileRegex(regex, options):
         raise Exception('Error regex: %s' % regex)
     return regex, oREExtra
 
-def ProcessFile(fIn, fullread):
+def ProcessFile(fIn, fullread, fType, options):
     if fullread:
         yield fIn.read()
     else:
         for line in fIn:
+            if fType == 2:
+                line = line.decode(*ParseOptionEncoding(options.encoding))
             yield line.strip('\n\r')
 
 def Hex(data, dohex):
@@ -434,18 +440,27 @@ def Hex(data, dohex):
         return data
 
 def ExtractStringsASCII(data):
-    regex = REGEX_STANDARD + '{%d,}'
+    regex = REGEX_STANDARD + b'{%d,}'
     return re.findall(regex % 4, data)
 
 def ExtractStringsUNICODE(data):
-    regex = '((' + REGEX_STANDARD + '\x00){%d,})'
-    return [foundunicodestring.replace('\x00', '') for foundunicodestring, dummy in re.findall(regex % 4, data)]
+    regex = b'((' + REGEX_STANDARD + b'\x00){%d,})'
+    return [foundunicodestring.replace(b'\x00', b'') for foundunicodestring, dummy in re.findall(regex % 4, data)]
 
 def ExtractStrings(data):
     return ExtractStringsASCII(data) + ExtractStringsUNICODE(data)
 
 def DumpFunctionStrings(data):
-    return ''.join([extractedstring + '\n' for extractedstring in ExtractStrings(data)])
+    return ''.join([extractedstring.decode() + '\n' for extractedstring in ExtractStrings(data)])
+
+def ParseOptionEncoding(encoding):
+    if encoding == '':
+        encodingvalue = 'utf8'
+        errorsvalue = 'surrogateescape'
+    else:
+        encodingvalue = encoding
+        errorsvalue = None
+    return encodingvalue, errorsvalue
 
 def RESearchSingle(regex, filenames, oOutput, options):
     if options.name and regex == 'all':
@@ -459,9 +474,17 @@ def RESearchSingle(regex, filenames, oOutput, options):
             if options.fullread or options.extractstrings or options.grepall:
                 IfWIN32SetBinary(sys.stdin)
             fIn = sys.stdin
+            fType = 1
+        elif os.path.splitext(filename)[1].lower() == '.gz':
+            fIn = gzip.GzipFile(filename, 'rb')
+            fType = 2
         else:
-            fIn = open(filename, IFF(options.fullread or options.extractstrings or options.grepall, 'rb', 'r'))
-        for line in ProcessFile(fIn, options.fullread or options.extractstrings or options.grepall):
+            if options.fullread or options.extractstrings or options.grepall:
+                fIn = open(filename, 'rb')
+            else:
+                fIn = open(filename, 'r', encoding=ParseOptionEncoding(options.encoding)[0], errors=ParseOptionEncoding(options.encoding)[1])
+            fType = 3
+        for line in ProcessFile(fIn, options.fullread or options.extractstrings or options.grepall, fType, options):
             if options.extractstrings:
                 line = DumpFunctionStrings(line)
             for regex, oREExtra in regexes:
@@ -478,7 +501,7 @@ def RESearchSingle(regex, filenames, oOutput, options):
                             oOutput.Line(Hex(result, options.hex))
                         if isinstance(result, tuple):
                             oOutput.Line(Hex(result[0], options.hex))
-        if fIn != sys.stdin:
+        if fType != 1:
             fIn.close()
 
 def RESearchCSV(csvFilename, filenames, oOutput, options):
@@ -510,9 +533,14 @@ def RESearchCSV(csvFilename, filenames, oOutput, options):
             if options.fullread or options.extractstrings or options.grepall:
                 IfWIN32SetBinary(sys.stdin)
             fIn = sys.stdin
+            fType = 1
+        elif os.path.splitext(filename)[1].lower() == '.gz':
+            fIn = gzip.GzipFile(filename, 'rb')
+            fType = 2
         else:
-            fIn = open(filename, IFF(options.fullread or options.extractstrings or options.grepall, 'rb', 'r'))
-        for line in ProcessFile(fIn, options.fullread or options.extractstrings or options.grepall):
+            fIn = open(filename, IFF(options.fullread or options.extractstrings or options.grepall, 'rb', 'r'), encoding=ParseOptionEncoding(options.encoding)[0], errors=ParseOptionEncoding(options.encoding)[1])
+            fType = 3
+        for line in ProcessFile(fIn, options.fullread or options.extractstrings or options.grepall, fType, options):
             if options.extractstrings:
                 line = DumpFunctionStrings(line)
             for regex, (oREExtra, comment) in dRegex.items():
@@ -544,7 +572,7 @@ def RESearchCSV(csvFilename, filenames, oOutput, options):
                             else:
                                 outputLine = MakeCSVLine(newRow, options.separatorinput, QUOTE) + options.separatorinput + result[0]
                         oOutput.Line(outputLine)
-        if fIn != sys.stdin:
+        if fType != 1:
             fIn.close()
 
 def RESearch(regex, filenames, options):
@@ -569,8 +597,29 @@ def KeepOfficeURL(url):
 def RemoveOfficeURLs(urls):
     return [url for url in urls if KeepOfficeURL(url)]
 
+def IsPrivateIPv4(ipv4):
+    if ipv4.startswith('192.168.'):
+        return True
+    if ipv4.startswith('10.'):
+        return True
+    if ipv4.startswith('172.'):
+        result = ipv4.split('.')
+        if len(result) >= 2:
+            secondNumber = result[1]
+            if secondNumber in ['16', '17', '18', '19', '20', '21', '22', '23', '24', '25', '26', '27', '28', '29', '30', '31']:
+                return True
+    if ipv4.startswith('127.'):
+        return True
+    if ipv4.startswith('169.254.'):
+        return True
+    return False
+
+def RemovePrivateIPv4s(ipv4s):
+    return [ipv4 for ipv4 in ipv4s if not IsPrivateIPv4(ipv4)]
+
 dFilters = {
-            'officeurls': ['Remove URLs that are common in OOXML Office documents', RemoveOfficeURLs]
+            'officeurls': ['Remove URLs that are common in OOXML Office documents', RemoveOfficeURLs],
+            'publicipv4s': ['Remove IPv4 addresses that are private', RemovePrivateIPv4s]
 }
 
 def ApplyFilter(result, options):
@@ -625,6 +674,7 @@ https://DidierStevens.com'''
     oParser.add_option('-F', '--filter', default='', help='Filter output')
     oParser.add_option('--script', default='', help='Python script file with definitions to include')
     oParser.add_option('--execute', default='', help='Python commands to execute')
+    oParser.add_option('--encoding', type=str, default='', help='Encoding for file open')
     (options, args) = oParser.parse_args()
 
     if options.man:
