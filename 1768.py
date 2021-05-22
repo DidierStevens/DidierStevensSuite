@@ -4,8 +4,8 @@ from __future__ import print_function
 
 __description__ = 'Analyze Cobalt Strike beacons'
 __author__ = 'Didier Stevens'
-__version__ = '0.0.5'
-__date__ = '2021/03/06'
+__version__ = '0.0.6'
+__date__ = '2021/05/15'
 
 """
 Source code put in the public domain by Didier Stevens, no Copyright
@@ -34,6 +34,12 @@ History:
   2020/11/29: added rule_shellcode_00_end
   2021/02/13: 0.0.5 updated shellcode analysis (+ Python 3 fix); added XORChain analysis for PE sections; remove duplicate configs when dumping raw
   2021/03/06: added option -c
+  2021/03/25: 0.0.6 fix for provided sample
+  2021/04/06: fix
+  2021/04/28: added option -J
+  2021/04/30: CS version guessing
+  2021/05/02: fix
+  2021/05/15: continue JSON output
 
 Todo:
   add JSON output
@@ -88,6 +94,8 @@ Each license id can be previded by a name for the license is (use : as a separat
 Example : 1768.py -l ATP_1:12345678,pentester_2:87654321
 
 Option -c (--csv) is used to output the config parameters in CSV format.
+
+Option -J (--jsonoutput) is used to output the config parameters in JSON format.
 
 It reads one or more files or stdin. This tool is very versatile when it comes to handling files, later full details will be provided.
 
@@ -293,6 +301,9 @@ Most options can be combined, like #ps# for example.
 
 DEFAULT_SEPARATOR = ','
 QUOTE = '"'
+
+START_CONFIG_I = b'ihihik'
+START_CONFIG_DOT = b'././.,'
 
 def PrintError(*args, **kwargs):
     print(*args, file=sys.stderr, **kwargs)
@@ -1460,7 +1471,7 @@ def FindAllList(data, searches):
     return sorted(list(set(result)))
 
 def DecodeSectionnameIfNeeded(name):
-    if name.startswith('.'):
+    if len(name) == 0 or name.startswith('.'):
         return name
     xorkey = ord(name[0]) ^ ord('.')
     newname = ''.join([chr(ord(c) ^ xorkey) for c in name]).rstrip('\x00')
@@ -1607,6 +1618,15 @@ def GetScriptPath():
     else:
         return os.path.dirname(sys.argv[0])
 
+def DetermineCSVersionFromConfig(dJSON):
+    maximumID = max(map(int, dJSON.keys()))
+    if maximumID < 55:
+        return ('3', maximumID)
+    elif maximumID == 55:
+        return ('4.0', maximumID)
+    else:
+        return ('4.1+', maximumID)
+
 def GetJSONData():
     filename = os.path.join(GetScriptPath(), '1768.json')
     if not os.path.isfile(filename):
@@ -1615,6 +1635,7 @@ def GetJSONData():
     
 def AnalyzeEmbeddedPEFileSub(payloadsectiondata, options):
     result = []
+    dJSON = {}
     xorKey = b'i'
     config, startconfig, endconfig = CutData(Xor(payloadsectiondata, xorKey), '[000100010002]:')
     if len(config) == 0:
@@ -1628,11 +1649,11 @@ def AnalyzeEmbeddedPEFileSub(payloadsectiondata, options):
             startconfig, endconfig = StatisticalSearch(payloadsectiondata, xorKey)
         if startconfig == None:
             result.append('Error: config not found')
-            return result
+            return [result, dJSON]
         else:
             result.append('Config found (statistical): xorkey %s 0x%08x 0x%08x' % (xorKey, startconfig, endconfig))
             result.append(cDump(Xor(payloadsectiondata[startconfig:endconfig + 1], xorKey)).HexAsciiDump(rle=True))
-            return result
+            return [result, dJSON]
 #                result.append('Config found: 0x%08x 0x%08x %s' % (startconfig, endconfig, ' '.join(['0x%08x' % position for position in FindAll(payloadsectiondata, '\xFF\xFF\xFF\xFF\xFF\xFF\xFF\xFF')])))
 #                result.append('Config found: 0x%08x 0x%08x %s' % (startconfig, endconfig, ' '.join(['0x%08x' % position for position in FindAll(payloadsectiondata, '\x90\x01\x00\x00')])))
     result.append('Config found: xorkey %s 0x%08x 0x%08x' % (xorKey, startconfig, endconfig))
@@ -1713,15 +1734,19 @@ def AnalyzeEmbeddedPEFileSub(payloadsectiondata, options):
         type, length, data = Unpack(formatTypeLength, data)
         parameter, data = GetChunk(length, data)
         info = ''
+        rawvalue = None
         if type == 1 and length == 2:
             identifier = struct.unpack('>H', parameter)[0]
+            rawvalue = identifier
             info = InterpretValue('%d' % identifier, number, identifier, dConfigValueInterpreter)
         elif type == 2 and length == 4:
-            value = '%d' % struct.unpack('>I', parameter)[0]
+            rawvalue = struct.unpack('>I', parameter)[0]
+            value = '%d' % rawvalue
             info = InterpretValue(value, number, parameter[0:4], dConfigValueInterpreter)
             info += LookupValue(str(number), value, dLookupValues)
         elif type == 3 and not number in [0x0c, 0x0d]:
             info = InterpretValue('', number, parameter, dConfigValueInterpreter)
+            rawvalue = binascii.b2a_hex(parameter).decode()
             if info == '':
                 info = Represent(C2SIP3(parameter))
 
@@ -1729,6 +1754,7 @@ def AnalyzeEmbeddedPEFileSub(payloadsectiondata, options):
         resultType = '0x%04x' % type
         resultLength = '0x%04x' % length
         resultID = dConfigIdentifiers.get(number, '')
+        dJSON[number] = {'id': resultID, 'type': resultType, 'info': info, 'rawvalue': rawvalue}
         if options.csv:
             result.append(MakeCSVLine((resultNumber, resultID, resultType, resultLength, info), ',', '"'))
         else:
@@ -1758,10 +1784,13 @@ def AnalyzeEmbeddedPEFileSub(payloadsectiondata, options):
                 result.append(' Decoded:     %s' % ToHexadecimal(ntlBytes + parameter))
                 result.append(" 'i'-encoded: %s" % ToHexadecimal(Xor(ntlBytes + parameter, b'i')))
                 result.append(" '.'-encoded: %s" % ToHexadecimal(Xor(ntlBytes + parameter, b'.')))
-    return result
+    result.append('Guessing Cobalt Strike version: %s (max 0x%04x)' % DetermineCSVersionFromConfig(dJSON))
+    return [result, dJSON]
 
 def AnalyzeEmbeddedPEFile(payloadsectiondata, oOutput, options):
-    for line in AnalyzeEmbeddedPEFileSub(payloadsectiondata, options):
+    result, dJSON = AnalyzeEmbeddedPEFileSub(payloadsectiondata, options)
+    oOutput.JSON(dJSON)
+    for line in result:
         oOutput.Line(line)
 
 def DetectPEFile(data):
@@ -1780,7 +1809,7 @@ def DetectPEFile(data):
 def StripLeadingNOPs(data):
     return data.lstrip(b'\x90')
 
-def XORChain(iKey, encodedData):
+def XORChainSlow(iKey, encodedData):
     decodedData = b''
     xorkey = iKey
     while len(encodedData) >= 4:
@@ -1790,26 +1819,55 @@ def XORChain(iKey, encodedData):
         encodedData = encodedData[4:]
     return decodedData
 
+def XORChainFast(iKey, encodedData):
+    oDATA = DataIO()
+    xorkey = iKey
+    index = 0
+    format = '<I'
+    formatLength = struct.calcsize(format)
+    while True:
+        bytesInteger = encodedData[index:index + formatLength]
+        if len(bytesInteger) != formatLength:
+            break
+        encoded = struct.unpack(format, bytesInteger)[0]
+        oDATA.write(struct.pack(format, encoded ^ xorkey))
+        xorkey = encoded
+        index += formatLength
+    return oDATA.getvalue()
+
+def XORChain(iKey, encodedData):
+    fast = XORChainFast(iKey, encodedData)
+    return fast
+    slow = XORChainSlow(iKey, encodedData)
+    if slow != fast:
+        raise Exception('slow != fast')
+    return fast
+
 def TryXORChainDecoding(data):
     if len(data) < 0x100:
         return data, []
-    formatstring = '<III'
-    formatlength = struct.calcsize(formatstring)
+    formatstring = '<II'
+    formatLength = struct.calcsize(formatstring)
+    startLength = 16
     for iIter in range(1, 0x100):
-        bytesValues = data[iIter:iIter + formatlength]
-        if len(bytesValues) != formatlength:
+        bytesValues = data[iIter:iIter + formatLength + startLength]
+        if len(bytesValues) != formatLength + startLength:
             return data, []
-        xorKey, xorEncodedLength, xorEncodedMZ = struct.unpack(formatstring, bytesValues)
-        decodedMZ = xorKey ^ xorEncodedMZ
-        if struct.pack('<I', decodedMZ)[0:2] != b'MZ':
-            continue
+        xorKey, xorEncodedLength = struct.unpack(formatstring, bytesValues[:formatLength])
         decodedLength = xorKey ^ xorEncodedLength
-        decodedData = XORChain(xorKey, data[iIter + formatlength - 4:iIter + formatlength - 4 + decodedLength])
-        if DetectPEFile(decodedData):
-            return decodedData, ['xorkey(chain): 0x%08x' % xorKey, 'length: 0x%08x' % decodedLength]
+        decodedStart = XORChain(xorKey, bytesValues[formatLength:])
+        if StripLeadingNOPs(decodedStart)[0:2] == b'MZ':
+            decodedData = StripLeadingNOPs(XORChain(xorKey, data[iIter + formatLength:iIter + formatLength + decodedLength]))
+            if DetectPEFile(decodedData):
+                return decodedData, ['xorkey(chain): 0x%08x' % xorKey, 'length: 0x%08x' % decodedLength]
+        if b'MZRE' in decodedStart or b'MZAR' in decodedStart:
+            decodedData = XORChain(xorKey, data[iIter + formatLength:iIter + formatLength + decodedLength])
+            if START_CONFIG_I in decodedData or START_CONFIG_DOT in decodedData:
+                return decodedData, ['xorkey(chain): 0x%08x' % xorKey, 'length: 0x%08x' % decodedLength]
+            
     return data, []
 
-def ExtractPEFile(data):
+def TryExtractDecode(data):
     if DetectPEFile(data):
         return data, []
     extracted = StripLeadingNOPs(data)
@@ -1818,12 +1876,14 @@ def ExtractPEFile(data):
     extracted, messages = TryXORChainDecoding(data)
     if DetectPEFile(extracted):
         return extracted, messages
+    if START_CONFIG_I in extracted or START_CONFIG_DOT in extracted:
+        return extracted, messages
     return data, []
 
 def TestShellcodeHeuristic(data):
     return b'hwini' in data[:0x1000] or b'hws2_' in data[:0x1000] or (data[0:1] == b'\xFC' and len(data) < 0x1000)
 
-def ProcessBinaryFile(filename, content, cutexpression, flag, oOutput, oLogfile, options, oParserFlag):
+def ProcessBinaryFile(filename, content, cutexpression, flag, oOutput, oLogfile, options):
     if content == None:
         try:
             oBinaryFile = cBinaryFile(filename, C2BIP3(options.password), options.noextraction, options.literalfilenames)
@@ -1838,24 +1898,28 @@ def ProcessBinaryFile(filename, content, cutexpression, flag, oOutput, oLogfile,
             return
         data = CutData(data, cutexpression)[0]
         oBinaryFile.close()
+        oOutput.Line('File: %s%s' % (filename, IFF(oBinaryFile.extracted, ' (extracted)', '')))
     else:
         data = content
-
-    (flagoptions, flagargs) = oParserFlag.parse_args(flag.split(' '))
+        oOutput.Line('File: %s' % (filename))
 
     try:
         # ----- Put your data processing code here -----
-        oOutput.Line('File: %s%s' % (filename, IFF(oBinaryFile.extracted, ' (extracted)', '')))
-        data, messages = ExtractPEFile(data)
+        data, messages = TryExtractDecode(data)
         for message in messages:
             oOutput.Line(message)
         if data[0:2] == b'MZ' and not options.raw:
             extracted, messages = GetXorChainSection(data)
             if extracted != None:
-                for message in messages:
-                    oOutput.Line(message)
-                AnalyzeEmbeddedPEFile(extracted, oOutput, options)
-            else:
+                resultChain, dJSON = AnalyzeEmbeddedPEFileSub(extracted, options)
+                if resultChain != ['Error: config not found']:
+                    for message in messages:
+                        oOutput.Line(message)
+                    for message in resultChain:
+                        oOutput.Line(message)
+                else:
+                    extracted = None
+            if extracted == None:
                 error, sectiondata = GetDataSection(data)
                 if error != None:
                     oOutput.Line('Error: PE file error: %s' % error)
@@ -1880,7 +1944,7 @@ def ProcessBinaryFile(filename, content, cutexpression, flag, oOutput, oLogfile,
                     if error != None:
                         positionMZ = payload.find(b'MZ')
                         if positionMZ != 0:
-                            if b'ihihik' in sectiondata or b'././.,' in sectiondata:
+                            if START_CONFIG_I in sectiondata or START_CONFIG_DOT in sectiondata:
                                 AnalyzeEmbeddedPEFile(data, oOutput, options)
                             elif TestShellcodeHeuristic(payload):
                                 oOutput.Line('Probably found shellcode:')
@@ -1902,22 +1966,20 @@ def ProcessBinaryFile(filename, content, cutexpression, flag, oOutput, oLogfile,
             oOutput.Line(cDump(data).HexAsciiDump(rle=False))
         else:
             dConfigs = {}
-            for position in FindAll(data, b'ihihik') + FindAll(data, b'././.,'):
-                result = AnalyzeEmbeddedPEFileSub(data[position:position+0x10000], options)
+            for position in FindAll(data, START_CONFIG_I) + FindAll(data, START_CONFIG_DOT):
+                result, dJSON = AnalyzeEmbeddedPEFileSub(data[position:position+0x10000], options)
                 configSha256 = hashlib.sha256(''.join(result).encode()).hexdigest()
                 if not configSha256 in dConfigs:
                     dConfigs[configSha256] = True
+                    oOutput.JSON(dJSON)
                     for line in result:
                         oOutput.Line(line)
 
-#        oOutput.Line(cDump(data[0:0x100]).HexAsciiDump())
         # ----------------------------------------------
     except:
         oLogfile.LineError('Processing file %s %s' % (filename, repr(sys.exc_info()[1])))
         if not options.ignoreprocessingerrors:
             raise
-
-#    data = CutData(cBinaryFile(filename, C2BIP3(options.password), options.noextraction, options.literalfilenames).Data(), cutexpression)[0]
 
 def FormatTime(epoch=None):
     if epoch == None:
@@ -2022,8 +2084,55 @@ def ProcessLicenseIDs(oOutput, oLogfile, options):
         oOutput.Line(rule_shellcode_00 % (idName, idName, idInteger, FormatTime(), SpaceEvery2Characters(binascii.b2a_hex(b'\x00' + bytes).decode())))
         oOutput.Line(rule_shellcode_00_end % (idName, idName, idInteger, FormatTime(), SpaceEvery2Characters(binascii.b2a_hex(b'\x00' + bytes).decode())))
 
-def ProcessBinaryFiles(filenames, oLogfile, options, oParserFlag):
-    oOutput = InstantiateCOutput(options)
+class cOutputJSON(object):
+    def __init__(self, oOutput, options):
+        self.oOutput = oOutput
+        self.options = options
+        self.messages = []
+        self.filename = ''
+        self.JSONs = []
+
+    def JSON(self, dJSON):
+        self.JSONs.append(dJSON)
+
+    def Line(self, line):
+        if self.options.jsonoutput:
+            self.messages.append(line)
+        else:
+            self.oOutput.Line(line)
+
+    def Filename(self, filename, index, total):
+        self.oOutput.Filename(filename, index, total)
+        self.filename = filename
+
+class cAPIOptions(object):
+    def __init__(self):
+        self.csv = False
+        self.select = ''
+        self.ignoreprocessingerrors = False
+        self.raw = False
+
+class cAPIOutput(object):
+    def __init__(self):
+        self.messages = []
+        self.JSONs = []
+
+    def JSON(self, dJSON):
+        self.JSONs.append(dJSON)
+
+    def Line(self, line):
+        self.messages.append(line)
+
+    def LineError(self, line):
+        pass
+
+def APIAnalyze(data):
+    oOutput = cAPIOutput()
+    ProcessBinaryFile('', data, ':', '', oOutput, cAPIOutput(), cAPIOptions())
+    return oOutput.JSONs
+
+def ProcessBinaryFiles(filenames, oLogfile, options):
+    oOutput = cOutputJSON(InstantiateCOutput(options), options)
     index = 0
     if options.jsoninput:
         items = CheckJSON(sys.stdin.read())
@@ -2032,14 +2141,18 @@ def ProcessBinaryFiles(filenames, oLogfile, options, oParserFlag):
         for item in items:
             oOutput.Filename(item['name'], index, len(items))
             index += 1
-            ProcessBinaryFile(item['name'], item['content'], '', '', oOutput, oLogfile, options, oParserFlag)
+            ProcessBinaryFile(item['name'], item['content'], '', '', oOutput, oLogfile, options)
+            if options.jsonoutput:
+                oOutput.oOutput.Line(json.dumps({'filename': oOutput.filename, 'messages': oOutput.messages, 'config': oOutput.JSONs[0]}))
     elif options.licenseids != '':
         ProcessLicenseIDs(oOutput, oLogfile, options)
     else:
         for filename, cutexpression, flag in filenames:
             oOutput.Filename(filename, index, len(filenames))
             index += 1
-            ProcessBinaryFile(filename, None, cutexpression, flag, oOutput, oLogfile, options, oParserFlag)
+            ProcessBinaryFile(filename, None, cutexpression, flag, oOutput, oLogfile, options)
+            if options.jsonoutput:
+                oOutput.oOutput.Line(json.dumps({'filename': oOutput.filename, 'messages': oOutput.messages, 'config': oOutput.JSONs[0]}))
 
 def Main():
     moredesc = '''
@@ -2047,9 +2160,6 @@ def Main():
 Source code put in the public domain by Didier Stevens, no Copyright
 Use at your own risk
 https://DidierStevens.com'''
-
-    oParserFlag = optparse.OptionParser(usage='\nFlag arguments start with #f#:')
-    oParserFlag.add_option('-l', '--length', action='store_true', default=False, help='Print length of files')
 
     oParser = optparse.OptionParser(usage='usage: %prog [options] [[@]file|cut-expression|flag-expression ...]\n' + __description__ + moredesc, version='%prog ' + __version__, epilog='This tool also accepts flag arguments (#f#), read the man page (-m) for more info.')
     oParser.add_option('-m', '--man', action='store_true', default=False, help='Print manual')
@@ -2064,6 +2174,7 @@ https://DidierStevens.com'''
     oParser.add_option('--recursedir', action='store_true', default=False, help='Recurse directories (wildcards and here files (@...) allowed)')
     oParser.add_option('--checkfilenames', action='store_true', default=False, help='Perform check if files exist prior to file processing')
     oParser.add_option('-j', '--jsoninput', action='store_true', default=False, help='Consume JSON from stdin')
+    oParser.add_option('-J', '--jsonoutput', action='store_true', default=False, help='Output JSON')
     oParser.add_option('--logfile', type=str, default='', help='Create logfile with given keyword')
     oParser.add_option('--logcomment', type=str, default='', help='A string with comments to be included in the log file')
     oParser.add_option('--ignoreprocessingerrors', action='store_true', default=False, help='Ignore errors during file processing')
@@ -2071,7 +2182,6 @@ https://DidierStevens.com'''
 
     if options.man:
         oParser.print_help()
-        oParserFlag.print_help()
         PrintManual()
         return
 
@@ -2088,7 +2198,7 @@ https://DidierStevens.com'''
         PrintError(oExpandFilenameArguments.message)
         oLogfile.Line('Warning', repr(oExpandFilenameArguments.message))
 
-    ProcessBinaryFiles(oExpandFilenameArguments.Filenames(), oLogfile, options, oParserFlag)
+    ProcessBinaryFiles(oExpandFilenameArguments.Filenames(), oLogfile, options)
 
     if oLogfile.errors > 0:
         PrintError('Number of errors: %d' % oLogfile.errors)
