@@ -4,8 +4,8 @@ from __future__ import print_function
 
 __description__ = 'Template binary file argument'
 __author__ = 'Didier Stevens'
-__version__ = '0.0.4'
-__date__ = '2021/01/17'
+__version__ = '0.0.5'
+__date__ = '2021/05/23'
 
 """
 Source code put in the public domain by Didier Stevens, no Copyright
@@ -46,6 +46,7 @@ History:
   2020/12/09: added CSVWriteRow
   2020/12/27: added Unpack
   2021/01/17: 0.0.4 fix cOutput binary bug
+  2021/05/23: 0.0.5 changed binary output logic
 
 Todo:
   Document flag arguments in man page
@@ -1188,6 +1189,7 @@ class cOutput():
         self.headCounter = 0
         self.tail = False
         self.tailQueue = []
+        self.STDOUT = 'STDOUT'
         self.fOut = None
         self.oCsvWriter = None
         self.rootFilenames = {}
@@ -1196,12 +1198,24 @@ class cOutput():
             self.fileoptions = 'wb'
         else:
             self.fileoptions = 'w'
+
+    def Open(self, binary=False):
+        if self.fOut != None:
+            return
+
+        if binary:
+            self.fileoptions = 'wb'
+        else:
+            self.fileoptions = 'w'
+
         if self.filenameOption:
             if self.ParseHash(self.filenameOption):
                 if not self.separateFiles and self.filename != '':
                     self.fOut = open(self.filename, self.fileoptions)
             elif self.filenameOption != '':
                 self.fOut = open(self.filenameOption, self.fileoptions)
+        else:
+            self.fOut = self.STDOUT
 
     def ParseHash(self, option):
         if option.startswith('#'):
@@ -1252,14 +1266,15 @@ class cOutput():
             iter += 1
 
     def LineSub(self, line, eol):
-        if self.fOut == None or self.console:
+        self.Open()
+        if self.fOut == self.STDOUT or self.console:
             try:
                 print(line, end=eol)
             except UnicodeEncodeError:
                 encoding = sys.stdout.encoding
                 print(line.encode(encoding, errors='backslashreplace').decode(encoding), end=eol)
 #            sys.stdout.flush()
-        if self.fOut != None:
+        if self.fOut != self.STDOUT:
             self.fOut.write(line + '\n')
             self.fOut.flush()
 
@@ -1279,7 +1294,8 @@ class cOutput():
         self.Line('%s: %s' % (self.FormatTime(), line))
 
     def WriteBinary(self, data):
-        if self.fOut != None:
+        self.Open(True)
+        if self.fOut != self.STDOUT:
             self.fOut.write(data)
             self.fOut.flush()
         else:
@@ -1329,7 +1345,7 @@ class cOutput():
         self.headCounter = 0
         self.tailQueue = []
 
-        if self.fOut != None:
+        if self.fOut != self.STDOUT:
             self.fOut.close()
             self.fOut = None
 

@@ -4,8 +4,8 @@ from __future__ import print_function
 
 __description__ = "Template for text file processing"
 __author__ = 'Didier Stevens'
-__version__ = '0.0.3'
-__date__ = '2020/11/11'
+__version__ = '0.0.4'
+__date__ = '2021/02/27'
 
 """
 
@@ -27,6 +27,8 @@ History:
   2018/10/20: added eol to cOutput.Line
   2020/02/22: 0.0.2 added option --context
   2020/11/11: 0.0.3 added option --encoding
+  2021/02/14: 0.0.4 File2Strings fix & Strings2File
+  2021/02/27: Changed encoding
 
 Todo:
 """
@@ -134,7 +136,21 @@ def File2Strings(filename):
     except:
         return None
     try:
-        return map(lambda line:line.rstrip('\n'), f.readlines())
+        return tuple(map(lambda line:line.rstrip('\n'), f.readlines()))
+    except:
+        return None
+    finally:
+        f.close()
+
+def Strings2File(filename, lines):
+    try:
+        f = open(filename, 'w')
+    except:
+        return None
+    try:
+        for line in lines:
+            f.write(line + '\n')
+        return True
     except:
         return None
     finally:
@@ -471,16 +487,18 @@ def SearchAndReplace(line, search, replace, searchoptions):
     return line.replace(search, replace)
 
 def ProcessFileWithoutContext(fIn, oBeginGrep, oGrep, oEndGrep, options, fullread):
-    if fIn == None:
+    if fIn[0] == None:
         return
 
     begin = oBeginGrep == None or not oBeginGrep.dogrep
     end = False
     returnendline = False
     if fullread:
-        yield fIn.read()
+        yield fIn[0].read()
     else:
-        for line in fIn:
+        for line in fIn[0]:
+            if fIn[1] == 2:
+                line = line.decode(*ParseOptionEncoding(options.encoding))
             line = line.rstrip('\n\r')
             if not begin:
                 begin, line = oBeginGrep.Grep(line)
@@ -504,7 +522,7 @@ def ProcessFileWithoutContext(fIn, oBeginGrep, oGrep, oEndGrep, options, fullrea
             yield line
 
 def ProcessFileWithContext(fIn, oBeginGrep, oGrep, oEndGrep, context, options, fullread):
-    if fIn == None:
+    if fIn[0] == None:
         return
 
     begin = oBeginGrep == None or not oBeginGrep.dogrep
@@ -521,10 +539,12 @@ def ProcessFileWithContext(fIn, oBeginGrep, oGrep, oEndGrep, context, options, f
     lineNumbers = []
 
     if fullread:
-        yield fIn.read()
+        yield fIn[0].read()
     else:
-        for line in fIn:
+        for line in fIn[0]:
             lineCounter += 1
+            if fIn[1] == 2:
+                line = line.decode(*ParseOptionEncoding(options.encoding))
             line = line.rstrip('\n\r')
             if not begin:
                 begin, line = oBeginGrep.Grep(line)
@@ -579,29 +599,32 @@ def AnalyzeFileError(filename):
     except:
         pass
 
+def ParseOptionEncoding(encoding):
+    if encoding == '':
+        encodingvalue = 'utf8'
+        errorsvalue = 'surrogateescape'
+    else:
+        encodingvalue = encoding
+        errorsvalue = None
+    return encodingvalue, errorsvalue
+
 @contextmanager
 def TextFile(filename, oLogfile, options):
+    fType = 0
     if filename == '':
-        if options.encoding != '':
-            sys.stdin.reconfigure(encoding=options.encoding)
         fIn = sys.stdin
+        fType = 1
     elif os.path.splitext(filename)[1].lower() == '.gz':
         try:
             fIn = gzip.GzipFile(filename, 'rb')
-        except:
-            AnalyzeFileError(filename)
-            oLogfile.LineError('Opening file %s %s' % (filename, repr(sys.exc_info()[1])))
-            fIn = None
-    elif options.encoding == '':
-        try:
-            fIn = open(filename, 'r')
+            fType = 2
         except:
             AnalyzeFileError(filename)
             oLogfile.LineError('Opening file %s %s' % (filename, repr(sys.exc_info()[1])))
             fIn = None
     else:
         try:
-            fIn = open(filename, 'r', encoding=options.encoding)
+            fIn = open(filename, 'r', encoding=ParseOptionEncoding(options.encoding)[0], errors=ParseOptionEncoding(options.encoding)[1])
         except:
             AnalyzeFileError(filename)
             oLogfile.LineError('Opening file %s %s' % (filename, repr(sys.exc_info()[1])))
@@ -610,12 +633,12 @@ def TextFile(filename, oLogfile, options):
     if fIn != None:
         oLogfile.Line('Success', 'Opening file %s' % filename)
 
-    yield fIn
+    yield (fIn, fType)
 
     if fIn != None:
         if sys.exc_info()[1] != None:
             oLogfile.LineError('Reading file %s %s' % (filename, repr(sys.exc_info()[1])))
-        if fIn != sys.stdin:
+        if fType != 1:
             fIn.close()
 
 def ProcessTextFile(filename, oBeginGrep, oGrep, oEndGrep, context, oOutput, oLogfile, options):

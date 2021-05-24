@@ -2,8 +2,8 @@
 
 __description__ = 'Extract base64 strings from file'
 __author__ = 'Didier Stevens'
-__version__ = '0.0.13'
-__date__ = '2020/12/25'
+__version__ = '0.0.14'
+__date__ = '2021/05/23'
 
 """
 
@@ -31,6 +31,7 @@ History:
   2018/07/23: 0.0.11: added option -I
   2020/07/02: 0.0.12: added zxc encoding, verbose YARACompile, updated CutData, option -A, selection warning, DSS_DEFAULT_HASH_ALGORITHMS, option --jsonoutput, option -T, option -p
   2020/12/25: 0.0.13 added dec encoding; Translate refactoring
+  2021/05/23: 0.0.14 added nb decoding
 
 Todo:
 """
@@ -102,6 +103,7 @@ zxle
 zxbe
 zxc
 dec
+nb
 
 bu stands for "backslash UNICODE" (\\u), it looks like this: \\u9090\\ueb77...
 pu stands for "percent UNICODE" (%u), it looks like this: %u9090%ueb77...
@@ -112,6 +114,7 @@ zxle stands for "zero hexadecimal little-endian" (0x), it looks like this: 0x909
 zxbe stands for "zero hexadecimal big-endian" (0x), it looks like this: 0x909090900x77eb...
 zxc stands for "zero hexadecimal comma" (0x), it looks like this: 0x90,0x90,0x90,0x90...
 dec stands for "decimal", it looks like this: 80;75;3;4...
+nb stands for "NETBIOS", it looks like this: ENFKOIAA
 
 zxle and zxbe encoding looks for 1 to 8 hexadecimal characters after the prefix 0x. If the number of hexadecimal characters is uneven, a 0 (digit zero) will be prefixed to have an even number of hexadecimal digits.
 
@@ -852,6 +855,37 @@ def DecodeDataDecimal(data, ProcessFunction):
                 except:
                     continue
 
+def NETBIOSDecode(netbios):
+    dTranslate = {
+        ord(b'A'): ord(b'0'),
+        ord(b'B'): ord(b'1'),
+        ord(b'C'): ord(b'2'),
+        ord(b'D'): ord(b'3'),
+        ord(b'E'): ord(b'4'),
+        ord(b'F'): ord(b'5'),
+        ord(b'G'): ord(b'6'),
+        ord(b'H'): ord(b'7'),
+        ord(b'I'): ord(b'8'),
+        ord(b'J'): ord(b'9'),
+        ord(b'K'): ord(b'A'),
+        ord(b'L'): ord(b'B'),
+        ord(b'M'): ord(b'C'),
+        ord(b'N'): ord(b'D'),
+        ord(b'O'): ord(b'E'),
+        ord(b'P'): ord(b'F'),
+    }
+    return binascii.a2b_hex(bytes([dTranslate[char] for char in netbios]))
+
+def DecodeDataNETBIOS(data, ProcessFunction):
+    #find A - P sequence of letters
+    for netbiosstring in re.findall(b'[ABCDEFGHIJKLMNOP]+', data):
+        netbiosstring = ProcessFunction(netbiosstring)
+        if len(netbiosstring) % 2 == 0:
+            try:
+                yield (netbiosstring, NETBIOSDecode(netbiosstring))
+            except:
+                continue
+
 def YARACompile(ruledata):
     if ruledata.startswith('#'):
         if ruledata.startswith('#h#'):
@@ -1156,6 +1190,7 @@ def Main():
         'zxbe': ('0x hexadecimal big-endian, example: 0x909090900x77eb...', DecodeDataZXBigEndian),
         'zxc': ('0x hexadecimal 2 digits, comma-separated, example: 0x90,0x90,0x90,0x90...', DecodeDataZXC),
         'dec': ('decimal numbers, separated by an arbitrary separator, example: 80;75;3;4...', DecodeDataDecimal),
+        'nb': ('Uppercase letters from A to P, example: ENFKOIAA', DecodeDataNETBIOS),
     }
 
     helpEncodings = '\n'.join(AvailableEncodings())
