@@ -4,8 +4,8 @@ from __future__ import print_function
 
 __description__ = 'Analyze Cobalt Strike beacons'
 __author__ = 'Didier Stevens'
-__version__ = '0.0.6'
-__date__ = '2021/05/15'
+__version__ = '0.0.7'
+__date__ = '2021/06/14'
 
 """
 Source code put in the public domain by Didier Stevens, no Copyright
@@ -40,6 +40,7 @@ History:
   2021/04/30: CS version guessing
   2021/05/02: fix
   2021/05/15: continue JSON output
+  2021/06/14: updated man with 1768.json info
 
 Todo:
   add JSON output
@@ -96,6 +97,8 @@ Example : 1768.py -l ATP_1:12345678,pentester_2:87654321
 Option -c (--csv) is used to output the config parameters in CSV format.
 
 Option -J (--jsonoutput) is used to output the config parameters in JSON format.
+
+A JSON file with name 1768.json placed in the same directory as 1768.py will be used to enhance fields with information, like the license-id field.
 
 It reads one or more files or stdin. This tool is very versatile when it comes to handling files, later full details will be provided.
 
