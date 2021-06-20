@@ -2,8 +2,8 @@
 
 __description__ = 'Analyze OLE files (Compound Binary Files)'
 __author__ = 'Didier Stevens'
-__version__ = '0.0.60'
-__date__ = '2021/02/23'
+__version__ = '0.0.61'
+__date__ = '2021/06/20'
 
 """
 
@@ -109,6 +109,7 @@ History:
   2021/01/09: 0.0.58 updated man
   2021/02/06: 0.0.59 small change to XML detection logic
   2021/02/23: 0.0.60 small change PIP message
+  2021/06/20: 0.0.61 updated man
 
 Todo:
 
@@ -176,6 +177,8 @@ Manual:
 
 oledump is a tool to analyze OLE files (officially: Compound File Binary Format, CFBF). Many file formats are in fact OLE files, like Microsoft Office files, MSI files, ... Even the new Microsoft Office Open XML (OOXML) format uses OLE files for VBA macros.
 oledump can analyze OLE files directly, or indirectly when they are contained in some file format (like .docm, .xml, ...).
+
+A cheat sheet can be found here: https://www.sans.org/security-resources/posters/oledumppy-quick-reference/325/download
 
 oledump uses 2 modules that are not part of Python 2: olefile (http://www.decalage.info/python/olefileio) and YARA.
 You need to install the olefile module for this program to work.
