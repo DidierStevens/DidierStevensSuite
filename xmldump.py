@@ -2,8 +2,8 @@
 
 __description__ = 'This is essentially a wrapper for xml.etree.ElementTree'
 __author__ = 'Didier Stevens'
-__version__ = '0.0.6'
-__date__ = '2020/04/16'
+__version__ = '0.0.7'
+__date__ = '2020/06/07'
 
 """
 
@@ -21,6 +21,7 @@ History:
   2020/01/12: added pretty print
   2020/04/16: 0.0.5 added celltext; option --encoding
   2020/04/16: 0.0.6 updated man page
+  2020/06/07: 0.0.7 added option -j
 
 Todo:
 """
@@ -34,6 +35,8 @@ import textwrap
 import xml.etree.ElementTree
 import re
 import xml.dom.minidom
+import json
+import binascii
 
 def PrintManual():
     manual = r'''
@@ -207,6 +210,9 @@ Reference,Formula,Value
 A1,EXEC("note"&"pad"),33
 A2,HALT(),1
 
+Option -j can be used with celltext to pass JSON output from zipdump to xmldump, and have shared strings references resolved.
+Option -j takes the id number of the XML file to convert to CSV.
+
 By default, output is printed to the console (stdout). It can be directed to a file using option -o.
 '''
     for line in manual.split('\n'):
@@ -317,6 +323,50 @@ def ProcessFile(fIn, fullread):
         for line in fIn:
             yield line.strip('\n\r')
 
+def CheckJSON(stringJSON):
+    try:
+        object = json.loads(stringJSON)
+    except:
+        print('Error parsing JSON')
+        print(sys.exc_info()[1])
+        return None
+    if not isinstance(object, dict):
+        print('Error JSON is not a dictionary')
+        return None
+    if not 'version' in object:
+        print('Error JSON dictionary has no version')
+        return None
+    if object['version'] != 2:
+        print('Error JSON dictionary has wrong version')
+        return None
+    if not 'id' in object:
+        print('Error JSON dictionary has no id')
+        return None
+    if object['id'] != 'didierstevens.com':
+        print('Error JSON dictionary has wrong id')
+        return None
+    if not 'type' in object:
+        print('Error JSON dictionary has no type')
+        return None
+    if object['type'] != 'content':
+        print('Error JSON dictionary has wrong type')
+        return None
+    if not 'fields' in object:
+        print('Error JSON dictionary has no fields')
+        return None
+    if not 'name' in object['fields']:
+        print('Error JSON dictionary has no name field')
+        return None
+    if not 'content' in object['fields']:
+        print('Error JSON dictionary has no content field')
+        return None
+    if not 'items' in object:
+        print('Error JSON dictionary has no items')
+        return None
+    for item in object['items']:
+        item['content'] = binascii.a2b_base64(item['content'])
+    return object['items']
+
 def XMLGetText(element):
     if sys.version_info[0] > 2:
         encoding = 'unicode'
@@ -373,6 +423,22 @@ def PrettyPrint(data, oOutput, options):
     oOutput.Line(xml.dom.minidom.parseString(data).toprettyxml())
 
 def ExtractCellText(data, oOutput, options):
+    dSharedStrings = {}
+    if options.jsoninput != '':
+        items = CheckJSON(data)
+        if items == None:
+            return
+        for item in items:
+            if  item['name'].endswith('/sharedStrings.xml'):
+                root, dXMLNS = AnalyzeXMLNS(item['content'].decode())
+                counter = 0
+                for element in root.iter('{http://schemas.openxmlformats.org/spreadsheetml/2006/main}si'):
+                    for child in element:
+                        dSharedStrings[counter] = child.text
+                    counter += 1
+            elif item['id'] == int(options.jsoninput):
+                data = item['content'].decode()
+
     oOutput.Line(MakeCSVLine(['Reference', 'Formula', 'Value'], DEFAULT_SEPARATOR, QUOTE))
     root, dXMLNS = AnalyzeXMLNS(data)
     for element in root.iter('{http://schemas.openxmlformats.org/spreadsheetml/2006/main}c'):
@@ -380,6 +446,7 @@ def ExtractCellText(data, oOutput, options):
             reference = element.attrib['r']
         else:
             reference = ''
+        cellType = element.attrib.get('t', '')
         formula = ''
         value = ''
         for child in element:
@@ -387,6 +454,8 @@ def ExtractCellText(data, oOutput, options):
                 formula = XMLGetText(child)
             if child.tag == '{http://schemas.openxmlformats.org/spreadsheetml/2006/main}v':
                 value = XMLGetText(child)
+                if cellType == 's':
+                    formula = dSharedStrings.get(int(value), '')
         oOutput.Line(MakeCSVLine([reference, formula, value], DEFAULT_SEPARATOR, QUOTE))
 
 dCommands = {'text': ExtractText, 'wordtext': ExtractWordText, 'elementtext': ExtractElementText, 'attributes': ExtractElementAttributes, 'pretty': PrettyPrint, 'celltext': ExtractCellText}
@@ -428,6 +497,7 @@ https://DidierStevens.com'''
     oParser.add_option('-m', '--man', action='store_true', default=False, help='Print manual')
     oParser.add_option('-u', '--includeuri', action='store_true', default=False, help='Include URI for the tags')
     oParser.add_option('-o', '--output', type=str, default='', help='Output to file')
+    oParser.add_option('-j', '--jsoninput', type=str, default='', help='JSON input')
     oParser.add_option('--encoding', type=str, default='', help='Encoding for file open')
     (options, args) = oParser.parse_args()
 
