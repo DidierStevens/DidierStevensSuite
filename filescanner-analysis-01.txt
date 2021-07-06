@@ -1,10 +1,11 @@
-# Last change 2021/01/16
+# Last change 2021/07/06
 # exhaustive: process all rules, don't stop after the first match
 exhaustive
 # fullfileread: read the full content of files
 fullfileread
 # selectallfiles: also report files that didn't trigger rules
 selectallfiles
+# extension=.txt: limit search to file with .txt extension
 # rules:
 PK:start:str=PK
 $META:icontent:str=MANIFEST.MF
