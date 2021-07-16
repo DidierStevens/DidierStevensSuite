@@ -2,7 +2,7 @@
 
 __description__ = 'Extract base64 strings from file'
 __author__ = 'Didier Stevens'
-__version__ = '0.0.15'
+__version__ = '0.0.16'
 __date__ = '2021/07/16'
 
 """
@@ -33,6 +33,7 @@ History:
   2020/12/25: 0.0.13 added dec encoding; Translate refactoring
   2021/05/23: 0.0.14 added nb decoding
   2021/07/16: 0.0.15 bug fix -i -I options; man page changes
+  2021/07/16: 0.0.16 added b85 decoding
 
 Todo:
 """
@@ -52,6 +53,7 @@ import codecs
 import zlib
 import json
 import operator
+import base64
 try:
     import yara
 except:
@@ -109,6 +111,7 @@ zxbe stands for "zero hexadecimal big-endian" (0x), it looks like this: 0x909090
 zxc stands for "zero hexadecimal comma" (0x), it looks like this: 0x90,0x90,0x90,0x90...
 dec stands for "decimal", it looks like this: 80;75;3;4...
 nb stands for "NETBIOS", it looks like this: ENFKOIAA
+b85 stands for BASE85 RFC 1924, it looks like this: X>D+Ca&#bLba`-Pb31o...
 
 zxle and zxbe encoding looks for 1 to 8 hexadecimal characters after the prefix 0x. If the number of hexadecimal characters is uneven, a 0 (digit zero) will be prefixed to have an even number of hexadecimal digits.
 
@@ -745,6 +748,14 @@ def DecodeDataBase64(data, ProcessFunction):
             except:
                 continue
 
+def DecodeDataBase85RFC1924(data, ProcessFunction):
+    for base85string in re.findall(b'[ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!#$%&()*+\-;<=>?@^_`{|}~]+', data):
+        base85string = ProcessFunction(base85string)
+        try:
+            yield (base85string, base64.b85decode(base85string))
+        except:
+            continue
+
 def DecodeDataHex(data, ProcessFunction):
     for hexstring in re.findall(b'[ABCDEFabcdef0123456789]+', data):
         hexstring = ProcessFunction(hexstring)
@@ -1188,6 +1199,7 @@ def Main():
         'zxc': ('0x hexadecimal 2 digits, comma-separated, example: 0x90,0x90,0x90,0x90...', DecodeDataZXC),
         'dec': ('decimal numbers, separated by an arbitrary separator, example: 80;75;3;4...', DecodeDataDecimal),
         'nb': ('NETBIOS, uppercase letters from A to P, example: ENFKOIAA', DecodeDataNETBIOS),
+        'b85': ('BASE85 RFC 1924, example: X>D+Ca&#bLba`-Pb31o...', DecodeDataBase85RFC1924),
     }
 
     helpEncodings = '\n'.join(AvailableEncodings())
