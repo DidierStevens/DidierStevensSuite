@@ -2,8 +2,8 @@
 
 __description__ = 'Extract base64 strings from file'
 __author__ = 'Didier Stevens'
-__version__ = '0.0.14'
-__date__ = '2021/05/23'
+__version__ = '0.0.15'
+__date__ = '2021/07/16'
 
 """
 
@@ -32,6 +32,7 @@ History:
   2020/07/02: 0.0.12: added zxc encoding, verbose YARACompile, updated CutData, option -A, selection warning, DSS_DEFAULT_HASH_ALGORITHMS, option --jsonoutput, option -T, option -p
   2020/12/25: 0.0.13 added dec encoding; Translate refactoring
   2021/05/23: 0.0.14 added nb decoding
+  2021/07/16: 0.0.15 bug fix -i -I options; man page changes
 
 Todo:
 """
@@ -68,6 +69,8 @@ dumplinelength = 16
 MALWARE_PASSWORD = b'infected'
 REGEX_STANDARD = b'[\x09\x20-\x7E]'
 
+global dEncodings
+
 def PrintManual():
     manual = '''
 Manual:
@@ -93,18 +96,9 @@ By default, it's the MD5 hash, but this can be changed by setting environment va
 Like this: set DSS_DEFAULT_HASH_ALGORITHMS=sha256
 
 By default, base64dump will search for base64 encoding strings. It's possible to specify other encodings by using option -e. This option takes the following values:
-b64
-bu
-pu
-hex
-bx
-ah
-zxle
-zxbe
-zxc
-dec
-nb
+''' + '\n'.join(dEncodings.keys()) + '''
 
+b64 stands for BASE64, it looks like this: TVqQAAMAAAAEAAAA...
 bu stands for "backslash UNICODE" (\\u), it looks like this: \\u9090\\ueb77...
 pu stands for "percent UNICODE" (%u), it looks like this: %u9090%ueb77...
 hex stands for "hexadecimal", it looks like this: 6D6573736167652C...
@@ -1058,9 +1052,12 @@ def BASE64Dump(filename, options):
     if options.ignorewhitespace:
         data = RemoveWhitespace(data)
     for ignore in options.ignore:
-        data = data.replace(ignore, '')
-    for ignore in binascii.a2b_hex(options.ignorehex):
-        data = data.replace(ignore, '')
+        data = data.replace(bytes([P23Ord(ignore)]), b'')
+    for index in range(len(options.ignore)):
+        data = data.replace(options.ignore.encode()[index:index + 1], b'')
+    bytesignorehex = binascii.a2b_hex(options.ignorehex)
+    for index in range(len(bytesignorehex)):
+        data = data.replace(bytesignorehex[index:index + 1], b'')
     if options.ignorenullbytes:
         previous_char_was_zero = False
         result = ''
@@ -1190,7 +1187,7 @@ def Main():
         'zxbe': ('0x hexadecimal big-endian, example: 0x909090900x77eb...', DecodeDataZXBigEndian),
         'zxc': ('0x hexadecimal 2 digits, comma-separated, example: 0x90,0x90,0x90,0x90...', DecodeDataZXC),
         'dec': ('decimal numbers, separated by an arbitrary separator, example: 80;75;3;4...', DecodeDataDecimal),
-        'nb': ('Uppercase letters from A to P, example: ENFKOIAA', DecodeDataNETBIOS),
+        'nb': ('NETBIOS, uppercase letters from A to P, example: ENFKOIAA', DecodeDataNETBIOS),
     }
 
     helpEncodings = '\n'.join(AvailableEncodings())
