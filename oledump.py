@@ -2,8 +2,8 @@
 
 __description__ = 'Analyze OLE files (Compound Binary Files)'
 __author__ = 'Didier Stevens'
-__version__ = '0.0.61'
-__date__ = '2021/06/20'
+__version__ = '0.0.62'
+__date__ = '2021/08/11'
 
 """
 
@@ -110,6 +110,7 @@ History:
   2021/02/06: 0.0.59 small change to XML detection logic
   2021/02/23: 0.0.60 small change PIP message
   2021/06/20: 0.0.61 updated man
+  2021/08/11: 0.0.62 fix return code bug for multiple OLE files inside OOXML container
 
 Todo:
 
@@ -2200,7 +2201,8 @@ def OLEDump(filename, options):
                         if not options.quiet and not options.jsonoutput:
                             print('%s: %s' % (letter, info.filename))
                     ole = olefile.OleFileIO(DataIO(content))
-                    returnCode, selectionCounter = OLESub(ole, content, letter, rules, options)
+                    returnCodeSub, selectionCounter = OLESub(ole, content, letter, rules, options)
+                    returnCode = max(returnCode, returnCodeSub)
                     selectionCounterTotal += selectionCounter
                     oleFileFound = True
                     ole.close()
@@ -2242,7 +2244,8 @@ def OLEDump(filename, options):
                                             break
                                     print('%s: %s' % (letter, nameValue))
                             ole = olefile.OleFileIO(DataIO(content))
-                            returnCode, selectionCounter = OLESub(ole, content, letter, rules, options)
+                            returnCodeSub, selectionCounter = OLESub(ole, content, letter, rules, options)
+                            returnCode = max(returnCode, returnCodeSub)
                             PrintWarningSelection(options.select, selectionCounter)
                             ole.close()
             elif data.startswith(ACTIVEMIME_MAGIC):

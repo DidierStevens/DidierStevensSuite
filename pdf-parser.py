@@ -1,11 +1,11 @@
-#!/usr/bin/python
+#!/usr/bin/env python
 
 __description__ = 'pdf-parser, use it to parse a PDF document'
 __author__ = 'Didier Stevens'
-__version__ = '0.7.4'
-__date__ = '2019/11/05'
+__version__ = '0.7.5'
+__date__ = '2021/07/03'
 __minimum_python_version__ = (2, 5, 1)
-__maximum_python_version__ = (3, 7, 5)
+__maximum_python_version__ = (3, 9, 5)
 
 """
 Source code put in public domain by Didier Stevens, no Copyright
@@ -69,6 +69,7 @@ History:
   2019/07/30: bug fixes (including fixes Josef Hinteregger)
   2019/09/26: V0.7.3 added multiple id selection to option -o; added man page (-m); added environment variable PDFPARSER_OPTIONS; bug fixes
   2019/11/05: V0.7.4 fixed plugin path when compiled with pyinstaller, replaced eval with int
+  2021/07/03: V0.7.5 bug fixes; fixed ASCII85Decode Python 3 bug thanks to R Primus
 
 Todo:
   - handle printf todo
@@ -978,7 +979,7 @@ def ConditionalCanonicalize(sIn, nocanonicalizedoutput):
 def ASCII85Decode(data):
   import struct
   n = b = 0
-  out = ''
+  out = b''
   for c in data:
     if '!' <= c and c <= 'u':
       n += 1
@@ -988,7 +989,7 @@ def ASCII85Decode(data):
         n = b = 0
     elif c == 'z':
       assert n == 0
-      out += '\0\0\0\0'
+      out += b'\0\0\0\0'
     elif c == '~':
       if n:
         for _ in range(5-n):

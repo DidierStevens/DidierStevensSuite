@@ -2,8 +2,8 @@
 
 __description__ = 'Tool to test a PDF file'
 __author__ = 'Didier Stevens'
-__version__ = '0.2.7'
-__date__ = '2019/11/05'
+__version__ = '0.2.8'
+__date__ = '2020/11/21'
 
 """
 
@@ -56,6 +56,7 @@ History:
   2018/07/05: V0.2.5 introduced cExpandFilenameArguments; renamed option literal to literalfilenames
   2019/09/30: V0.2.6 color bugfix, thanks to Leo
   2019/11/05: V0.2.7 fixed plugin path when compiled with pyinstaller
+  2020/11/21: V0.2.8 added data argument to PDFiD function
 
 Todo:
   - update XML example (entropy, EOF)
@@ -84,6 +85,10 @@ if sys.version_info[0] >= 3:
     import configparser as ConfigParser
 else:
     import ConfigParser
+if sys.version_info[0] >= 3:
+    from io import BytesIO as DataIO
+else:
+    from cStringIO import StringIO as DataIO
 
 #Convert 2 Bytes If Python 3
 def C2BIP3(string):
@@ -93,9 +98,11 @@ def C2BIP3(string):
         return string
 
 class cBinaryFile:
-    def __init__(self, file):
+    def __init__(self, file, data=None):
         self.file = file
-        if file == '':
+        if data != None:
+            self.infile = DataIO(data)
+        elif file == '':
             self.infile = sys.stdin
         elif file.lower().startswith('http://') or file.lower().startswith('https://'):
             try:
@@ -382,7 +389,7 @@ def ParseINIFile():
                 keywords.append(key)
     return keywords
 
-def PDFiD(file, allNames=False, extraData=False, disarm=False, force=False):
+def PDFiD(file, allNames=False, extraData=False, disarm=False, force=False, data=None):
     """Example of XML output:
     <PDFiD ErrorOccured="False" ErrorMessage="" Filename="test.pdf" Header="%PDF-1.1" IsPDF="True" Version="0.0.4" Entropy="4.28">
             <Keywords>
@@ -454,7 +461,7 @@ def PDFiD(file, allNames=False, extraData=False, disarm=False, force=False):
     try:
         attIsPDF = xmlDoc.createAttribute('IsPDF')
         xmlDoc.documentElement.setAttributeNode(attIsPDF)
-        oBinaryFile = cBinaryFile(file)
+        oBinaryFile = cBinaryFile(file, data)
         if extraData:
             oPDFDate = cPDFDate()
             oEntropy = cEntropy()

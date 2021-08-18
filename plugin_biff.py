@@ -2,8 +2,8 @@
 
 __description__ = 'BIFF plugin for oledump.py'
 __author__ = 'Didier Stevens'
-__version__ = '0.0.23'
-__date__ = '2021/06/18'
+__version__ = '0.0.24'
+__date__ = '2021/08/12'
 
 """
 
@@ -52,6 +52,8 @@ History:
   2021/02/23: added PASSWORD record cracking
   2021/05/23: 0.0.23 bruteforce
   2021/06/18: added userdefinedfunction names (sample RANDBETWEEN)
+  2021/07/23: 0.0.24 added CreateXorKey_Method1
+  2021/08/12: continue xor deobfuscation
 
 Todo:
   updated parsing of records for BIFF5 record format
@@ -196,6 +198,8 @@ def ParseLocRelU(expression):
 def ParseLoc(expression, cellrefformat, ignoreRelFlags=False):
     formatcodes = 'HH'
     formatsize = struct.calcsize(formatcodes)
+    if len(expression) < formatsize:
+        return '', expression
     row, column = struct.unpack(formatcodes, expression[0:formatsize])
     if ignoreRelFlags:
         rowRelative = False
@@ -1352,13 +1356,14 @@ class cBruteforceAttack(object):
 
 def ParsePasswordFileName(filename):
     dCharacterSets = {
+        'n': '0123456789',
         'a': 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789',
         'p': ''' !"#$%&'()*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]^_`abcdefghijklmnopqrstuvwxyz{|}~''',
     }
 
     if not filename.startswith('#'):
         return None
-    if filename[1] in ['a', 'p']:
+    if filename[1] in dCharacterSets:
         return [dCharacterSets[filename[1]], int(filename[2:])]
     else:
         return [dCharacterSets['a'], int(filename[1:])]
@@ -4927,8 +4932,9 @@ def GetDictionary(passwordfile):
         for password in passwordsJTR:
             yield password
     else:
-        for password in File2Strings(passwordfile):
-            yield password
+        with open(passwordfile, encoding='latin') as fPasswords:
+            for password in fPasswords:
+                yield password.rstrip('\n')
 
 def CreatePasswordVerifier_Method1(password):
     verifier = 0
@@ -4945,11 +4951,27 @@ def CreatePasswordVerifier_Method1(password):
         verifier = intermediate3 ^ P23Ord(passwordbyte)
     return verifier ^ 0xCE4B
 
+def CreateXorKey_Method1(password):
+    password = password[:15]
+    initialCode = ( 0xE1F0, 0x1D0F, 0xCC9C, 0x84C0, 0x110C, 0x0E10, 0xF1CE, 0x313E, 0x1872, 0xE139, 0xD40F, 0x84F9, 0x280C, 0xA96A, 0x4EC3 )
+    xorMatrix = ( 0xAEFC, 0x4DD9, 0x9BB2, 0x2745, 0x4E8A, 0x9D14, 0x2A09, 0x7B61, 0xF6C2, 0xFDA5, 0xEB6B, 0xC6F7, 0x9DCF, 0x2BBF, 0x4563, 0x8AC6, 0x05AD, 0x0B5A, 0x16B4, 0x2D68, 0x5AD0, 0x0375, 0x06EA, 0x0DD4, 0x1BA8, 0x3750, 0x6EA0, 0xDD40, 0xD849, 0xA0B3, 0x5147, 0xA28E, 0x553D, 0xAA7A, 0x44D5, 0x6F45, 0xDE8A, 0xAD35, 0x4A4B, 0x9496, 0x390D, 0x721A, 0xEB23, 0xC667, 0x9CEF, 0x29FF, 0x53FE, 0xA7FC, 0x5FD9, 0x47D3, 0x8FA6, 0x0F6D, 0x1EDA, 0x3DB4, 0x7B68, 0xF6D0, 0xB861, 0x60E3, 0xC1C6, 0x93AD, 0x377B, 0x6EF6, 0xDDEC, 0x45A0, 0x8B40, 0x06A1, 0x0D42, 0x1A84, 0x3508, 0x6A10, 0xAA51, 0x4483, 0x8906, 0x022D, 0x045A, 0x08B4, 0x1168, 0x76B4, 0xED68, 0xCAF1, 0x85C3, 0x1BA7, 0x374E, 0x6E9C, 0x3730, 0x6E60, 0xDCC0, 0xA9A1, 0x4363, 0x86C6, 0x1DAD, 0x3331, 0x6662, 0xCCC4, 0x89A9, 0x0373, 0x06E6, 0x0DCC, 0x1021, 0x2042, 0x4084, 0x8108, 0x1231, 0x2462, 0x48C4 )
+
+    xorkey = initialCode[len(password) - 1]
+    currentElement = 0x68
+    for char in password[::-1]:
+        charValue = ord(char)
+        for i in range(7):
+            if charValue & 0x40 != 0:
+                xorkey = xorkey ^ xorMatrix[currentElement]
+            charValue = charValue * 2
+            currentElement -= 1
+    return xorkey
+
 def AnalyzeXORObfuscationStructure(data, passwordlistFilename):
     key, verifier = struct.unpack('<HH', data)
     password = None
     for candidate in GetDictionary(passwordlistFilename):
-        if CreatePasswordVerifier_Method1(candidate) == verifier:
+        if CreatePasswordVerifier_Method1(candidate) == verifier and CreateXorKey_Method1(candidate) == key:
             password = candidate
             break
     return key, verifier, password
@@ -5358,7 +5380,7 @@ class cBIFF(cPluginParent):
 
                 # FORMULA record
                 if opcode == 0x06 and len(data) >= 21:
-                    if not filepassFound:
+                    if not filepassFound or decrypted:
                         cellref, dummy = ParseLoc(data, options.cellrefformat, True)
                         formatcodes = 'H'
                         formatsize = struct.calcsize(formatcodes)
@@ -5377,7 +5399,7 @@ class cBIFF(cPluginParent):
 
                 # LABEL record #a# difference BIFF4 and BIFF5+
                 if opcode == 0x18 and len(data) >= 16:
-                    if not filepassFound:
+                    if not filepassFound or decrypted:
                         flags = P23Ord(data[0])
                         lnName = P23Ord(data[3])
                         szFormula = P23Ord(data[4]) + P23Ord(data[5]) * 0x100
@@ -5465,7 +5487,7 @@ class cBIFF(cPluginParent):
 
                 # BOF record
                 if opcode == 0x0809 and len(data) >= 8:
-                    if not filepassFound:
+                    if not filepassFound or decrypted:
                         formatcodes = '<HHHH'
                         formatsize = struct.calcsize(formatcodes)
                         vers, dt, rupBuild, rupYear = struct.unpack(formatcodes, data[0:formatsize])
@@ -5479,7 +5501,7 @@ class cBIFF(cPluginParent):
 
                 # STRING record
                 if opcode == 0x207 and len(data) >= 4:
-                    if not filepassFound:
+                    if not filepassFound or decrypted:
                         values = list(Strings(data[3:]).values())
                         strings = ''
                         if values[0] != []:
@@ -5492,7 +5514,7 @@ class cBIFF(cPluginParent):
 
                 # number record
                 if opcode == 0x0203:
-                    if not filepassFound:
+                    if not filepassFound or decrypted:
                         cellref, data2 = ParseLoc(data, options.cellrefformat, True)
                         formatcodes = '<Hd'
                         formatsize = struct.calcsize(formatcodes)
@@ -5502,7 +5524,7 @@ class cBIFF(cPluginParent):
 
                 # RK record
                 if opcode == 0x027E and len(data) == 10:
-                    if not filepassFound:
+                    if not filepassFound or decrypted:
                         cellref, data2 = ParseLoc(data, options.cellrefformat, True)
                         formatcodes = '<H'
                         formatsize = struct.calcsize(formatcodes)
@@ -5514,7 +5536,7 @@ class cBIFF(cPluginParent):
                 # unknown record
                 #a# handle more than one UDF
                 if opcode == 0x23 and len(data) > 8:
-                    if not filepassFound:
+                    if not filepassFound or decrypted:
                         dummy1, dummy2, stringLength, remainder = Unpack('<IHH', data)
                         userdefinedfunctionNames.append(remainder[:stringLength].decode())
 
