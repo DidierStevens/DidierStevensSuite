@@ -2,8 +2,8 @@
 
 __description__ = "Program to use Python's re.findall on files"
 __author__ = 'Didier Stevens'
-__version__ = '0.0.17'
-__date__ = '2021/05/05'
+__version__ = '0.0.18'
+__date__ = '2021/09/21'
 
 """
 
@@ -48,6 +48,8 @@ History:
   2021/03/11: 0.0.17 added gzip support and option --encoding
   2021/04/04: fixes for binary mode
   2021/05/05: added public ips filter
+  2021/09/19: 0.0.18 map Python3 fix
+  2021/09/21: added sys.stdin.reconfigure
 
 Todo:
   add hostname to header
@@ -274,7 +276,7 @@ def File2Strings(filename):
     except:
         return None
     try:
-        return map(lambda line:line.rstrip('\n'), f.readlines())
+        return list(map(lambda line:line.rstrip('\n'), f.readlines()))
     except:
         return None
     finally:
@@ -462,6 +464,13 @@ def ParseOptionEncoding(encoding):
         errorsvalue = None
     return encodingvalue, errorsvalue
 
+def MinimalPythonVersion(major, minor):
+    if sys.version_info[0] < major:
+        return False
+    if sys.version_info[0] > major:
+        return True
+    return sys.version_info[1] >= minor
+
 def RESearchSingle(regex, filenames, oOutput, options):
     if options.name and regex == 'all':
         regexes = [CompileRegex(name, options) for name in LibraryAllNames() if not name in excludeRegexesForAll]
@@ -473,6 +482,8 @@ def RESearchSingle(regex, filenames, oOutput, options):
         if filename == '':
             if options.fullread or options.extractstrings or options.grepall:
                 IfWIN32SetBinary(sys.stdin)
+            elif MinimalPythonVersion(3, 7):
+                sys.stdin.reconfigure(encoding=ParseOptionEncoding(options.encoding)[0], errors=ParseOptionEncoding(options.encoding)[1])
             fIn = sys.stdin
             fType = 1
         elif os.path.splitext(filename)[1].lower() == '.gz':
@@ -532,6 +543,8 @@ def RESearchCSV(csvFilename, filenames, oOutput, options):
         if filename == '':
             if options.fullread or options.extractstrings or options.grepall:
                 IfWIN32SetBinary(sys.stdin)
+            elif MinimalPythonVersion(3, 7):
+                sys.stdin.reconfigure(encoding=ParseOptionEncoding(options.encoding)[0], errors=ParseOptionEncoding(options.encoding)[1])
             fIn = sys.stdin
             fType = 1
         elif os.path.splitext(filename)[1].lower() == '.gz':
