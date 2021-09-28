@@ -2,8 +2,8 @@
 
 __description__ = 'Extract base64 strings from file'
 __author__ = 'Didier Stevens'
-__version__ = '0.0.16'
-__date__ = '2021/07/16'
+__version__ = '0.0.17'
+__date__ = '2021/09/27'
 
 """
 
@@ -34,6 +34,7 @@ History:
   2021/05/23: 0.0.14 added nb decoding
   2021/07/16: 0.0.15 bug fix -i -I options; man page changes
   2021/07/16: 0.0.16 added b85 decoding
+  2021/09/27: 0.0.17 added select L; added a85 decoding
 
 Todo:
 """
@@ -112,10 +113,11 @@ zxc stands for "zero hexadecimal comma" (0x), it looks like this: 0x90,0x90,0x90
 dec stands for "decimal", it looks like this: 80;75;3;4...
 nb stands for "NETBIOS", it looks like this: ENFKOIAA
 b85 stands for BASE85 RFC 1924, it looks like this: X>D+Ca&#bLba`-Pb31o...
+a85 stands for ASCII85, it looks like this: BOu!rD]...
 
 zxle and zxbe encoding looks for 1 to 8 hexadecimal characters after the prefix 0x. If the number of hexadecimal characters is uneven, a 0 (digit zero) will be prefixed to have an even number of hexadecimal digits.
 
-Select a datastream for further analysis with option -s followed by the ID number of the datastream (or a for all). For example -s 2:
+Select a datastream for further analysis with option -s followed by the ID number of the datastream, L for the largest one, or a for all. For example -s 2:
 
 Info:
  MD5: d611941e0d24cb6b59c7b6b2add4fd8f
@@ -756,6 +758,14 @@ def DecodeDataBase85RFC1924(data, ProcessFunction):
         except:
             continue
 
+def DecodeDataAscii85(data, ProcessFunction):
+    for ascii85string in re.findall(b'''[!"#$%&'()*+,./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\]^_`abcdefghijklmnopqrstuz-]+''', data):
+        ascii85string = ProcessFunction(ascii85string)
+        try:
+            yield (ascii85string, base64.a85decode(ascii85string))
+        except:
+            continue
+
 def DecodeDataHex(data, ProcessFunction):
     for hexstring in re.findall(b'[ABCDEFabcdef0123456789]+', data):
         hexstring = ProcessFunction(hexstring)
@@ -1140,8 +1150,17 @@ def BASE64Dump(filename, options):
         for key, value in sorted(report):
             print(value)
     else:
+        decodedData = list(dEncodings[options.encoding][1](data, ProcessFunction))
+        if options.select == 'L':
+            largestSize = -1
+            largestCounter = None
+            for index, (encodeddata, decodeddata) in enumerate(decodedData):
+                if len(encodeddata) > largestSize:
+                    largestSize = len(encodeddata)
+                    largestCounter = index + 1
+            options.select = str(largestCounter)
         counter = 1
-        for encodeddata, decodeddata in dEncodings[options.encoding][1](data, ProcessFunction):
+        for encodeddata, decodeddata in decodedData:
             if options.number and len(decodeddata) < options.number:
                 continue
             if options.unique and decodeddata in dDecodedData:
@@ -1200,13 +1219,14 @@ def Main():
         'dec': ('decimal numbers, separated by an arbitrary separator, example: 80;75;3;4...', DecodeDataDecimal),
         'nb': ('NETBIOS, uppercase letters from A to P, example: ENFKOIAA', DecodeDataNETBIOS),
         'b85': ('BASE85 RFC 1924, example: X>D+Ca&#bLba`-Pb31o...', DecodeDataBase85RFC1924),
+        'a85': ('ASCII85, example: BOu!rD]...', DecodeDataAscii85),
     }
 
     helpEncodings = '\n'.join(AvailableEncodings())
     oParser = optparse.OptionParser(usage='usage: %prog [options] [file]\n' + __description__  + '\n' + helpEncodings, version='%prog ' + __version__)
     oParser.add_option('-m', '--man', action='store_true', default=False, help='Print manual')
     oParser.add_option('-e', '--encoding', default='b64', help='select encoding to use, use "all" to try all encodings (default base64)')
-    oParser.add_option('-s', '--select', default='', help='select item nr for dumping (a for all)')
+    oParser.add_option('-s', '--select', default='', help='select item nr for dumping (a for all, L for largest)')
     oParser.add_option('-d', '--dump', action='store_true', default=False, help='perform dump')
     oParser.add_option('-x', '--hexdump', action='store_true', default=False, help='perform hex dump')
     oParser.add_option('-a', '--asciidump', action='store_true', default=False, help='perform ascii dump')
@@ -1234,6 +1254,13 @@ def Main():
     if options.man:
         oParser.print_help()
         PrintManual()
+        return 0
+
+    if options.number != None and options.select == 'L':
+        print('Error: option number and select L are mutually exclusive')
+        return 0
+    if options.unique and options.select == 'L':
+        print('Error: option unique and select L are mutually exclusive')
         return 0
 
     if ParseCutArgument(options.cut)[0] == None:
