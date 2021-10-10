@@ -4,8 +4,8 @@ from __future__ import print_function
 
 __description__ = 'Analyze Cobalt Strike beacons'
 __author__ = 'Didier Stevens'
-__version__ = '0.0.7'
-__date__ = '2021/06/14'
+__version__ = '0.0.8'
+__date__ = '2021/10/10'
 
 """
 Source code put in the public domain by Didier Stevens, no Copyright
@@ -41,6 +41,7 @@ History:
   2021/05/02: fix
   2021/05/15: continue JSON output
   2021/06/14: updated man with 1768.json info
+  2021/10/10: 0.0.8 1768.json improvements
 
 Todo:
   add JSON output
@@ -1603,10 +1604,15 @@ def ConvertIntToIPv4(value):
 def ToHexadecimal(value):
     return binascii.b2a_hex(value).decode()
 
-def LookupValue(number, value, dInfo):
+def LookupValue(number, value, dInfo, verbose=False):
     lookup = ''
     if number in dInfo:
         lookup = dInfo[number].get(value, '')
+    if isinstance(lookup, dict):
+        message = lookup['normal']
+        if verbose:
+            message += ' (%s)' % lookup['verbose']
+        lookup = message
     return PrefixIfNeeded(lookup)
 
 def InterpretValue(info, number, value, dConfigValueInterpreter):
@@ -1627,8 +1633,14 @@ def DetermineCSVersionFromConfig(dJSON):
         return ('3', maximumID)
     elif maximumID == 55:
         return ('4.0', maximumID)
+    elif maximumID > 55 and maximumID < 58:
+        return ('4.1', maximumID)
+    elif maximumID == 58:
+        return ('4.2', maximumID)
+    elif maximumID == 70:
+        return ('4.3', maximumID)
     else:
-        return ('4.1+', maximumID)
+        return ('4.4', maximumID)
 
 def GetJSONData():
     filename = os.path.join(GetScriptPath(), '1768.json')
@@ -1746,12 +1758,13 @@ def AnalyzeEmbeddedPEFileSub(payloadsectiondata, options):
             rawvalue = struct.unpack('>I', parameter)[0]
             value = '%d' % rawvalue
             info = InterpretValue(value, number, parameter[0:4], dConfigValueInterpreter)
-            info += LookupValue(str(number), value, dLookupValues)
+            info += LookupValue(str(number), value, dLookupValues, options.verbose)
         elif type == 3 and not number in [0x0c, 0x0d]:
             info = InterpretValue('', number, parameter, dConfigValueInterpreter)
             rawvalue = binascii.b2a_hex(parameter).decode()
             if info == '':
                 info = Represent(C2SIP3(parameter))
+            info += LookupValue(str(number), rawvalue, dLookupValues, options.verbose)
 
         resultNumber = '0x%04x' % number
         resultType = '0x%04x' % type
@@ -2178,6 +2191,7 @@ https://DidierStevens.com'''
     oParser.add_option('--checkfilenames', action='store_true', default=False, help='Perform check if files exist prior to file processing')
     oParser.add_option('-j', '--jsoninput', action='store_true', default=False, help='Consume JSON from stdin')
     oParser.add_option('-J', '--jsonoutput', action='store_true', default=False, help='Output JSON')
+    oParser.add_option('-V', '--verbose', action='store_true', default=False, help='Verbose output')
     oParser.add_option('--logfile', type=str, default='', help='Create logfile with given keyword')
     oParser.add_option('--logcomment', type=str, default='', help='A string with comments to be included in the log file')
     oParser.add_option('--ignoreprocessingerrors', action='store_true', default=False, help='Ignore errors during file processing')
