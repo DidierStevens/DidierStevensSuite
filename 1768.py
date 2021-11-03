@@ -4,8 +4,8 @@ from __future__ import print_function
 
 __description__ = 'Analyze Cobalt Strike beacons'
 __author__ = 'Didier Stevens'
-__version__ = '0.0.8'
-__date__ = '2021/10/10'
+__version__ = '0.0.9'
+__date__ = '2021/11/01'
 
 """
 Source code put in the public domain by Didier Stevens, no Copyright
@@ -42,6 +42,8 @@ History:
   2021/05/15: continue JSON output
   2021/06/14: updated man with 1768.json info
   2021/10/10: 0.0.8 1768.json improvements
+  2021/10/17: 0.0.9 added malleable instructions decoding
+  2021/11/01: refactoring instructions decoding
 
 Todo:
   add JSON output
@@ -1647,7 +1649,195 @@ def GetJSONData():
     if not os.path.isfile(filename):
         return {}
     return json.load(open(filename, 'r'))
-    
+
+class cStruct(object):
+    def __init__(self, data):
+        self.data = data
+        self.originaldata = data
+
+    def Unpack(self, format):
+        formatsize = struct.calcsize(format)
+        if len(self.data) < formatsize:
+            raise Exception('Not enough data')
+        tounpack = self.data[:formatsize]
+        self.data = self.data[formatsize:]
+        result = struct.unpack(format, tounpack)
+        if len(result) == 1:
+            return result[0]
+        else:
+            return result
+
+    def Truncate(self, length):
+        self.data = self.data[:length]
+
+    def GetBytes(self, length=None):
+        if length == None:
+            length = len(self.data)
+        result = self.data[:length]
+        self.data = self.data[length:]
+        return result
+
+    def GetString(self, format):
+        stringLength = self.Unpack(format)
+        return self.GetBytes(stringLength)
+
+    def Length(self):
+        return len(self.data)
+
+# https://www.usualsuspect.re/article/cobalt-strikes-malleable-c2-under-the-hood
+INSTRUCTION_TYPE_MALLEABLE_C2 = 1
+INSTRUCTION_TYPE_GET = 2
+INSTRUCTION_TYPE_POST = 3
+
+INSTRUCTION_NONE = 0
+INSTRUCTION_APPEND = 1
+INSTRUCTION_PREPEND = 2
+INSTRUCTION_BASE64 = 3
+INSTRUCTION_PRINT = 4
+INSTRUCTION_PARAMETER = 5
+INSTRUCTION_HEADER = 6
+INSTRUCTION_BUILD = 7
+INSTRUCTION_NETBIOS = 8
+INSTRUCTION_CONST_PARAMETER = 9
+INSTRUCTION_CONST_HEADER = 10
+INSTRUCTION_NETBIOSU = 11
+INSTRUCTION_URI_APPEND = 12
+INSTRUCTION_BASE64URL = 13
+INSTRUCTION_STRREP = 14
+INSTRUCTION_MASK = 15
+INSTRUCTION_CONST_HOST_HEADER = 16
+
+def DecodeInstructions(value, instructionsType):
+    oStruct = cStruct(value)
+    instructions = []
+    opcodes = []
+    buildFlag = False
+    while oStruct.Length() >= 4:
+        opcode = oStruct.Unpack('>I')
+        if buildFlag and opcode in [0, 6, 7, 10, 16]:
+            instructions.append('Build End')
+            opcodes.append(['7', 'End'])
+            buildFlag = False
+        if opcode == INSTRUCTION_NONE:
+            break
+        if opcode == INSTRUCTION_APPEND:
+            if instructionsType == INSTRUCTION_TYPE_MALLEABLE_C2:
+                operand = oStruct.Unpack('>I')
+                instructions.append('Remove %d bytes from end' % operand)
+                opcodes.append([str(opcode), str(operand)])
+            else:
+                operand = oStruct.GetString('>I').decode('latin')
+                instructions.append('Append %s' % operand)
+                opcodes.append([str(opcode), operand])
+        elif opcode == INSTRUCTION_PREPEND:
+            if instructionsType == INSTRUCTION_TYPE_MALLEABLE_C2:
+                operand = oStruct.Unpack('>I')
+                instructions.append('Remove %d bytes from begin' % operand)
+                opcodes.append([str(opcode), str(operand)])
+            else:
+                operand = oStruct.GetString('>I').decode('latin')
+                instructions.append('Prepend %s' % operand)
+                opcodes.append([str(opcode), operand])
+        elif opcode == INSTRUCTION_BASE64:
+            instructions.append('BASE64')
+            opcodes.append([str(opcode)])
+        elif opcode == INSTRUCTION_PRINT:
+            instructions.append('Print')
+            opcodes.append([str(opcode)])
+        elif opcode == INSTRUCTION_PARAMETER:
+            operand = oStruct.GetString('>I').decode('latin')
+            instructions.append('Parameter %s' % operand)
+            opcodes.append([str(opcode), operand])
+        elif opcode == INSTRUCTION_HEADER:
+            operand = oStruct.GetString('>I').decode('latin')
+            instructions.append('Header %s' % operand)
+            opcodes.append([str(opcode), operand])
+        elif opcode == INSTRUCTION_BUILD:
+            buildFlag = True
+            operand = oStruct.Unpack('>I')
+            if instructionsType == INSTRUCTION_TYPE_POST:
+                if operand == 0:
+                    operand = 'SessionId'
+                else:
+                    operand = 'Output'
+            else:
+                operand = 'Metadata'
+            instructions.append('Build %s' % operand)
+            opcodes.append([str(opcode), operand])
+        elif opcode == INSTRUCTION_NETBIOS:
+            instructions.append('NETBIOS lowercase')
+            opcodes.append([str(opcode)])
+        elif opcode == INSTRUCTION_CONST_PARAMETER:
+            operand = oStruct.GetString('>I').decode('latin')
+            instructions.append('Const_parameter %s' % operand)
+            opcodes.append([str(opcode), operand])
+        elif opcode == INSTRUCTION_CONST_HEADER:
+            operand = oStruct.GetString('>I').decode('latin')
+            instructions.append('Const_header %s' % operand)
+            opcodes.append([str(opcode), operand])
+        elif opcode == INSTRUCTION_NETBIOSU:
+            instructions.append('NETBIOS uppercase')
+            opcodes.append([str(opcode)])
+        elif opcode == INSTRUCTION_URI_APPEND:
+            instructions.append('Uri_append')
+            opcodes.append([str(opcode)])
+        elif opcode == INSTRUCTION_BASE64URL:
+            instructions.append('BASE64 URL')
+            opcodes.append([str(opcode)])
+        elif opcode == INSTRUCTION_STRREP:
+            operand1 = oStruct.GetString('>I').decode('latin')
+            operand2 = oStruct.GetString('>I').decode('latin')
+            instructions.append('STRREP %s %s' % (operand1, operand2))
+            opcodes.append([str(opcode), operand1, operand2])
+        elif opcode == INSTRUCTION_MASK:
+            instructions.append('XOR with 4-byte random key')
+            opcodes.append([str(opcode)])
+        elif opcode == INSTRUCTION_CONST_HOST_HEADER:
+            operand = oStruct.GetString('>I').decode('latin')
+            instructions.append('Const_host_header %s' % operand)
+            opcodes.append([str(opcode), operand])
+        else:
+            instructions.append('Unknown instruction: 0x%02x' % opcode)
+            opcodes.append([str(opcode)])
+
+    result = []
+    buildFlag = False
+    for instruction in instructions:
+        if instruction == 'Build End':
+            result.append(build)
+        elif instruction.startswith('Build '):
+            build = [instruction]
+            buildFlag= True
+        elif buildFlag:
+            build.append(instruction)
+        else:
+            result.append(instruction)
+    instructions = result
+
+    result = []
+    buildFlag = False
+    for opcode in opcodes:
+        if opcode == ['7', 'End']:
+            result.append(build)
+        elif opcode[0] == '7':
+            build = [opcode]
+            buildFlag= True
+        elif buildFlag:
+            build.append(opcode)
+        else:
+            result.append(opcode)
+    opcodes = result
+
+    if instructionsType == INSTRUCTION_TYPE_MALLEABLE_C2:
+        instructions = [['Transform Input'] + instructions]
+        opcodes = [[['7', 'Input']] + opcodes]
+    return [instructions, opcodes]
+
+def DecodeMalleableC2Instructions(parameter):
+    instructions, opcodes = DecodeInstructions(parameter, INSTRUCTION_TYPE_MALLEABLE_C2)
+    buildOpcodes = ','.join([item for opcode in opcodes for item in opcode])
+    return 'Instructions: ' + ','.join(instructions) + ' [7,Input,' + buildOpcodes + ']'
+
 def AnalyzeEmbeddedPEFileSub(payloadsectiondata, options):
     result = []
     dJSON = {}
@@ -1730,6 +1920,7 @@ def AnalyzeEmbeddedPEFileSub(payloadsectiondata, options):
     dConfigValueInterpreter = {
         0x0001: lambda value: LookupConfigValue(0x0001, value),
         0x0007: ToHexadecimal,
+        0x000b: DecodeMalleableC2Instructions,
         0x0013: ConvertIntToIPv4,
         0x0023: lambda value: LookupConfigValue(0x0023, value),
         0x002b: lambda value: LookupConfigValue(0x002b, value),
@@ -1759,7 +1950,7 @@ def AnalyzeEmbeddedPEFileSub(payloadsectiondata, options):
             value = '%d' % rawvalue
             info = InterpretValue(value, number, parameter[0:4], dConfigValueInterpreter)
             info += LookupValue(str(number), value, dLookupValues, options.verbose)
-        elif type == 3 and not number in [0x0c, 0x0d]:
+        elif type == 3 and not number in [0x0b, 0x0c, 0x0d]:
             info = InterpretValue('', number, parameter, dConfigValueInterpreter)
             rawvalue = binascii.b2a_hex(parameter).decode()
             if info == '':
@@ -1776,24 +1967,32 @@ def AnalyzeEmbeddedPEFileSub(payloadsectiondata, options):
         else:
             resultID = ('%-' + str(max([len(value) for value in dConfigIdentifiers.values()])) + 's') % resultID
             result.append('%s %s %s %s%s' % (resultNumber, resultID, resultType, resultLength, PrefixIfNeeded(info)))
-        if type == 3 and number in [0x0c, 0x0d]:
-#            parameters = parameter
-#            while len(parameters) >= 8 and sum([C2IIP2(c) for c in parameters]) != 0:
-#                type, parameters = Unpack('>I', parameters)
-#                if type != 3:
-#                    length, parameters = Unpack('>I', parameters)
-#                    parameter, parameters = GetChunk(length, parameters)
-#                else:
-#                    length = None
-#                if type == 3:
-#                    result.append('  0x%04x' % (type))
-#                else:
-#                    result.append('  0x%04x 0x%04x%s' % (type, length, PrefixIfNeeded(Represent(C2SIP3(parameter)))))
-            for string in ExtractStringsASCII(parameter):
-                if options.csv:
-                    result.append(MakeCSVLine(('', '', '', '', string.decode('utf8', 'surrogateescape')), ',', '"'))
+        if type == 3 and number in [0x0b, 0x0c, 0x0d]:
+            instructions, opcodes = DecodeInstructions(parameter, {0x0b: INSTRUCTION_TYPE_MALLEABLE_C2, 0x0c: INSTRUCTION_TYPE_GET, 0x0d: INSTRUCTION_TYPE_POST}[number])
+            for index, instruction in enumerate(instructions):
+                if isinstance(instruction, str):
+                    if options.csv:
+                        result.append(MakeCSVLine(('', '', '', '', instruction, ',', '"')))
+                    else:
+                        result.append('  %s' % instruction)
                 else:
-                    result.append('  %s' % string.decode('utf8', 'surrogateescape'))
+                    buildOpcodes = '[' + ','.join([':'.join(opcode) for opcode in opcodes[index]]) + ']'
+                    dJSON[number] = {'id': resultID, 'type': resultType, 'info': buildOpcodes, 'rawvalue': binascii.b2a_hex(parameter).decode()}
+                    if options.csv:
+                        result.append(MakeCSVLine(('', '', '', '', '%s:%s' % (instruction[0], buildOpcodes), ',', '"')))
+                    else:
+                        result.append('  %s: %s' % (instruction[0], buildOpcodes))
+                    for buildStep in instruction[1:]:
+                        if options.csv:
+                            result.append(MakeCSVLine(('', '', '', '', buildStep, ',', '"')))
+                        else:
+                            result.append('   %s' % buildStep)
+#            for string in ExtractStringsASCII(parameter):
+#                if options.csv:
+#                    result.append(MakeCSVLine(('', '', '', '', string.decode('utf8', 'surrogateescape')), ',', '"'))
+#                else:
+#                    result.append('  %s' % string.decode('utf8', 'surrogateescape'))
+            
         if options.select != '':
             select = ParseInteger(options.select)
             if number == select:
@@ -2127,6 +2326,7 @@ class cAPIOptions(object):
         self.select = ''
         self.ignoreprocessingerrors = False
         self.raw = False
+        self.verbose = False
 
 class cAPIOutput(object):
     def __init__(self):
