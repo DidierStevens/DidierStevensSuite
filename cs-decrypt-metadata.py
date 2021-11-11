@@ -4,8 +4,8 @@ from __future__ import print_function
 
 __description__ = 'Cobalt Strike: RSA decrypt metadata'
 __author__ = 'Didier Stevens'
-__version__ = '0.0.1'
-__date__ = '2021/10/20'
+__version__ = '0.0.2'
+__date__ = '2021/11/10'
 
 """
 Source code put in the public domain by Didier Stevens, no Copyright
@@ -15,6 +15,8 @@ Use at your own risk
 History:
   2021/10/10: start
   2021/10/20: refactoring
+  2021/10/26: 0.0.2 parsing binary IPv4 address
+  2021/11/10: error handling decrypting; added option -t
 
 Todo:
   
@@ -29,6 +31,7 @@ import os
 import sys
 import json
 import textwrap
+import base64
 try:
     import Crypto.PublicKey.RSA
     import Crypto.Cipher.PKCS1_v1_5
@@ -54,7 +57,8 @@ Example:
 
 cs-decrypt-metadata.py KN9zfIq31DBBdLtF4JUjmrhm0lRKkC/I/zAiJ+Xxjz787h9yh35cRjEnXJAwQcWP4chXobXT/E5YrZjgreeGTrORnj//A5iZw2TClEnt++gLMyMHwgjsnvg9czGx6Ekpz0L1uEfkVoo4MpQ0/kJk9myZagRrPrFWdE9U7BwCzlE=
 
-Encrypted metadata: KN9zfIq31DBBdLtF4JUjmrhm0lRKkC/I/zAiJ+Xxjz787h9yh35cRjEnXJAwQcWP4chXobXT/E5YrZjgreeGTrORnj//A5iZw2TClEnt++gLMyMHwgjsnvg9czGx6Ekpz0L1uEfkVoo4MpQ0/kJk9myZagRrPrFWdE9U7BwCzlE=
+Input: KN9zfIq31DBBdLtF4JUjmrhm0lRKkC/I/zAiJ+Xxjz787h9yh35cRjEnXJAwQcWP4chXobXT/E5YrZjgreeGTrORnj//A5iZw2TClEnt++gLMyMHwgjsnvg9czGx6Ekpz0L1uEfkVoo4MpQ0/kJk9myZagRrPrFWdE9U7BwCzlE=
+Encrypted metadata: 28df737c8ab7d4304174bb45e095239ab866d2544a902fc8ff302227e5f18f3efcee1f72877e5c4631275c903041c58fe1c857a1b5d3fc4e58ad98e0ade7864eb3919e3fff039899c364c29449edfbe80b332307c208ec9ef83d7331b1e84929cf42f5b847e4568a38329434fe4264f66c996a046b3eb156744f54ec1c02ce51
 Decrypted:
 Header: 0000beef
 Datasize: 0000005d
@@ -73,10 +77,16 @@ var3: 19042
 var4: 0
 var5: 1988364896
 var6: 1988359504
-var7: 1862862346
+Internal IPv4: 10.6.9.111
 Field: b'DESKTOP-Q21RU7A'
 Field: b'maxwell.carter'
 Field: b'svchost.exe'
+
+By default, metadata is BASE64 encoded. If another transformation is used by the beacon to encode the metadata, option -t can be used to transform the metadata prior to decrypting.
+
+Example:
+
+cs-decrypt-metadata.py -t 7:Metadata,13,2:__cfduid=,6:Cookie __cfduid=GQ-rUvFDD0WewXldmHhCkZybJ5OB4ZrwbRbN6K4St2Jr7W1L0FR0eSZSdHtt0i9JHBBUzRnQj1U4a0a4meC9YMvgvdSIQ4QlqNEw5GMDKkTYjAcNRRCe3QYZ2FeW4dn5SALu70Eb7F5VzDoFcG_Hq3akmQpHH-RBWPYNxTX2fsE
 
 '''
     for line in manual.split('\n'):
@@ -92,8 +102,12 @@ def RSAEncrypt(key, data):
 def RSADecrypt(key, data):
     oPrivateKey = Crypto.PublicKey.RSA.importKey(binascii.a2b_hex(key))
     oRSAPrivateKey = Crypto.Cipher.PKCS1_v1_5.new(oPrivateKey)
-    ciphertext = binascii.a2b_base64(data)
-    cleartext = oRSAPrivateKey.decrypt(ciphertext, None)
+#    ciphertext = binascii.a2b_base64(data)
+    ciphertext = data
+    try:
+        cleartext = oRSAPrivateKey.decrypt(ciphertext, None)
+    except ValueError:
+        return None
     return cleartext
 
 class cStruct(object):
@@ -305,14 +319,15 @@ def DecodeMetadata(decrypted):
 
         peek = oStruct.GetBytes(peek=True)
         if not re.match(b'[0-9]+\t[0-9]+\.[0-9]+', peek):
-            var1, var2, var3, var4, var5, var6, var7 = oStruct.Unpack('>BBHIIII')
+            var1, var2, var3, var4, var5, var6 = oStruct.Unpack('>BBHIII')
             print('var1: %d' % var1)
             print('var2: %d' % var2)
             print('var3: %d' % var3)
             print('var4: %d' % var4)
             print('var5: %d' % var5)
             print('var6: %d' % var6)
-            print('var7: %d' % var7)
+            ipv4 = oStruct.GetBytes(4)
+            print('Internal IPv4: %s' % '.'.join([str(byte) for byte in ipv4[::-1]]))
 
     remainder = oStruct.GetBytes()
     for field in remainder.split(b'\t'):
@@ -331,8 +346,73 @@ def GetJSONData():
         return {}
     return json.load(open(filename, 'r'))
 
+def BASE64URLDecode(data):
+    paddingLength = 4 - len(data) % 4
+    if paddingLength <= 2:
+        data += b'=' * paddingLength
+    return base64.b64decode(data, b'-_')
+
+def StartsWithGetRemainder(strIn, strStart):
+    if strIn.startswith(strStart):
+        return True, strIn[len(strStart):]
+    else:
+        return False, None
+    
+def GetInstructions(instructions, instructionType):
+    for result in instructions.split(';'):
+        match, remainder = StartsWithGetRemainder(result, '7:%s,' % instructionType)
+        if match:
+            if instructionType in ['Output', 'Metadata']:
+                return ','.join(remainder.split(',')[::-1])
+            else:
+                return remainder
+    return ''
+
+def ProcessInstructions(instructions, rawdata, instructionType):
+    instructions = GetInstructions(instructions, instructionType)
+    if instructions == '':
+        instructions = []
+    else:
+        instructions = [instruction for instruction in instructions.split(',')]
+    data = rawdata
+    for instruction in instructions:
+        instruction = instruction.split(':')
+        opcode = int(instruction[0])
+        operands = instruction[1:]
+        if opcode == 1:
+            if instructionType == 'Metadata':
+                data = data[:-len(operands[0])]
+            else:
+                data = data[:-int(operands[0])]
+        elif opcode == 2:
+            if instructionType == 'Metadata':
+                data = data[len(operands[0]):]
+            else:
+                data = data[int(operands[0]):]
+        elif opcode == 3:
+            data = binascii.a2b_base64(data)
+        elif opcode == 4:
+            pass
+        elif opcode == 6:
+            pass
+        elif opcode == 7:
+            pass
+        elif opcode == 13:
+            data = BASE64URLDecode(data)
+        elif opcode == 15:
+            xorkey = data[0:4]
+            ciphertext = data[4:]
+            data = []
+            for iter, value in enumerate(ciphertext):
+                data.append(value ^ xorkey[iter % 4])
+            data = bytes(data)
+    return data
+            
 def DecryptMetadata(arg, options):
-    print('Encrypted metadata: %s' % arg)
+    print('Input: %s' % arg)
+    arg = ProcessInstructions(options.transform, arg.encode(), 'Metadata')
+    print('Encrypted metadata: %s' % binascii.b2a_hex(arg).decode())
+
     if options.private != '':
         decrypted = RSADecrypt(options.private, arg)
         if decrypted != None:
@@ -365,6 +445,7 @@ https://DidierStevens.com'''
     oParser.add_option('-m', '--man', action='store_true', default=False, help='Print manual')
     oParser.add_option('-p', '--private', default='', help='Private key (hexadecimal)')
     oParser.add_option('-f', '--file', default='', help='File with private key')
+    oParser.add_option('-t', '--transform', type=str, default='7:Metadata,3', help='Transformation instructions')
     (options, args) = oParser.parse_args()
 
     if options.man:
