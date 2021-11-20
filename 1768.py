@@ -4,8 +4,8 @@ from __future__ import print_function
 
 __description__ = 'Analyze Cobalt Strike beacons'
 __author__ = 'Didier Stevens'
-__version__ = '0.0.9'
-__date__ = '2021/11/01'
+__version__ = '0.0.10'
+__date__ = '2021/11/17'
 
 """
 Source code put in the public domain by Didier Stevens, no Copyright
@@ -44,9 +44,13 @@ History:
   2021/10/10: 0.0.8 1768.json improvements
   2021/10/17: 0.0.9 added malleable instructions decoding
   2021/11/01: refactoring instructions decoding
+  2021/11/05: 0.0.10 cOutput replacements
+  2021/11/07: added FinalTests
+  2021/11/14: added DNS fields
+  2021/11/17: added missing field names (ebook FINDING BEACONS IN THE DARK)
 
 Todo:
-  add JSON output
+  JSON output -> instructions
 """
 
 import optparse
@@ -1209,6 +1213,13 @@ class cOutput():
             elif self.filenameOption != '':
                 self.fOut = open(self.filenameOption, 'w')
 
+        self.dReplacements = {}
+
+    def Replace(self, line):
+        for key, value in self.dReplacements.items():
+            line = line.replace(key, value)
+        return line
+
     def ParseHash(self, option):
         if option.startswith('#'):
             position = self.filenameOption.find('#', 1)
@@ -1258,6 +1269,7 @@ class cOutput():
             iter += 1
 
     def LineSub(self, line, eol):
+        line = self.Replace(line)
         if self.fOut == None or self.console:
             try:
                 print(line, end=eol)
@@ -1884,11 +1896,11 @@ def AnalyzeEmbeddedPEFileSub(payloadsectiondata, options):
         0x0012: 'killdate_day', #
         0x0013: 'DNS_Idle', #
         0x0014: 'DNS_Sleep', #
-        0x0015: 'SSH_', #
-        0x0016: 'SSH_', #
-        0x0017: 'SSH_', #
-        0x0018: 'SSH_', #
-        0x0019: 'SSH_', #
+        0x0015: 'SSH_HOST', #
+        0x0016: 'SSH_PORT', #
+        0x0017: 'SSH_USER-NAME', #
+        0x0018: 'SSH_PASSWORD', #
+        0x0019: 'SSH_PUBKEY', #
         0x001a: 'get-verb',
         0x001b: 'post-verb',
         0x001c: 'HttpPostChunk', #
@@ -1911,11 +1923,29 @@ def AnalyzeEmbeddedPEFileSub(payloadsectiondata, options):
         0x002d: 'process-inject-min_alloc',
         0x002e: 'process-inject-transform-x86',
         0x002f: 'process-inject-transform-x64',
+        0x0030: 'DEPRECATED_PROCINJ_ALLOWED',
+        0x0031: 'BIND_HOST',
         0x0032: 'UsesCookies',
         0x0033: 'process-inject-execute',
         0x0034: 'process-inject-allocation-method',
         0x0035: 'process-inject-stub',
         0x0036: 'HostHeader',
+        0x0037: 'EXIT_FUNK',
+        0x0038: 'SSH_BANNER',
+        0x0039: 'SMB_FRAME_HEADER',
+        0x003a: 'TCP_FRAME_HEADER',
+        0x003b: 'HEADERS_TO_REMOVE',
+        0x003c: 'DNS_beacon',
+        0x003d: 'DNS_A',
+        0x003e: 'DNS_AAAA',
+        0x003f: 'DNS_TXT',
+        0x0040: 'DNS_metadata',
+        0x0041: 'DNS_output',
+        0x0042: 'DNS_resolver',
+        0x0043: 'DNS_STRATEGY',
+        0x0044: 'DNS_STRATEGY_ROTATE_SECONDS',
+        0x0045: 'DNS_STRATEGY_FAIL_X',
+        0x0046: 'DNS_STRATE-GY_FAIL_SEC-ONDS',
     }
     dConfigValueInterpreter = {
         0x0001: lambda value: LookupConfigValue(0x0001, value),
@@ -1946,7 +1976,10 @@ def AnalyzeEmbeddedPEFileSub(payloadsectiondata, options):
             rawvalue = identifier
             info = InterpretValue('%d' % identifier, number, identifier, dConfigValueInterpreter)
         elif type == 2 and length == 4:
-            rawvalue = struct.unpack('>I', parameter)[0]
+            if number in [0x44, 0x45, 0x46]:
+                rawvalue = struct.unpack('>i', parameter)[0]
+            else:
+                rawvalue = struct.unpack('>I', parameter)[0]
             value = '%d' % rawvalue
             info = InterpretValue(value, number, parameter[0:4], dConfigValueInterpreter)
             info += LookupValue(str(number), value, dLookupValues, options.verbose)
@@ -1992,7 +2025,7 @@ def AnalyzeEmbeddedPEFileSub(payloadsectiondata, options):
 #                    result.append(MakeCSVLine(('', '', '', '', string.decode('utf8', 'surrogateescape')), ',', '"'))
 #                else:
 #                    result.append('  %s' % string.decode('utf8', 'surrogateescape'))
-            
+
         if options.select != '':
             select = ParseInteger(options.select)
             if number == select:
@@ -2079,7 +2112,7 @@ def TryXORChainDecoding(data):
             decodedData = XORChain(xorKey, data[iIter + formatLength:iIter + formatLength + decodedLength])
             if START_CONFIG_I in decodedData or START_CONFIG_DOT in decodedData:
                 return decodedData, ['xorkey(chain): 0x%08x' % xorKey, 'length: 0x%08x' % decodedLength]
-            
+
     return data, []
 
 def TryExtractDecode(data):
@@ -2097,6 +2130,12 @@ def TryExtractDecode(data):
 
 def TestShellcodeHeuristic(data):
     return b'hwini' in data[:0x1000] or b'hws2_' in data[:0x1000] or (data[0:1] == b'\xFC' and len(data) < 0x1000)
+
+def FinalTests(data, oOutput):
+    if b'\x4C\x8B\x53\x08\x45\x8B\x0A\x45\x8B\x5A\x04\x4D\x8D\x52\x08\x45\x85\xC9\x75\x05\x45\x85\xDB\x74\x33\x45\x3B\xCB\x73\xE6\x49\x8B\xF9\x4C\x8B\x03' in data:
+        oOutput.Line('Sleep mask 64-bit 4.2 deobfuscation routine found.')
+    if b'\x8B\x46\x04\x8B\x08\x8B\x50\x04\x83\xC0\x08\x89\x55\x08\x89\x45\x0C\x85\xC9\x75\x04\x85\xD2\x74\x23\x3B\xCA\x73\xE6\x8B\x06\x8D\x3C\x08\x33\xD2' in data:
+        oOutput.Line('Sleep mask 32-bit 4.2 deobfuscation routine found.')
 
 def ProcessBinaryFile(filename, content, cutexpression, flag, oOutput, oLogfile, options):
     if content == None:
@@ -2132,6 +2171,7 @@ def ProcessBinaryFile(filename, content, cutexpression, flag, oOutput, oLogfile,
                         oOutput.Line(message)
                     for message in resultChain:
                         oOutput.Line(message)
+                    FinalTests(extracted, oOutput)
                 else:
                     extracted = None
             if extracted == None:
@@ -2175,10 +2215,12 @@ def ProcessBinaryFile(filename, content, cutexpression, flag, oOutput, oLogfile,
                             oOutput.Line('Error: embedded PE file error: %s' % error)
                     else:
                         AnalyzeEmbeddedPEFile(payloadsectiondata, oOutput, options)
+                    FinalTests(payload, oOutput)
         elif TestShellcodeHeuristic(data):
             oOutput.Line('Probably found shellcode:')
             AnalyzeShellcode(data, oOutput)
             oOutput.Line(cDump(data).HexAsciiDump(rle=False))
+            FinalTests(data, oOutput)
         else:
             dConfigs = {}
             for position in FindAll(data, START_CONFIG_I) + FindAll(data, START_CONFIG_DOT):
@@ -2189,7 +2231,7 @@ def ProcessBinaryFile(filename, content, cutexpression, flag, oOutput, oLogfile,
                     oOutput.JSON(dJSON)
                     for line in result:
                         oOutput.Line(line)
-
+            FinalTests(data, oOutput)
         # ----------------------------------------------
     except:
         oLogfile.LineError('Processing file %s %s' % (filename, repr(sys.exc_info()[1])))

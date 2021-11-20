@@ -2,8 +2,8 @@
 
 __description__ = 'Extract base64 strings from file'
 __author__ = 'Didier Stevens'
-__version__ = '0.0.17'
-__date__ = '2021/09/27'
+__version__ = '0.0.18'
+__date__ = '2021/11/14'
 
 """
 
@@ -35,8 +35,10 @@ History:
   2021/07/16: 0.0.15 bug fix -i -I options; man page changes
   2021/07/16: 0.0.16 added b85 decoding
   2021/09/27: 0.0.17 added select L; added a85 decoding
+  2021/11/14: 0.0.18 fixed DecodeDataDecimal
 
 Todo:
+  add base64 url
 """
 
 import optparse
@@ -864,7 +866,7 @@ def DecodeDataDecimal(data, ProcessFunction):
         if len(dBytes) > 0:
             # take the most frequent non-digit character as separator
             separator = bytes([sorted(dBytes.items(), key=operator.itemgetter(1), reverse=True)[0][0]])
-            for decimalstring in re.findall(br'(?:[0123456789]{1,3}' + separator + br')+[0123456789]{1,3}', decimals):
+            for decimalstring in re.findall((br'(?:[0123456789]{1,3}\x%02x' % separator[0]) + br')+[0123456789]{1,3}', decimals):
                 try:
                     yield (decimalstring, bytes([int(decimal) for decimal in decimalstring.split(separator)]))
                 except:

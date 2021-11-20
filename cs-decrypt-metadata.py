@@ -4,8 +4,8 @@ from __future__ import print_function
 
 __description__ = 'Cobalt Strike: RSA decrypt metadata'
 __author__ = 'Didier Stevens'
-__version__ = '0.0.2'
-__date__ = '2021/11/10'
+__version__ = '0.0.3'
+__date__ = '2021/11/15'
 
 """
 Source code put in the public domain by Didier Stevens, no Copyright
@@ -17,9 +17,11 @@ History:
   2021/10/20: refactoring
   2021/10/26: 0.0.2 parsing binary IPv4 address
   2021/11/10: error handling decrypting; added option -t
+  2021/11/11: 0.0.3 refactoring: cCSInstructions, cOutput
+  2021/11/15: bugfix decoding
 
 Todo:
-  
+
 """
 
 import binascii
@@ -32,6 +34,7 @@ import sys
 import json
 import textwrap
 import base64
+import time
 try:
     import Crypto.PublicKey.RSA
     import Crypto.Cipher.PKCS1_v1_5
@@ -92,6 +95,231 @@ cs-decrypt-metadata.py -t 7:Metadata,13,2:__cfduid=,6:Cookie __cfduid=GQ-rUvFDD0
     for line in manual.split('\n'):
         print(textwrap.fill(line, 79))
 
+DEFAULT_SEPARATOR = ','
+QUOTE = '"'
+
+def IfWIN32SetBinary(io):
+    if sys.platform == 'win32':
+        import msvcrt
+        msvcrt.setmode(io.fileno(), os.O_BINARY)
+
+#Fix for http://bugs.python.org/issue11395
+def StdoutWriteChunked(data):
+    if sys.version_info[0] > 2:
+        if isinstance(data, str):
+            sys.stdout.write(data)
+        else:
+            sys.stdout.buffer.write(data)
+    else:
+        while data != '':
+            sys.stdout.write(data[0:10000])
+            try:
+                sys.stdout.flush()
+            except IOError:
+                return
+            data = data[10000:]
+
+class cVariables():
+    def __init__(self, variablesstring='', separator=DEFAULT_SEPARATOR):
+        self.dVariables = {}
+        if variablesstring == '':
+            return
+        for variable in variablesstring.split(separator):
+            name, value = VariableNameValue(variable)
+            self.dVariables[name] = value
+
+    def SetVariable(self, name, value):
+        self.dVariables[name] = value
+
+    def Instantiate(self, astring):
+        for key, value in self.dVariables.items():
+            astring = astring.replace('%' + key + '%', value)
+        return astring
+
+class cOutput():
+    def __init__(self, filenameOption=None, binary=False):
+        self.starttime = time.time()
+        self.filenameOption = filenameOption
+        self.separateFiles = False
+        self.progress = False
+        self.console = False
+        self.head = False
+        self.headCounter = 0
+        self.tail = False
+        self.tailQueue = []
+        self.STDOUT = 'STDOUT'
+        self.fOut = None
+        self.oCsvWriter = None
+        self.rootFilenames = {}
+        self.binary = binary
+        if self.binary:
+            self.fileoptions = 'wb'
+        else:
+            self.fileoptions = 'w'
+        self.dReplacements = {}
+
+    def Replace(self, line):
+        for key, value in self.dReplacements.items():
+            line = line.replace(key, value)
+        return line
+
+    def Open(self, binary=False):
+        if self.fOut != None:
+            return
+
+        if binary:
+            self.fileoptions = 'wb'
+        else:
+            self.fileoptions = 'w'
+
+        if self.filenameOption:
+            if self.ParseHash(self.filenameOption):
+                if not self.separateFiles and self.filename != '':
+                    self.fOut = open(self.filename, self.fileoptions)
+            elif self.filenameOption != '':
+                self.fOut = open(self.filenameOption, self.fileoptions)
+        else:
+            self.fOut = self.STDOUT
+
+    def ParseHash(self, option):
+        if option.startswith('#'):
+            position = self.filenameOption.find('#', 1)
+            if position > 1:
+                switches = self.filenameOption[1:position]
+                self.filename = self.filenameOption[position + 1:]
+                for switch in switches:
+                    if switch == 's':
+                        self.separateFiles = True
+                    elif switch == 'p':
+                        self.progress = True
+                    elif switch == 'c':
+                        self.console = True
+                    elif switch == 'l':
+                        pass
+                    elif switch == 'g':
+                        if self.filename != '':
+                            extra = self.filename + '-'
+                        else:
+                            extra = ''
+                        self.filename = '%s-%s%s.txt' % (os.path.splitext(os.path.basename(sys.argv[0]))[0], extra, self.FormatTime())
+                    elif switch == 'h':
+                        self.head = True
+                    elif switch == 't':
+                        self.tail = True
+                    else:
+                        return False
+                return True
+        return False
+
+    @staticmethod
+    def FormatTime(epoch=None):
+        if epoch == None:
+            epoch = time.time()
+        return '%04d%02d%02d-%02d%02d%02d' % time.localtime(epoch)[0:6]
+
+    def RootUnique(self, root):
+        if not root in self.rootFilenames:
+            self.rootFilenames[root] = None
+            return root
+        iter = 1
+        while True:
+            newroot = '%s_%04d' % (root, iter)
+            if not newroot in self.rootFilenames:
+                self.rootFilenames[newroot] = None
+                return newroot
+            iter += 1
+
+    def LineSub(self, line, eol):
+        line = self.Replace(line)
+        self.Open()
+        if self.fOut == self.STDOUT or self.console:
+            try:
+                print(line, end=eol)
+            except UnicodeEncodeError:
+                encoding = sys.stdout.encoding
+                print(line.encode(encoding, errors='backslashreplace').decode(encoding), end=eol)
+#            sys.stdout.flush()
+        if self.fOut != self.STDOUT:
+            self.fOut.write(line + '\n')
+            self.fOut.flush()
+
+    def Line(self, line, eol='\n'):
+        if self.head:
+            if self.headCounter < 10:
+                self.LineSub(line, eol)
+            elif self.tail:
+                self.tailQueue = self.tailQueue[-9:] + [[line, eol]]
+            self.headCounter += 1
+        elif self.tail:
+            self.tailQueue = self.tailQueue[-9:] + [[line, eol]]
+        else:
+            self.LineSub(line, eol)
+
+    def LineTimestamped(self, line):
+        self.Line('%s: %s' % (self.FormatTime(), line))
+
+    def WriteBinary(self, data):
+        self.Open(True)
+        if self.fOut != self.STDOUT:
+            self.fOut.write(data)
+            self.fOut.flush()
+        else:
+            IfWIN32SetBinary(sys.stdout)
+            StdoutWriteChunked(data)
+
+    def CSVWriteRow(self, row):
+        if self.oCsvWriter == None:
+            self.StringIOCSV = StringIO()
+#            self.oCsvWriter = csv.writer(self.fOut)
+            self.oCsvWriter = csv.writer(self.StringIOCSV)
+        self.oCsvWriter.writerow(row)
+        self.Line(self.StringIOCSV.getvalue(), '')
+        self.StringIOCSV.truncate(0)
+        self.StringIOCSV.seek(0)
+
+    def Filename(self, filename, index, total):
+        self.separateFilename = filename
+        if self.progress:
+            if index == 0:
+                eta = ''
+            else:
+                seconds = int(float((time.time() - self.starttime) / float(index)) * float(total - index))
+                eta = 'estimation %d seconds left, finished %s ' % (seconds, self.FormatTime(time.time() + seconds))
+            PrintError('%d/%d %s%s' % (index + 1, total, eta, self.separateFilename))
+        if self.separateFiles and self.filename != '':
+            oFilenameVariables = cVariables()
+            oFilenameVariables.SetVariable('f', self.separateFilename)
+            basename = os.path.basename(self.separateFilename)
+            oFilenameVariables.SetVariable('b', basename)
+            oFilenameVariables.SetVariable('d', os.path.dirname(self.separateFilename))
+            root, extension = os.path.splitext(basename)
+            oFilenameVariables.SetVariable('r', root)
+            oFilenameVariables.SetVariable('ru', self.RootUnique(root))
+            oFilenameVariables.SetVariable('e', extension)
+
+            self.Close()
+            self.fOut = open(oFilenameVariables.Instantiate(self.filename), self.fileoptions)
+
+    def Close(self):
+        if self.head and self.tail and len(self.tailQueue) > 0:
+            self.LineSub('...', '\n')
+
+        for line, eol in self.tailQueue:
+            self.LineSub(line, eol)
+
+        self.headCounter = 0
+        self.tailQueue = []
+
+        if self.fOut != self.STDOUT:
+            self.fOut.close()
+            self.fOut = None
+
+def InstantiateCOutput(options):
+    filenameOption = None
+    if options.output != '':
+        filenameOption = options.output
+    return cOutput(filenameOption)
+
 def RSAEncrypt(key, data):
     oPublicKey = Crypto.PublicKey.RSA.importKey(binascii.a2b_hex(key).rstrip(b'\x00'))
     oRSAPublicKey = Crypto.Cipher.PKCS1_v1_5.new(oPublicKey)
@@ -102,7 +330,6 @@ def RSAEncrypt(key, data):
 def RSADecrypt(key, data):
     oPrivateKey = Crypto.PublicKey.RSA.importKey(binascii.a2b_hex(key))
     oRSAPrivateKey = Crypto.Cipher.PKCS1_v1_5.new(oPrivateKey)
-#    ciphertext = binascii.a2b_base64(data)
     ciphertext = data
     try:
         cleartext = oRSAPrivateKey.decrypt(ciphertext, None)
@@ -290,49 +517,49 @@ dCodepages = {
     65001: 'Unicode (UTF-8)'
 }
 
-def DecodeMetadata(decrypted):
+def DecodeMetadata(decrypted, oOutput):
     oStruct = cStruct(decrypted)
     beef = oStruct.Unpack('>I')[0]
-    print('Decrypted:')
-    print('Header: %08x' % beef)
+    oOutput.Line('Decrypted:')
+    oOutput.Line('Header: %08x' % beef)
     datasize = oStruct.Unpack('>I')[0]
-    print('Datasize: %08x' % datasize)
+    oOutput.Line('Datasize: %08x' % datasize)
     oStruct.Truncate(datasize)
     rawkey = oStruct.GetBytes(16)
-    print('Raw key:  %s' % binascii.b2a_hex(rawkey).decode())
+    oOutput.Line('Raw key:  %s' % binascii.b2a_hex(rawkey).decode())
     sha256hex = hashlib.sha256(rawkey).hexdigest()
     aeskey = sha256hex[:32]
     hmackey = sha256hex[32:]
-    print(' aeskey:  %s' % aeskey)
-    print(' hmackey: %s' % hmackey)
+    oOutput.Line(' aeskey:  %s' % aeskey)
+    oOutput.Line(' hmackey: %s' % hmackey)
     charset, charset_oem = oStruct.Unpack('<HH')
-    print('charset: %04x %s' % (charset, dCodepages.get(charset, '')))
-    print('charset_oem: %04x %s' % (charset_oem, dCodepages.get(charset_oem, '')))
+    oOutput.Line('charset: %04x %s' % (charset, dCodepages.get(charset, '')))
+    oOutput.Line('charset_oem: %04x %s' % (charset_oem, dCodepages.get(charset_oem, '')))
 
     peek = oStruct.GetBytes(peek=True)
     if not re.match(b'[0-9]+\t[0-9]+\t[0-9]', peek):
         bid, pid, port, flags = oStruct.Unpack('>IIHB')
-        print('bid: %04x %d' % (bid, bid))
-        print('pid: %04x %d' % (pid, pid))
-        print('port: %d' % port)
-        print('flags: %02x' % flags)
+        oOutput.Line('bid: %04x %d' % (bid, bid))
+        oOutput.Line('pid: %04x %d' % (pid, pid))
+        oOutput.Line('port: %d' % port)
+        oOutput.Line('flags: %02x' % flags)
 
         peek = oStruct.GetBytes(peek=True)
-        if not re.match(b'[0-9]+\t[0-9]+\.[0-9]+', peek):
+        if not re.match(b'[0-9]+\.[0-9]+\t[0-9]+', peek):
             var1, var2, var3, var4, var5, var6 = oStruct.Unpack('>BBHIII')
-            print('var1: %d' % var1)
-            print('var2: %d' % var2)
-            print('var3: %d' % var3)
-            print('var4: %d' % var4)
-            print('var5: %d' % var5)
-            print('var6: %d' % var6)
+            oOutput.Line('var1: %d' % var1)
+            oOutput.Line('var2: %d' % var2)
+            oOutput.Line('var3: %d' % var3)
+            oOutput.Line('var4: %d' % var4)
+            oOutput.Line('var5: %d' % var5)
+            oOutput.Line('var6: %d' % var6)
             ipv4 = oStruct.GetBytes(4)
-            print('Internal IPv4: %s' % '.'.join([str(byte) for byte in ipv4[::-1]]))
+            oOutput.Line('Internal IPv4: %s' % '.'.join([str(byte) for byte in ipv4[::-1]]))
 
     remainder = oStruct.GetBytes()
     for field in remainder.split(b'\t'):
-        print('Field: %s' % field)
-    print('')
+        oOutput.Line('Field: %s' % field)
+    oOutput.Line('')
 
 def GetScriptPath():
     if getattr(sys, 'frozen', False):
@@ -346,77 +573,151 @@ def GetJSONData():
         return {}
     return json.load(open(filename, 'r'))
 
-def BASE64URLDecode(data):
-    paddingLength = 4 - len(data) % 4
-    if paddingLength <= 2:
-        data += b'=' * paddingLength
-    return base64.b64decode(data, b'-_')
+class cCSInstructions(object):
+    CS_INSTRUCTION_TYPE_INPUT = 'Input'
+    CS_INSTRUCTION_TYPE_OUTPUT = 'Output'
+    CS_INSTRUCTION_TYPE_METADATA = 'Metadata'
+    CS_INSTRUCTION_TYPE_SESSIONID = 'SessionId'
 
-def StartsWithGetRemainder(strIn, strStart):
-    if strIn.startswith(strStart):
-        return True, strIn[len(strStart):]
-    else:
-        return False, None
-    
-def GetInstructions(instructions, instructionType):
-    for result in instructions.split(';'):
-        match, remainder = StartsWithGetRemainder(result, '7:%s,' % instructionType)
-        if match:
-            if instructionType in ['Output', 'Metadata']:
-                return ','.join(remainder.split(',')[::-1])
-            else:
-                return remainder
-    return ''
+    CS_INSTRUCTION_NONE = 0
+    CS_INSTRUCTION_APPEND = 1
+    CS_INSTRUCTION_PREPEND = 2
+    CS_INSTRUCTION_BASE64 = 3
+    CS_INSTRUCTION_PRINT = 4
+    CS_INSTRUCTION_PARAMETER = 5
+    CS_INSTRUCTION_HEADER = 6
+    CS_INSTRUCTION_BUILD = 7
+    CS_INSTRUCTION_NETBIOS = 8
+    CS_INSTRUCTION_CONST_PARAMETER = 9
+    CS_INSTRUCTION_CONST_HEADER = 10
+    CS_INSTRUCTION_NETBIOSU = 11
+    CS_INSTRUCTION_URI_APPEND = 12
+    CS_INSTRUCTION_BASE64URL = 13
+    CS_INSTRUCTION_STRREP = 14
+    CS_INSTRUCTION_MASK = 15
+    CS_INSTRUCTION_CONST_HOST_HEADER = 16
 
-def ProcessInstructions(instructions, rawdata, instructionType):
-    instructions = GetInstructions(instructions, instructionType)
-    if instructions == '':
-        instructions = []
-    else:
-        instructions = [instruction for instruction in instructions.split(',')]
-    data = rawdata
-    for instruction in instructions:
-        instruction = instruction.split(':')
-        opcode = int(instruction[0])
-        operands = instruction[1:]
-        if opcode == 1:
-            if instructionType == 'Metadata':
-                data = data[:-len(operands[0])]
+    def __init__(self, instructionType, instructions):
+        self.instructionType = instructionType
+        self.instructions = instructions
+
+    @staticmethod
+    def StartsWithGetRemainder(strIn, strStart):
+        if strIn.startswith(strStart):
+            return True, strIn[len(strStart):]
+        else:
+            return False, None
+
+    @staticmethod
+    def BASE64URLDecode(data):
+        paddingLength = 4 - len(data) % 4
+        if paddingLength <= 2:
+            data += b'=' * paddingLength
+        return base64.b64decode(data, b'-_')
+
+    @staticmethod
+    def NETBIOSDecode(netbios):
+        dTranslate = {
+            ord(b'A'): ord(b'0'),
+            ord(b'B'): ord(b'1'),
+            ord(b'C'): ord(b'2'),
+            ord(b'D'): ord(b'3'),
+            ord(b'E'): ord(b'4'),
+            ord(b'F'): ord(b'5'),
+            ord(b'G'): ord(b'6'),
+            ord(b'H'): ord(b'7'),
+            ord(b'I'): ord(b'8'),
+            ord(b'J'): ord(b'9'),
+            ord(b'K'): ord(b'A'),
+            ord(b'L'): ord(b'B'),
+            ord(b'M'): ord(b'C'),
+            ord(b'N'): ord(b'D'),
+            ord(b'O'): ord(b'E'),
+            ord(b'P'): ord(b'F'),
+        }
+        return binascii.a2b_hex(bytes([dTranslate[char] for char in netbios]))
+
+    def GetInstructions(self):
+        for result in self.instructions.split(';'):
+            match, remainder = __class__.StartsWithGetRemainder(result, '7:%s,' % self.instructionType)
+            if match:
+                if self.instructionType in [__class__.CS_INSTRUCTION_TYPE_OUTPUT, __class__.CS_INSTRUCTION_TYPE_METADATA]:
+                    return ','.join(remainder.split(',')[::-1])
+                else:
+                    return remainder
+        return ''
+
+    def ProcessInstructions(self, rawdata):
+        instructions = self.GetInstructions()
+        if instructions == '':
+            instructions = []
+        else:
+            instructions = [instruction for instruction in instructions.split(',')]
+        data = rawdata
+        for instruction in instructions:
+            instruction = instruction.split(':')
+            opcode = int(instruction[0])
+            operands = instruction[1:]
+            if opcode == __class__.CS_INSTRUCTION_NONE:
+                pass
+            elif opcode == __class__.CS_INSTRUCTION_APPEND:
+                if self.instructionType == __class__.CS_INSTRUCTION_TYPE_METADATA:
+                    data = data[:-len(operands[0])]
+                else:
+                    data = data[:-int(operands[0])]
+            elif opcode == __class__.CS_INSTRUCTION_PREPEND:
+                if self.instructionType == __class__.CS_INSTRUCTION_TYPE_METADATA:
+                    data = data[len(operands[0]):]
+                else:
+                    data = data[int(operands[0]):]
+            elif opcode == __class__.CS_INSTRUCTION_BASE64:
+                data = binascii.a2b_base64(data)
+            elif opcode == __class__.CS_INSTRUCTION_PRINT:
+                pass
+            elif opcode == __class__.CS_INSTRUCTION_PARAMETER:
+                pass
+            elif opcode == __class__.CS_INSTRUCTION_HEADER:
+                pass
+            elif opcode == __class__.CS_INSTRUCTION_BUILD:
+                pass
+            elif opcode == __class__.CS_INSTRUCTION_NETBIOS:
+                data = __class__.NETBIOSDecode(data.upper())
+            elif opcode == __class__.CS_INSTRUCTION_CONST_PARAMETER:
+                pass
+            elif opcode == __class__.CS_INSTRUCTION_CONST_HEADER:
+                pass
+            elif opcode == __class__.CS_INSTRUCTION_NETBIOSU:
+                data = __class__.NETBIOSDecode(data)
+            elif opcode == __class__.CS_INSTRUCTION_URI_APPEND:
+                pass
+            elif opcode == __class__.CS_INSTRUCTION_BASE64URL:
+                data = __class__.BASE64URLDecode(data)
+            elif opcode == __class__.CS_INSTRUCTION_STRREP:
+                data = data.replace(operands[0], operands[1])
+            elif opcode == __class__.CS_INSTRUCTION_MASK:
+                xorkey = data[0:4]
+                ciphertext = data[4:]
+                data = []
+                for iter, value in enumerate(ciphertext):
+                    data.append(value ^ xorkey[iter % 4])
+                data = bytes(data)
+            elif opcode == __class__.CS_INSTRUCTION_CONST_HOST_HEADER:
+                pass
             else:
-                data = data[:-int(operands[0])]
-        elif opcode == 2:
-            if instructionType == 'Metadata':
-                data = data[len(operands[0]):]
-            else:
-                data = data[int(operands[0]):]
-        elif opcode == 3:
-            data = binascii.a2b_base64(data)
-        elif opcode == 4:
-            pass
-        elif opcode == 6:
-            pass
-        elif opcode == 7:
-            pass
-        elif opcode == 13:
-            data = BASE64URLDecode(data)
-        elif opcode == 15:
-            xorkey = data[0:4]
-            ciphertext = data[4:]
-            data = []
-            for iter, value in enumerate(ciphertext):
-                data.append(value ^ xorkey[iter % 4])
-            data = bytes(data)
-    return data
-            
+                raise Exception('Unknown instruction opcode: %d' % opcode)
+        return data
+
 def DecryptMetadata(arg, options):
-    print('Input: %s' % arg)
-    arg = ProcessInstructions(options.transform, arg.encode(), 'Metadata')
-    print('Encrypted metadata: %s' % binascii.b2a_hex(arg).decode())
+    oOutput = InstantiateCOutput(options)
+
+    oOutput.Line('Input: %s' % arg)
+    arg = cCSInstructions(cCSInstructions.CS_INSTRUCTION_TYPE_METADATA, options.transform).ProcessInstructions(arg.encode())
+    oOutput.Line('Encrypted metadata: %s' % binascii.b2a_hex(arg).decode())
 
     if options.private != '':
         decrypted = RSADecrypt(options.private, arg)
         if decrypted != None:
-            DecodeMetadata(decrypted)
+            DecodeMetadata(decrypted, oOutput)
     elif options.file != '':
         if javaobj == None:
             print('javaobj module required: pip install javaobj-py3')
@@ -425,14 +726,14 @@ def DecryptMetadata(arg, options):
         privateKey = binascii.b2a_hex(bytes([number & 0xFF for number in pobj.array.value.privateKey.encoded._data])).decode()
         decrypted = RSADecrypt(privateKey, arg)
         if decrypted != None:
-            DecodeMetadata(decrypted)
+            DecodeMetadata(decrypted, oOutput)
     else:
         jsonData = GetJSONData()
         for publicKey, dPrivatekey in jsonData['dLookupValues']['7'].items():
             privateKey = dPrivatekey['verbose']
             decrypted = RSADecrypt(privateKey, arg)
             if decrypted != None:
-                DecodeMetadata(decrypted)
+                DecodeMetadata(decrypted, oOutput)
                 break
 
 def Main():
@@ -443,6 +744,7 @@ https://DidierStevens.com'''
 
     oParser = optparse.OptionParser(usage='usage: %prog [options] encrypted_metadata\n' + __description__ + moredesc, version='%prog ' + __version__)
     oParser.add_option('-m', '--man', action='store_true', default=False, help='Print manual')
+    oParser.add_option('-o', '--output', type=str, default='', help='Output to file (# supported)')
     oParser.add_option('-p', '--private', default='', help='Private key (hexadecimal)')
     oParser.add_option('-f', '--file', default='', help='File with private key')
     oParser.add_option('-t', '--transform', type=str, default='7:Metadata,3', help='Transformation instructions')
