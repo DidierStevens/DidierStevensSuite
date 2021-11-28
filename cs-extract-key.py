@@ -4,8 +4,8 @@ from __future__ import print_function
 
 __description__ = 'Extract cryptographic keys from Cobalt Strike beacon process dump'
 __author__ = 'Didier Stevens'
-__version__ = '0.0.2'
-__date__ = '2021/11/02'
+__version__ = '0.0.3'
+__date__ = '2021/11/11'
 
 """
 Source code put in the public domain by Didier Stevens, no Copyright
@@ -23,6 +23,8 @@ History:
   2021/10/29: added option -t
   2021/10/31: changes to output
   2021/11/02: man page
+  2021/11/06: 0.0.3 added AverageDifferenceConsecutiveBytes and disabled it
+  2021/11/11: added option verbose
 
 Todo:
   Document flag arguments in man page
@@ -1057,6 +1059,7 @@ class cOutput():
         self.headCounter = 0
         self.tail = False
         self.tailQueue = []
+        self.STDOUT = 'STDOUT'
         self.fOut = None
         self.oCsvWriter = None
         self.rootFilenames = {}
@@ -1065,12 +1068,30 @@ class cOutput():
             self.fileoptions = 'wb'
         else:
             self.fileoptions = 'w'
+        self.dReplacements = {}
+
+    def Replace(self, line):
+        for key, value in self.dReplacements.items():
+            line = line.replace(key, value)
+        return line
+
+    def Open(self, binary=False):
+        if self.fOut != None:
+            return
+
+        if binary:
+            self.fileoptions = 'wb'
+        else:
+            self.fileoptions = 'w'
+
         if self.filenameOption:
             if self.ParseHash(self.filenameOption):
                 if not self.separateFiles and self.filename != '':
                     self.fOut = open(self.filename, self.fileoptions)
             elif self.filenameOption != '':
                 self.fOut = open(self.filenameOption, self.fileoptions)
+        else:
+            self.fOut = self.STDOUT
 
     def ParseHash(self, option):
         if option.startswith('#'):
@@ -1121,14 +1142,16 @@ class cOutput():
             iter += 1
 
     def LineSub(self, line, eol):
-        if self.fOut == None or self.console:
+        line = self.Replace(line)
+        self.Open()
+        if self.fOut == self.STDOUT or self.console:
             try:
                 print(line, end=eol)
             except UnicodeEncodeError:
                 encoding = sys.stdout.encoding
                 print(line.encode(encoding, errors='backslashreplace').decode(encoding), end=eol)
 #            sys.stdout.flush()
-        if self.fOut != None:
+        if self.fOut != self.STDOUT:
             self.fOut.write(line + '\n')
             self.fOut.flush()
 
@@ -1148,7 +1171,8 @@ class cOutput():
         self.Line('%s: %s' % (self.FormatTime(), line))
 
     def WriteBinary(self, data):
-        if self.fOut != None:
+        self.Open(True)
+        if self.fOut != self.STDOUT:
             self.fOut.write(data)
             self.fOut.flush()
         else:
@@ -1198,7 +1222,7 @@ class cOutput():
         self.headCounter = 0
         self.tailQueue = []
 
-        if self.fOut != None:
+        if self.fOut != self.STDOUT:
             self.fOut.close()
             self.fOut = None
 
@@ -1529,6 +1553,12 @@ def ExtractEncryptedCallback(data):
     else:
         return ciphertext
 
+def AverageDifferenceConsecutiveBytes(data):
+    sumDifferences = 0.0
+    for index in range(len(data) - 1):
+        sumDifferences += abs(data[index] - data[index + 1])
+    return sumDifferences /float(len(data)-1)
+
 def ProcessBinaryFile(filename, content, cutexpression, flag, oOutput, oLogfile, options, oParserFlag):
     if content == None:
         try:
@@ -1619,7 +1649,10 @@ def ProcessBinaryFile(filename, content, cutexpression, flag, oOutput, oLogfile,
             searchPositions = FindAll(data, b'sha256\x00')
             if searchPositions == []:
                 fullsearch = True
+            else:
+                oOutput.Line('Found %d instance(s) of string sha256\\x00' % len(searchPositions))
             if fullsearch:
+                oOutput.Line('Performing a full search')
                 searchPositions = [0]
             starttime = time.time()
             progressCounter = 0
@@ -1638,10 +1671,13 @@ def ProcessBinaryFile(filename, content, cutexpression, flag, oOutput, oLogfile,
                         break
                     if key == b'\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00':
                         continue
+#                    if AverageDifferenceConsecutiveBytes(key) < 50.0:
+#                        continue
                     hmacsSgnatureCalculated = hmac.new(key, encryptedData, hashlib.sha256).digest()[:16]
                     if hmacSignatureMessage == hmacsSgnatureCalculated:
                         oOutput.Line('HMAC key position: 0x%08x' % iter)
                         oOutput.Line('HMAC Key: %s' % binascii.b2a_hex(key).decode())
+#                        oOutput.Line('%f' % AverageDifferenceConsecutiveBytes(key))
                         hmackey = key
 
                     cypher = Crypto.Cipher.AES.new(key, Crypto.Cipher.AES.MODE_CBC, CS_FIXED_IV)
@@ -1650,8 +1686,11 @@ def ProcessBinaryFile(filename, content, cutexpression, flag, oOutput, oLogfile,
                     if callbackid < 256:
                         oOutput.Line('AES key position: 0x%08x' % iter)
                         oOutput.Line('AES Key:  %s' % binascii.b2a_hex(key).decode())
+#                        oOutput.Line('%f' % AverageDifferenceConsecutiveBytes(key))
                         aeskey = key
-
+                        if options.verbose:
+                            oOutput.Line('Decrypted data:')
+                            oOutput.Line(cDump(decryptedData).HexAsciiDump(), eol='')
                     if hmackey != None and aeskey != None and hmacaeskey == None:
                         hmacaeskey = '%s:%s' % (binascii.b2a_hex(hmackey).decode(), binascii.b2a_hex(aeskey).decode())
                         oOutput.Line('SHA256 raw key: %s' % hmacaeskey)
@@ -1708,6 +1747,7 @@ https://DidierStevens.com'''
     oParser.add_option('-t', '--task', type=str, default='', help='Encrypted task data (hexadecimal)')
     oParser.add_option('-c', '--callback', type=str, default='', help='Encrypted callback data (hexadecimal)')
     oParser.add_option('-f', '--fullsearch', action='store_true', default=False, help='Search the complete memory dump (in combination with options -t and -c)')
+    oParser.add_option('-V', '--verbose', action='store_true', default=False, help='Verbose output')
     oParser.add_option('-o', '--output', type=str, default='', help='Output to file (# supported)')
     oParser.add_option('-p', '--password', default='infected', help='The ZIP password to be used (default infected)')
     oParser.add_option('-n', '--noextraction', action='store_true', default=False, help='Do not extract from archive file')
