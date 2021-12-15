@@ -2,8 +2,8 @@
 
 __description__ = 'Extract base64 strings from file'
 __author__ = 'Didier Stevens'
-__version__ = '0.0.18'
-__date__ = '2021/11/14'
+__version__ = '0.0.19'
+__date__ = '2021/12/15'
 
 """
 
@@ -36,6 +36,7 @@ History:
   2021/07/16: 0.0.16 added b85 decoding
   2021/09/27: 0.0.17 added select L; added a85 decoding
   2021/11/14: 0.0.18 fixed DecodeDataDecimal
+  2021/12/15: 0.0.19 Python 3 bugfix
 
 Todo:
   add base64 url
@@ -1033,7 +1034,7 @@ def BASE64Dump(filename, options):
             oDataIO = DataIO(sys.stdin.read())
     elif filename.lower().endswith('.zip'):
         oZipfile = zipfile.ZipFile(filename, 'r')
-        oZipContent = oZipfile.open(oZipfile.infolist()[0], 'r', C2BIP3(MALWARE_PASSWORD))
+        oZipContent = oZipfile.open(oZipfile.infolist()[0], 'r', MALWARE_PASSWORD)
         oDataIO = DataIO(oZipContent.read())
         oZipContent.close()
         oZipfile.close()
