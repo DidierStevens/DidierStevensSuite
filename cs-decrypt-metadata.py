@@ -4,8 +4,8 @@ from __future__ import print_function
 
 __description__ = 'Cobalt Strike: RSA decrypt metadata'
 __author__ = 'Didier Stevens'
-__version__ = '0.0.3'
-__date__ = '2021/11/15'
+__version__ = '0.0.4'
+__date__ = '2021/12/16'
 
 """
 Source code put in the public domain by Didier Stevens, no Copyright
@@ -19,6 +19,7 @@ History:
   2021/11/10: error handling decrypting; added option -t
   2021/11/11: 0.0.3 refactoring: cCSInstructions, cOutput
   2021/11/15: bugfix decoding
+  2021/12/16: 0.0.4 bugfix
 
 Todo:
 
@@ -333,6 +334,8 @@ def RSADecrypt(key, data):
     ciphertext = data
     try:
         cleartext = oRSAPrivateKey.decrypt(ciphertext, None)
+        if cleartext == b'':
+            return None
     except ValueError:
         return None
     return cleartext
