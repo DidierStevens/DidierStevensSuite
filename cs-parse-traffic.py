@@ -4,8 +4,8 @@ from __future__ import print_function
 
 __description__ = 'Analyze Cobalt Strike HTTP/DNS beacon traffic'
 __author__ = 'Didier Stevens'
-__version__ = '0.0.3'
-__date__ = '2021/11/26'
+__version__ = '0.0.4'
+__date__ = '2021/12/12'
 
 """
 
@@ -31,6 +31,7 @@ History:
   2021/11/17: 0.0.3 refactoring crypto & parser
   2021/11/20: added constants from https://github.com/verctor/Cobalt_Homework/blob/master/scripts/define.py
   2021/11/26: merging HTTP and DNS
+  2021/12/12: 0.0.4 bugfix HMAC invalid; extra constants https://github.com/DidierStevens/Beta/issues/5
 
 Todo:
   add support for non-default DNS labels
@@ -472,6 +473,10 @@ class cCSParser(object):
         'COMMAND_DOWNLOAD': 11,
         'COMMAND_EXECUTE': 12,
         'COMMAND_SPAWN_PROC_X86' : 13,
+        'COMMAND_PROXYLISTENER_CONNECTMESSAGE' : 14,
+        'COMMAND_PROXYLISTENER_WRITEMESSAGE' : 15,
+        'COMMAND_PROXYLISTENER_CLOSEMESSAGE' : 16,
+        'COMMAND_PROXYLISTENER_LISTENMESSAGE' : 17,
         'COMMAND_INJECT_PING' : 18,
         'COMMAND_DOWNLOAD_CANCEL': 19,
         'COMMAND_FORWARD_PIPE_DATA': 22,
@@ -542,6 +547,16 @@ class cCSParser(object):
         'COMMAND_SPAWN_TOKEN_X64' : 90,
         'COMMAND_INJECTX64_PING' : 91,
         'COMMAND_BLOCKDLLS' : 92,
+        'COMMAND_SPAWNAS_X86' : 93,
+        'COMMAND_SPAWNAS_X64' : 94,
+        'COMMAND_INLINE_EXECUTE' : 95,
+        'COMMAND_RUN_INJECT_X86' : 96,
+        'COMMAND_RUN_INJECT_X64' : 97,
+        'COMMAND_SPAWNU_X86' : 98,
+        'COMMAND_SPAWNU_X64' : 99,
+        'COMMAND_INLINE_EXECUTE_OBJECT' : 100,
+        'COMMAND_JOB_REGISTER_MSGMODE' : 101,
+        'COMMAND_LSOCKET_BIND_LOCALHOST' : 102,
     }
 
     verctor_result = {
@@ -619,7 +634,14 @@ class cCSParser(object):
                 fWrite.write(data)
 
     def ProcessPostPacketDataSub(self, data):
-        oStructData = cStruct(self.oCrypto.Decrypt(data))
+        try:
+            oStructData = cStruct(self.oCrypto.Decrypt(data))
+        except Exception as e:
+            if e.args != ('HMAC signature invalid',):
+                raise
+            self.oOutput.Line('HMAC signature invalid')
+            self.oOutput.Line('')
+            return
         counter = oStructData.Unpack('>I')
         self.oOutput.Line('Counter: %d' % counter)
         oStructCallbackdata = cStruct(oStructData.GetString('>I'))

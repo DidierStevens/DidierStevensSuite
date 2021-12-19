@@ -4,8 +4,8 @@ from __future__ import print_function
 
 __description__ = 'Analyze Cobalt Strike beacon process dumps for further analysis'
 __author__ = 'Didier Stevens'
-__version__ = '0.0.2'
-__date__ = '2021/11/09'
+__version__ = '0.0.3'
+__date__ = '2021/12/12'
 
 """
 Source code put in the public domain by Didier Stevens, no Copyright
@@ -17,6 +17,7 @@ History:
   2021/11/02: continue
   2021/11/03: continue
   2021/11/09: 0.0.2 added summary and option -n
+  2021/12/12: 0.0.3 added options -r, --numberofkeystotry, --keystotry, --keysize
 
 Todo:
   Handle error when memory stream larger than segment?
@@ -62,6 +63,14 @@ Manual:
 When given Cobalt Strike beacon process dumps as input, this tool will try to locate segments encoded with the 'sleep mask', decoded them and write them to disk as .bin files.
 
 Option -n can be used to disable writing of files.
+
+If the input file is no a minidump, option -r can be used to process the input file as raw data.
+
+Option --keysize specifies the size of the XOR key to recover (13 by default).
+
+Option --numberofkeystotry specifies how many keys to list/process (10 by default).
+
+Option --keystotry specifies the index of the keys to try (comma-separated list, 0 by default).
 
 '''
     for line in manual.split('\n'):
@@ -1309,46 +1318,45 @@ def ProcessBinaryFile(filename, content, dSummary, cutexpression, flag, oOutput,
         if b'\x8B\x46\x04\x8B\x08\x8B\x50\x04\x83\xC0\x08\x89\x55\x08\x89\x45\x0C\x85\xC9\x75\x04\x85\xD2\x74\x23\x3B\xCA\x73\xE6\x8B\x06\x8D\x3C\x08\x33\xD2' in data:
             oOutput.Line('sleep mask 32-bit 4.2 deobfuscation routine found!')
 
-#        listData = [['raw', data]]
+        if options.raw:
+            listData = [[0, data]]
+        else:
+            listData = []
+            oMinidumpFile = MinidumpFile.parse_bytes(data)
+            oget_buffered_reader = oMinidumpFile.get_reader().get_buffered_reader()
+            for info in oMinidumpFile.memory_info.infos:
+                if info.Protect == MemoryInfoListStream.AllocationProtect.PAGE_READWRITE:
+#                    print(info.Protect, info.BaseAddress, info.RegionSize, info.Type)
+                    try:
+                        oget_buffered_reader.move(info.BaseAddress)
+                    except Exception as e:
+                        if e.args[0].endswith(' is not in process memory space'):
+                            print('Error: %s' % e.args[0])
+                            continue
+                        else:
+                            raise e
+                    try:
+                        bytesSegment = oget_buffered_reader.read(info.RegionSize)
+                        listData.append([['segment', info], bytesSegment])
+                    except OverflowError:
+                        print('OverflowError') #a# handle overflow
+                    except Exception as e:
+                        if e.args[0] == 'Would read over segment boundaries!':
+                            print('Error: %s' % e.args[0])
+                        else:
+                            raise e
+            listData = sorted(listData, reverse=True, key=lambda item: len(item[1]))
+            listData = [[dataInfo[1].BaseAddress, data] for dataInfo, data in listData]
 
-        listData = []
-        oMinidumpFile = MinidumpFile.parse_bytes(data)
-        oget_buffered_reader = oMinidumpFile.get_reader().get_buffered_reader()
-        for info in oMinidumpFile.memory_info.infos:
-            if info.Protect == MemoryInfoListStream.AllocationProtect.PAGE_READWRITE:
-#                print(info.Protect, info.BaseAddress, info.RegionSize, info.Type)
-                try:
-                    oget_buffered_reader.move(info.BaseAddress)
-                except Exception as e:
-                    if e.args[0].endswith(' is not in process memory space'):
-                        print('Error: %s' % e.args[0])
-                        continue
-                    else:
-                        raise e
-                try:
-                    bytesSegment = oget_buffered_reader.read(info.RegionSize)
-#                    print(len(bytesSegment))
-                    listData.append([['segment', info], bytesSegment])
-                except OverflowError:
-                    print('OverflowError') #a# handle overflow
-                except Exception as e:
-                    if e.args[0] == 'Would read over segment boundaries!':
-                        print('Error: %s' % e.args[0])
-                    else:
-                        raise e
-        listData = sorted(listData, reverse=True, key=lambda item: len(item[1]))
-
-        numberOfKeysToTry = 10
-        for dataInfo, data in listData:
-            oOutput.Line('Segment %x size %x' % (dataInfo[1].BaseAddress, len(data)))
+        for baseAddress, data in listData:
+            oOutput.Line('Segment %x size %x' % (baseAddress, len(data)))
             dKeys = {}
-            keySize = 13
-            for offset in range(keySize):
+            for offset in range(options.keysize):
                 position = 0
-                while len(data[position + offset:position + offset + keySize]) == keySize:
-                    key = data[position + offset:position + offset + keySize]
+                while len(data[position + offset:position + offset + options.keysize]) == options.keysize:
+                    key = data[position + offset:position + offset + options.keysize]
                     dKeys[key] = dKeys.get(key, 0) + 1
-                    position += keySize
+                    position += options.keysize
             oOutput.Line('Potential keys = %d' % len(dKeys))
             keysSorted = []
             normalizedKeys = set()
@@ -1362,28 +1370,29 @@ def ProcessBinaryFile(filename, content, dSummary, cutexpression, flag, oOutput,
                     if not normalizedKey in normalizedKeys:
                         keysSorted.append([key, value])
                         normalizedKeys.add(normalizedKey)
-                    if len(keysSorted) >= numberOfKeysToTry:
+                    if len(keysSorted) >= options.numberofkeystotry:
                         break
 
             if len(keysSorted) > 0:
                 oOutput.Line('Probable keys:')
-                for index, (key, value) in enumerate(keysSorted[:numberOfKeysToTry]):
+                for index, (key, value) in enumerate(keysSorted[:options.numberofkeystotry]):
                     oOutput.Line('%d %d %s %s %f' % (index, value, key, binascii.b2a_hex(key), AverageDifferenceConsecutiveBytes(key)))
 
-                keyToTry = 0
-                oOutput.Line('Trying probable key %d:' % keyToTry)
-                for offset in range(keySize):
-                    decrypted = Xor(data, keysSorted[keyToTry][0], offset)
-                    if b'sha256\x00' in decrypted:
-#                        print(dataInfo[1].Protect, dataInfo[1].BaseAddress, dataInfo[1].RegionSize, dataInfo[1].Type)
-                        oOutput.Line('sha256\\x00 string found, key offset: %d' % offset)
-                        dSummary['keys'] = dSummary.get('keys', []) + [binascii.b2a_hex(keysSorted[keyToTry][0])]
-                        if not options.nowrite:
-                            dumpFilename = '%s.%x-%d.bin' % (filename, dataInfo[1].BaseAddress, offset)
-                            oOutput.Line('Writing segment to disk: %s' % dumpFilename)
-                            dSummary['files'] = dSummary.get('files', []) + [dumpFilename]
-                            with open(dumpFilename, 'wb') as fOut:
-                                fOut.write(decrypted)
+                keysToTry = [int(index) for index in options.keystotry.split(',')]
+                for keyToTry in keysToTry:
+                    oOutput.Line('Trying probable key %d:' % keyToTry)
+                    for offset in range(options.keysize):
+                        decrypted = Xor(data, keysSorted[keyToTry][0], offset)
+                        if b'sha256\x00' in decrypted:
+    #                        print(dataInfo[1].Protect, dataInfo[1].BaseAddress, dataInfo[1].RegionSize, dataInfo[1].Type)
+                            oOutput.Line('sha256\\x00 string found, key offset: %d' % offset)
+                            dSummary['keys'] = dSummary.get('keys', []) + [binascii.b2a_hex(keysSorted[keyToTry][0])]
+                            if not options.nowrite:
+                                dumpFilename = '%s.%x-%d.bin' % (filename, baseAddress, offset)
+                                oOutput.Line('Writing segment to disk: %s' % dumpFilename)
+                                dSummary['files'] = dSummary.get('files', []) + [dumpFilename]
+                                with open(dumpFilename, 'wb') as fOut:
+                                    fOut.write(decrypted)
 
             oOutput.Line('')
 
@@ -1444,10 +1453,14 @@ https://DidierStevens.com'''
     oParser.add_option('-m', '--man', action='store_true', default=False, help='Print manual')
     oParser.add_option('-o', '--output', type=str, default='', help='Output to file (# supported)')
     oParser.add_option('-n', '--nowrite', action='store_true', default=False, help='Do not write decoded segments to disk')
+    oParser.add_option('-r', '--raw', action='store_true', default=False, help='Assume the input file is raw data')
+    oParser.add_option('--numberofkeystotry', type=int, default=10, help='Number of keys to try (default 10)')
+    oParser.add_option('--keystotry', type=str, default='0', help='Keys (index) to try (default 0)')
+    oParser.add_option('--keysize', type=int, default=13, help='Size of XOR key (default 13)')
     oParser.add_option('-p', '--password', default='infected', help='The ZIP password to be used (default infected)')
     oParser.add_option('--noextraction', action='store_true', default=False, help='Do not extract from archive file')
     oParser.add_option('-l', '--literalfilenames', action='store_true', default=False, help='Do not interpret filenames')
-    oParser.add_option('-r', '--recursedir', action='store_true', default=False, help='Recurse directories (wildcards and here files (@...) allowed)')
+    oParser.add_option('--recursedir', action='store_true', default=False, help='Recurse directories (wildcards and here files (@...) allowed)')
     oParser.add_option('--checkfilenames', action='store_true', default=False, help='Perform check if files exist prior to file processing')
     oParser.add_option('-j', '--jsoninput', action='store_true', default=False, help='Consume JSON from stdin')
     oParser.add_option('--logfile', type=str, default='', help='Create logfile with given keyword')

@@ -4,8 +4,8 @@ from __future__ import print_function
 
 __description__ = 'Analyze Cobalt Strike beacons'
 __author__ = 'Didier Stevens'
-__version__ = '0.0.10'
-__date__ = '2021/11/17'
+__version__ = '0.0.11'
+__date__ = '2021/12/12'
 
 """
 Source code put in the public domain by Didier Stevens, no Copyright
@@ -48,6 +48,7 @@ History:
   2021/11/07: added FinalTests
   2021/11/14: added DNS fields
   2021/11/17: added missing field names (ebook FINDING BEACONS IN THE DARK)
+  2021/12/12: 0.0.11 added 1768b.json support
 
 Todo:
   JSON output -> instructions
@@ -1657,10 +1658,13 @@ def DetermineCSVersionFromConfig(dJSON):
         return ('4.4', maximumID)
 
 def GetJSONData():
+    filename = os.path.join(GetScriptPath(), '1768b.json')
+    if os.path.isfile(filename):
+        return json.load(open(filename, 'r'))
     filename = os.path.join(GetScriptPath(), '1768.json')
-    if not os.path.isfile(filename):
-        return {}
-    return json.load(open(filename, 'r'))
+    if os.path.isfile(filename):
+        return json.load(open(filename, 'r'))
+    return {}
 
 class cStruct(object):
     def __init__(self, data):

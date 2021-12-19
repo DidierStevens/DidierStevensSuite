@@ -4,8 +4,8 @@ from __future__ import print_function
 
 __description__ = 'Extract cryptographic keys from Cobalt Strike beacon process dump'
 __author__ = 'Didier Stevens'
-__version__ = '0.0.3'
-__date__ = '2021/11/11'
+__version__ = '0.0.4'
+__date__ = '2021/12/11'
 
 """
 Source code put in the public domain by Didier Stevens, no Copyright
@@ -25,6 +25,7 @@ History:
   2021/11/02: man page
   2021/11/06: 0.0.3 added AverageDifferenceConsecutiveBytes and disabled it
   2021/11/11: added option verbose
+  2021/12/11: 0.0.4 added option donotfullsearch
 
 Todo:
   Document flag arguments in man page
@@ -125,7 +126,7 @@ If this succeeds, a valid key was found.
 
 I have observed that the HMAC and AES keys are often found in process memory, somewhere after string sha256\x00. As a speed optimization tactic, this tool will search for each occurrence of string sha256\x00 and try out the 0x500000 bytes that follow these string occurrences as HMAC and AES keys.
 For a typical writable process memory dumb of no more than 10MB, this takes a couple of minutes.
-If no occurrences of string sha250\x00 are found, then the complete process memory dump is processed. This processing mode can be forced with option -f.
+If no occurrences of string sha250\x00 are found, then the complete process memory dump is processed, unless option -d is used. This full search processing mode can be forced with option -f.
 
 There is a small difference between the way that data is encrypted by the beacon and the way that data is encrypted by the team server.
 Encrypted data sent by the team server to the beacon, contains tasks to be executed by the beacon. That encrypted data looks completely random. Option -t (task) must be used to provide this encrypted data (as a hexadecimal string) to the tool.
@@ -156,7 +157,7 @@ But whenever I found an AES key near an HMAC key, they were always true positive
 
 Remark that the above method (using option -t or -c) works also for version 3.x beacons.
 
-Beacon process memory can be encoded while the beacon is sleeping. This is done with a configuration option called a sleep mask. Since beacons sleep most of the time, it is very likely that you will take a process dump while a beacon is sleeping. This tool can not recover cryptographic keys from the process memory of a beacon with a sleep mask. I am working on a tool to decode such process memory, and then the output of that tool can be used by this tool.
+Beacon process memory can be encoded while the beacon is sleeping. This is done with a configuration option called a sleep mask. Since beacons sleep most of the time, it is very likely that you will take a process dump while a beacon is sleeping. This tool can not recover cryptographic keys from the process memory of a beacon with a sleep mask. If that is the case, use my tool cs-analyze-processdump.py first.
 
 '''
     for line in manual.split('\n'):
@@ -1559,6 +1560,9 @@ def AverageDifferenceConsecutiveBytes(data):
         sumDifferences += abs(data[index] - data[index + 1])
     return sumDifferences /float(len(data)-1)
 
+def PrintableASCII(data):
+    return ''.join([IFF(b >= 32 and b < 127, chr(b), '.') for b in data])
+
 def ProcessBinaryFile(filename, content, cutexpression, flag, oOutput, oLogfile, options, oParserFlag):
     if content == None:
         try:
@@ -1649,6 +1653,8 @@ def ProcessBinaryFile(filename, content, cutexpression, flag, oOutput, oLogfile,
             searchPositions = FindAll(data, b'sha256\x00')
             if searchPositions == []:
                 fullsearch = True
+                if options.donotfullsearch:
+                    return
             else:
                 oOutput.Line('Found %d instance(s) of string sha256\\x00' % len(searchPositions))
             if fullsearch:
@@ -1685,8 +1691,7 @@ def ProcessBinaryFile(filename, content, cutexpression, flag, oOutput, oLogfile,
                     callbackid = struct.unpack('>I', decryptedData[8:12])[0]
                     if callbackid < 256:
                         oOutput.Line('AES key position: 0x%08x' % iter)
-                        oOutput.Line('AES Key:  %s' % binascii.b2a_hex(key).decode())
-#                        oOutput.Line('%f' % AverageDifferenceConsecutiveBytes(key))
+                        oOutput.Line('AES Key:  %s %s %f' % (binascii.b2a_hex(key).decode(), PrintableASCII(key), AverageDifferenceConsecutiveBytes(key)))
                         aeskey = key
                         if options.verbose:
                             oOutput.Line('Decrypted data:')
@@ -1747,6 +1752,7 @@ https://DidierStevens.com'''
     oParser.add_option('-t', '--task', type=str, default='', help='Encrypted task data (hexadecimal)')
     oParser.add_option('-c', '--callback', type=str, default='', help='Encrypted callback data (hexadecimal)')
     oParser.add_option('-f', '--fullsearch', action='store_true', default=False, help='Search the complete memory dump (in combination with options -t and -c)')
+    oParser.add_option('-d', '--donotfullsearch', action='store_true', default=False, help='Do not fallback to a fullsearch')
     oParser.add_option('-V', '--verbose', action='store_true', default=False, help='Verbose output')
     oParser.add_option('-o', '--output', type=str, default='', help='Output to file (# supported)')
     oParser.add_option('-p', '--password', default='infected', help='The ZIP password to be used (default infected)')
