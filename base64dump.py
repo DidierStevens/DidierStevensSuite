@@ -2,8 +2,8 @@
 
 __description__ = 'Extract base64 strings from file'
 __author__ = 'Didier Stevens'
-__version__ = '0.0.19'
-__date__ = '2021/12/15'
+__version__ = '0.0.20'
+__date__ = '2021/12/28'
 
 """
 
@@ -37,6 +37,7 @@ History:
   2021/09/27: 0.0.17 added select L; added a85 decoding
   2021/11/14: 0.0.18 fixed DecodeDataDecimal
   2021/12/15: 0.0.19 Python 3 bugfix
+  2021/12/28: 0.0.20 added zxcn decoding
 
 Todo:
   add base64 url
@@ -113,6 +114,7 @@ ah stands for "ampersand hexadecimal" (&H), it looks like this: &H90&H90...
 zxle stands for "zero hexadecimal little-endian" (0x), it looks like this: 0x909090900xeb77...
 zxbe stands for "zero hexadecimal big-endian" (0x), it looks like this: 0x909090900x77eb...
 zxc stands for "zero hexadecimal comma" (0x), it looks like this: 0x90,0x90,0x90,0x90...
+zxcn stands for "zero hexadecimal comma no-leading-zero" (0x), it looks like this: 0x90,0xA,0x2A,0x90...
 dec stands for "decimal", it looks like this: 80;75;3;4...
 nb stands for "NETBIOS", it looks like this: ENFKOIAA
 b85 stands for BASE85 RFC 1924, it looks like this: X>D+Ca&#bLba`-Pb31o...
@@ -857,6 +859,14 @@ def DecodeDataZXC(data, ProcessFunction):
         except:
             continue
 
+def DecodeDataZXCN(data, ProcessFunction):
+    data = RemoveWhitespace(data)
+    for hexstring in re.findall(br'(?:0x[ABCDEFabcdef0123456789]{1,2},)+0x[ABCDEFabcdef0123456789]{1,2}', data):
+        try:
+            yield (hexstring, b''.join([binascii.a2b_hex(IFF(len(hexbyte) == 1, b'0' + hexbyte, hexbyte)) for hexbyte in hexstring.replace(b'0x', b'').split(b',')]))
+        except:
+            continue
+
 def DecodeDataDecimal(data, ProcessFunction):
     #find decimal numbers separated by a single character that is not a digit
     for decimals in re.findall(br'(?:[0123456789]{1,3}[^0123456789])+[0123456789]{1,3}', data):
@@ -1104,7 +1114,7 @@ def BASE64Dump(filename, options):
     rules = None
     if options.yara != None:
         if not 'yara' in sys.modules:
-            print('Error: option yara requires the YARA Python module.')
+            print('Error: option yara requires the YARA Python module. pip install yara-python')
             return
         rules, rulesVerbose = YARACompile(options.yara)
         if options.verbose:
@@ -1219,6 +1229,7 @@ def Main():
         'zxle': ('0x hexadecimal little-endian, example: 0x909090900xeb77...', DecodeDataZXLittleEndian),
         'zxbe': ('0x hexadecimal big-endian, example: 0x909090900x77eb...', DecodeDataZXBigEndian),
         'zxc': ('0x hexadecimal 2 digits, comma-separated, example: 0x90,0x90,0x90,0x90...', DecodeDataZXC),
+        'zxcn': ('0x hexadecimal 1 or 2 digits, comma-separated, example: 0x90,0xA,0x2A,0x90...', DecodeDataZXCN),
         'dec': ('decimal numbers, separated by an arbitrary separator, example: 80;75;3;4...', DecodeDataDecimal),
         'nb': ('NETBIOS, uppercase letters from A to P, example: ENFKOIAA', DecodeDataNETBIOS),
         'b85': ('BASE85 RFC 1924, example: X>D+Ca&#bLba`-Pb31o...', DecodeDataBase85RFC1924),

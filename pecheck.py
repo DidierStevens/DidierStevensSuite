@@ -2,8 +2,8 @@
 
 __description__ = 'Tool for displaying PE file info'
 __author__ = 'Didier Stevens'
-__version__ = '0.7.13'
-__date__ = '2021/02/25'
+__version__ = '0.7.14'
+__date__ = '2021/12/27'
 
 """
 
@@ -52,6 +52,8 @@ History:
   2020/07/26: fixes Python 3 bug for overlays reported by Lenny Zeltser; fixed ASCII 128; added option --verbose
   2020/10/22: 0.7.12 extra info (names) with -l P; Python 3 bug
   2021/02/25: 0.7.13 added signature hash
+  2021/05/29: 0.7.14 added file size
+  2021/12/27: support option -D with -l P
 
 Todo:
 """
@@ -112,6 +114,8 @@ After producing an overview of embedded PE files (with option -l P), select an e
 C:\Demo>pecheck.py -l 2 sample.png.vir
 
 Use option -g o (o = overlay) to extract the overlay, and -g s (s = stripped) to extract the PE file without overlay.
+
+When using option -D together with -l P, all found PE files are written to disk in the current directory, with filename: hash.vir.
 
 '''
     for line in manual.split('\n'):
@@ -415,6 +419,7 @@ def SingleFileInfo(filename, data, signatures, options):
     raw = pe.write()
     print("PE check for '%s':" % filename)
     print('Entropy: %f (Min=0.0, Max=8.0)' % pe.sections[0].entropy_H(raw))
+    print('Size: %d' % len(raw))
     print('MD5     hash: %s' % hashlib.md5(raw).hexdigest())
     print('SHA-1   hash: %s' % hashlib.sha1(raw).hexdigest())
     print('SHA-256 hash: %s' % hashlib.sha256(raw).hexdigest())
@@ -859,7 +864,7 @@ def Sections(data, options):
 
     if options.yara != None:
         if not 'yara' in sys.modules:
-            print('Error: option yara requires the YARA Python module.')
+            print('Error: option yara requires the YARA Python module. pip install yara-python')
             return
         rules, rulesVerbose = YARACompile(options.yara)
         if options.verbose:
@@ -959,7 +964,7 @@ def CalculateChosenHash(data):
     dHashes[hashes[0]].update(data)
     return dHashes[hashes[0]].hexdigest(), hashes[0]
 
-def GetInfoCarvedFile(data, position):
+def GetInfoCarvedFile(data, position, extractfile):
     try:
         info = ''
         oPEtemp = pefile.PE(data=data[position:])
@@ -976,13 +981,16 @@ def GetInfoCarvedFile(data, position):
         overlayOffset = Fixed_get_overlay_data_start_offset(oPEtemp)
         dataPEFile = oPEtemp.write()
         if overlayOffset == None:
-            lengthStripped = len(dataPEFile)
-            lengthWithOverlay = len(dataPEFile)
-            hashStripped, _ = CalculateChosenHash(dataPEFile)
+            dataPEFileStripped = dataPEFile
         else:
-            lengthStripped = len(dataPEFile[:overlayOffset])
-            lengthWithOverlay = len(dataPEFile)
-            hashStripped, _ = CalculateChosenHash(dataPEFile[:overlayOffset])
+            dataPEFileStripped = dataPEFile[:overlayOffset]
+        lengthStripped = len(dataPEFileStripped)
+        lengthWithOverlay = len(dataPEFile)
+        hashStripped, _ = CalculateChosenHash(dataPEFileStripped)
+        if extractfile:
+            with open(hashStripped + '.vir', 'wb') as fWrite:
+                fWrite.write(dataPEFileStripped)
+
         info += ' 0x%08x %s 0x%08x' % (position + lengthStripped - 1, hashStripped, position + lengthWithOverlay - 1)
         if position + lengthWithOverlay == len(data):
             info += ' (EOF)'
@@ -1002,7 +1010,7 @@ def SingleFile(filename, signatures, options):
     data = ReadFile(filename)
     if options.locate == 'P':
         for index, position in enumerate(FindAllPEFiles(data)):
-            print('%d: 0x%08x%s' % (index + 1, position, PrefixIfNeeded(GetInfoCarvedFile(data, position))))
+            print('%d: 0x%08x%s' % (index + 1, position, PrefixIfNeeded(GetInfoCarvedFile(data, position, options.dump))))
         return
     elif options.locate != '':
         try:
