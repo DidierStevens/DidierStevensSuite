@@ -2,8 +2,8 @@
 
 __description__ = 'JPEG file analysis tool'
 __author__ = 'Didier Stevens'
-__version__ = '0.0.7'
-__date__ = '2019/04/27'
+__version__ = '0.0.9'
+__date__ = '2022/02/08'
 
 """
 Source code put in public domain by Didier Stevens, no Copyright
@@ -25,6 +25,9 @@ History:
   2018/06/17: 0.0.6 added property extracted to cBinaryFile
   2019/04/20: 0.0.7 added option -t
   2019/04/27: CutData UNICODE & Find; added option -A
+  2020/10/21: 0.0.8 Python 3 fix in cBinaryFile
+  2022/02/04: 0.0.9 added AddExtraInfo
+  2022/02/08: updated man
 
 Todo:
 """
@@ -43,6 +46,7 @@ import re
 import struct
 import string
 import math
+import hashlib
 if sys.version_info[0] >= 3:
     from io import BytesIO as DataIO
 else:
@@ -110,6 +114,22 @@ A SOS segment's data is followed by the image data. The statistics of the image 
 If the last segment is incomplete, a *warning* line will be displayed.
 If the last segment is followed by extra bytes, a *trailing* line will be displayed.
 Use option -t if you want to consider all bytes after the first EOI marker as trailing (e.g. without being parsed).
+
+Option -E (extra) can be used to add extra information to the overview of segments. Like the hash of the data inside each segment (md5, sha1 or/and sha256).
+Like this:
+jpegdump.py -E md5 j.jpg
+
+File: j.jpg
+  1 p=0x00000000    : m=ffd8 SOI
+  2 p=0x00000002 d=0: m=ffe1 APP1  l=64837 e=6.886123 a=61.043573 md5=4aeb69c4b5abad75f426c9e179518ac2
+  3 p=0x0000fd49 d=0: m=ffdb DQT   l=  197 e=2.343628 a=0.618557 md5=61d311bde22762ae0e88b768e835eced remark: 195/65 = 3.000000
+  4 p=0x0000fe10 d=0: m=ffc4 DHT   l=  418 e=7.009735 a=14.149398 md5=fc293d732e9e8ce63b9033a754454494
+  5 p=0x0000ffb4 d=0: m=ffc0 SOF0  l=   17 e=3.189898 a=27.357143 md5=b60979610c08a94a925fad40b54780d4 remark: p=8 h=3456 w=4608 c=3
+  6 p=0x0000ffc7 d=0: m=ffda SOS   l=   12 e=2.446439 a=21.222222 md5=822524de858abbd7d9ccbbe35130cc2f remark: c=3
+                                  entropy-coded data: l=3529048 e=7.983918 a=84.905246 #ff00=8681
+  7 p=0x0036d92d d=0: m=ffd9 EOI
+
+To display more than one hash, use a comma to separate the desired hashes.
 
 Segments can be selected to inspect their data. This can be done with option -s and the index number.
 Example:
@@ -706,7 +726,7 @@ class cBinaryFile:
             return fRead.read(size)
 
     def Data(self):
-        data = self.fIn.read()
+        data = self.read()
         self.close()
         return data
 
@@ -1095,6 +1115,21 @@ def ConvertNone(value, replacement=''):
     else:
         return value
 
+def AddExtraInfo(extra, line, data):
+    extrainfo = []
+    if extra == '':
+        return ''
+    for item in extra.split(','):
+        if item == 'md5':
+            extrainfo.append('md5=%s' % hashlib.md5(data).hexdigest())
+        elif item == 'sha1':
+            extrainfo.append('sha1=%s' % hashlib.sha1(data).hexdigest())
+        elif item == 'sha256':
+            extrainfo.append('sha256=%s' % hashlib.sha256(data).hexdigest())
+        else:
+            raise Exception('Unknown extra options: %s' % extra)
+    return ' ' + ' '.join(extrainfo)
+
 def GetDelta(found, endOfPrevious, noPrevious):
     if noPrevious:
         return '   '
@@ -1173,6 +1208,7 @@ def ProcessJPEGFileSub(data, options, startposition=0):
                 size = struct.unpack('>xxH', marker)[0]
                 stats = CalculateByteStatistics(data=data[found+4:found+2+size])
                 line = '%3d p=0x%08x %s: m=%02x%02x %-5s l=%5d e=%f a=%f' % (counter, found, GetDelta(found, endOfPrevious, noPrevious), struct.unpack('Bx', marker[0:2])[0], markerType, markerName, size, stats[1], ConvertNone(stats[10], 0.0))
+                line += AddExtraInfo(options.extra, line, data[found+4:found+2+size])
                 # http://vip.sugovica.hu/Sardi/kepnezo/JPEG%20File%20Layout%20and%20Format.htm
                 if markerType == 0xDB:
                     line += ' remark: %d/65 = %f' % (size - 2, (size - 2.0) / 65.0)
@@ -1272,6 +1308,7 @@ https://DidierStevens.com'''
     oParser.add_option('-c', '--compliant', action='store_true', default=False, help='Combined with --findsoi, report compliant images only')
     oParser.add_option('-e', '--extract', action='store_true', default=False, help='Combined with --findsoi, extract images to disk')
     oParser.add_option('-t', '--trailing', action='store_true', default=False, help='Consider everything after the first EOI as trailing')
+    oParser.add_option('-E', '--extra', type=str, default='', help='add extra info')
     (options, args) = oParser.parse_args()
 
     if options.man:
