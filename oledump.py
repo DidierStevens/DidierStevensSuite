@@ -2,8 +2,8 @@
 
 __description__ = 'Analyze OLE files (Compound Binary Files)'
 __author__ = 'Didier Stevens'
-__version__ = '0.0.62'
-__date__ = '2021/08/11'
+__version__ = '0.0.63'
+__date__ = '2022/02/21'
 
 """
 
@@ -111,6 +111,7 @@ History:
   2021/02/23: 0.0.60 small change PIP message
   2021/06/20: 0.0.61 updated man
   2021/08/11: 0.0.62 fix return code bug for multiple OLE files inside OOXML container
+  2022/02/21: 0.0.63 Python 3 fix
 
 Todo:
 
@@ -1867,7 +1868,7 @@ def OLESub(ole, data, prefix, rules, options):
             if not options.quiet:
                 line = '%3s: %s %s%s %s' % (index, indicator, lengthString, moduleinfo, PrintableName(fname, orphan))
                 if indicator.lower() == 'm' and options.vbadecompress:
-                    streamForExtra = SearchAndDecompress(stream)
+                    streamForExtra = SearchAndDecompress(stream).encode()
                 else:
                     streamForExtra = stream
                 if options.calc:
