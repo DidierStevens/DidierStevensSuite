@@ -4,8 +4,8 @@ from __future__ import print_function
 
 __description__ = 'Analyze Cobalt Strike beacons'
 __author__ = 'Didier Stevens'
-__version__ = '0.0.11'
-__date__ = '2021/12/12'
+__version__ = '0.0.12'
+__date__ = '2022/02/22'
 
 """
 Source code put in the public domain by Didier Stevens, no Copyright
@@ -49,6 +49,7 @@ History:
   2021/11/14: added DNS fields
   2021/11/17: added missing field names (ebook FINDING BEACONS IN THE DARK)
   2021/12/12: 0.0.11 added 1768b.json support
+  2022/02/22: 0.0.12 added private key to 1768.json (provided by alexzorila); fix json output; pyzipper support
 
 Todo:
   JSON output -> instructions
@@ -57,7 +58,6 @@ Todo:
 import optparse
 import sys
 import os
-import zipfile
 import binascii
 import random
 import gzip
@@ -72,6 +72,10 @@ import fnmatch
 import json
 import time
 import hashlib
+try:
+    import pyzipper as zipfile
+except ImportError:
+    import zipfile
 if sys.version_info[0] >= 3:
     from io import BytesIO as DataIO
 else:
@@ -127,6 +131,7 @@ How the files are read, depends on the type of file arguments that are provided.
 If a file argument does not start with @ or #, it is considered to be a file on disk and the content will be read from disk.
 If the file is not a compressed file, the binary content of the file is read from disk for processing.
 Compressed files are solely recognized based on their extension: .zip and .gz.
+It uses built-in Python module zipfile, unless module pyzipper is installed. Module pyzipper adds AES support, and can be installed with pip (Python 3 only).
 If a file argument with extension .gz is provided, the tool will decompress the gzip file in memory and process the decompressed content. No checks are made to ensure that the file with extension .gz is an actual gzip compressed file.
 If a file argument with extension .zip is provided and it contains a single file, the tool will extract the file from the ZIP file in memory and process the decompressed content. No checks are made to ensure that the file with extension .zip is an actual ZIP compressed file.
 Password protected ZIP files can be processed too. The tool uses password 'infected' (without quotes) as default password. A different password can be provided using option --password.
@@ -675,6 +680,12 @@ def AnalyzeFileError(filename):
     except:
         pass
 
+def CreateZipFileObject(arg1, arg2):
+    if 'AESZipFile' in dir(zipfile):
+        return zipfile.AESZipFile(arg1, arg2)
+    else:
+        return zipfile.ZipFile(arg1, arg2)
+
 class cBinaryFile:
     def __init__(self, filename, zippassword='infected', noextraction=False, literalfilename=False):
         self.filename = filename
@@ -699,7 +710,7 @@ class cBinaryFile:
             elif fch == FCH_DATA:
                 self.fIn = DataIO(data)
             elif not self.noextraction and self.filename.lower().endswith('.zip'):
-                self.oZipfile = zipfile.ZipFile(self.filename, 'r')
+                self.oZipfile = CreateZipFileObject(self.filename, 'r')
                 if len(self.oZipfile.infolist()) == 1:
                     self.fIn = self.oZipfile.open(self.oZipfile.infolist()[0], 'r', self.zippassword)
                     self.extracted = True
@@ -1949,7 +1960,10 @@ def AnalyzeEmbeddedPEFileSub(payloadsectiondata, options):
         0x0043: 'DNS_STRATEGY',
         0x0044: 'DNS_STRATEGY_ROTATE_SECONDS',
         0x0045: 'DNS_STRATEGY_FAIL_X',
-        0x0046: 'DNS_STRATE-GY_FAIL_SEC-ONDS',
+        0x0046: 'DNS_STRATEGY_FAIL_SECONDS',
+        0x0047: 'MAX_RETRY_STRATEGY_ATTEMPTS',
+        0x0048: 'MAX_RETRY_STRATEGY_INCREASE',
+        0x0049: 'MAX_RETRY_STRATEGY_DURATION',
     }
     dConfigValueInterpreter = {
         0x0001: lambda value: LookupConfigValue(0x0001, value),
@@ -2171,6 +2185,7 @@ def ProcessBinaryFile(filename, content, cutexpression, flag, oOutput, oLogfile,
             if extracted != None:
                 resultChain, dJSON = AnalyzeEmbeddedPEFileSub(extracted, options)
                 if resultChain != ['Error: config not found']:
+                    oOutput.JSON(dJSON)
                     for message in messages:
                         oOutput.Line(message)
                     for message in resultChain:
