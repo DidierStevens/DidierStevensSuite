@@ -2,8 +2,8 @@
 
 __description__ = 'Analyze OLE files (Compound Binary Files)'
 __author__ = 'Didier Stevens'
-__version__ = '0.0.63'
-__date__ = '2022/02/21'
+__version__ = '0.0.64'
+__date__ = '2022/03/04'
 
 """
 
@@ -112,6 +112,7 @@ History:
   2021/06/20: 0.0.61 updated man
   2021/08/11: 0.0.62 fix return code bug for multiple OLE files inside OOXML container
   2022/02/21: 0.0.63 Python 3 fix
+  2022/03/04: 0.0.64 added option -u
 
 Todo:
 
@@ -614,6 +615,8 @@ To include extra data with each use of oledump, define environment variable OLED
 
 Sometimes during the analysis of an OLE file, you might come across compressed data inside the stream. For example, an indicator of ZLIB compressed DATA is byte 0x78.
 Option --decompress instructs oledump to search for compressed data inside the selected stream, and then decompress it. If this fails, the original data is displayed.
+
+Option -u can be used to include unused data found in the last sector of a stream, after the stream data.
 
 oledump can handle several types of files. OLE files are supported, but also the new Office Open XML standard: these are XML files inside a ZIP container, but VBA macros are still stored as OLE files inside the ZIP file. In such case, the name of the OLE file inside the ZIP file will be displayed, and the indices will be prefixed by a letter (A for the first OLE file, B for the second OLE file, ...).
 Example:
@@ -1682,22 +1685,42 @@ def OLE10HeaderPresent(data):
     version, data = ReadWORD(data)
     return version ==2
 
-def OLEGetStreams(ole, storages):
+def GetUnusedData(ole, fname):
+    sid = ole._find(fname)
+    entry = ole.direntries[sid]
+    if entry.size < ole.minisectorcutoff:
+        increase = ole.minisectorsize
+    else:
+        increase = ole.sectorsize
+    currentsize = entry.size
+    lendata = currentsize
+    while True:
+        currentsize += increase
+        data = ole._open(entry.isectStart, currentsize).read()
+        if len(data) == lendata:
+            return data[entry.size:]
+        else:
+            lendata = len(data)
+
+def OLEGetStreams(ole, storages, unuseddata):
     olestreams = []
     if storages:
-        olestreams.append([0, [ole.root.name], ole.root.entry_type, ole.root.clsid, ''])
+        olestreams.append([0, [ole.root.name], ole.root.entry_type, ole.root.clsid, '', 0])
     for fname in ole.listdir(storages=storages):
+        unusedData = b''
         if ole.get_type(fname) == 1:
-            data = ''
+            data = b''
         else:
             data = ole.openstream(fname).read()
-        olestreams.append([0, fname, ole.get_type(fname), ole.getclsid(fname), data])
+            if unuseddata:
+                unusedData = GetUnusedData(ole, fname)
+        olestreams.append([0, fname, ole.get_type(fname), ole.getclsid(fname), data + unusedData, len(unusedData)])
     for sid in range(len(ole.direntries)):
         entry = ole.direntries[sid]
         if entry is None:
             entry = ole._load_direntry(sid)
             if entry.entry_type == 2:
-                olestreams.append([1, entry.name, entry.entry_type, '', ole._open(entry.isectStart, entry.size).read()])
+                olestreams.append([1, entry.name, entry.entry_type, '', ole._open(entry.isectStart, entry.size).read(), 0])
     return olestreams
 
 def SelectPart(stream, part, moduleinfodata):
@@ -1808,13 +1831,13 @@ def OLESub(ole, data, prefix, rules, options):
         object = []
         counter = 1
         if options.vbadecompress:
-            for orphan, fname, entry_type, entry_clsid, stream in OLEGetStreams(ole, options.storages):
+            for orphan, fname, entry_type, entry_clsid, stream, sizeUnusedData in OLEGetStreams(ole, options.storages, options.unuseddata):
                 vbacode = SearchAndDecompress(stream, '')
                 if vbacode != '':
                     object.append({'id': counter, 'name': PrintableName(fname), 'content': C2SIP3(binascii.b2a_base64(vbacode.encode())).strip('\n')})
                 counter += 1
         else:
-            for orphan, fname, entry_type, entry_clsid, stream in OLEGetStreams(ole, options.storages):
+            for orphan, fname, entry_type, entry_clsid, stream, sizeUnusedData in OLEGetStreams(ole, options.storages, options.unuseddata):
                 object.append({'id': counter, 'name': PrintableName(fname), 'content': C2SIP3(binascii.b2a_base64(stream)).strip('\n')})
                 counter += 1
         print(json.dumps({'version': 2, 'id': 'didierstevens.com', 'type': 'content', 'fields': ['id', 'name', 'content'], 'items': object}))
@@ -1833,20 +1856,27 @@ def OLESub(ole, data, prefix, rules, options):
         for oPluginOle in objectsPluginOle:
             oPluginOle.PreProcess()
 
-        for orphan, fname, entry_type, entry_clsid, stream in OLEGetStreams(ole, options.storages):
+        for orphan, fname, entry_type, entry_clsid, stream, sizeUnusedData in OLEGetStreams(ole, options.storages, options.unuseddata):
             indicator = ' '
             macroPresent = False
             if options.info:
                 moduleinfo = ' ' * 12
             else:
                 moduleinfo = ''
-            lengthString = '       '
+            if options.unuseddata:
+                lengthString = '            '
+            else:
+                lengthString = '       '
             if entry_type == 5:
                 indicator = 'R'
             elif entry_type == 1:
                 indicator = '.'
             elif entry_type == 2:
-                lengthString = '%7d' % len(stream)
+                if options.unuseddata:
+                    lengthString = '%d(%d)' % (len(stream), sizeUnusedData)
+                    lengthString = '%12s' % lengthString
+                else:
+                    lengthString = '%7d' % len(stream)
                 moduleinfodata = dModuleinfo.get(''.join([c + '\x00' for c in fname[-1]]), None)
                 if options.info and moduleinfodata != None:
                     moduleinfo = '%d+%d' % (moduleinfodata[6], len(stream) - moduleinfodata[6])
@@ -1998,7 +2028,7 @@ def OLESub(ole, data, prefix, rules, options):
         else:
             selection = options.select
             part = ''
-        for orphan, fname, entry_type, entry_clsid, stream in OLEGetStreams(ole, options.storages):
+        for orphan, fname, entry_type, entry_clsid, stream, sizeUnusedData in OLEGetStreams(ole, options.storages, options.unuseddata):
             if selection == 'a' or ('%s%d' % (prefix, counter)) == selection.upper() or prefix == 'A' and str(counter) == selection or PrintableName(fname).lower() == selection.lower():
                 StdoutWriteChunked(HeadTail(DumpFunction(DecompressFunction(DecodeFunction(decoders, options, CutData(SelectPart(stream, part, dModuleinfo.get(''.join([c + '\x00' for c in fname[-1]]), None)), options.cut)[0]))), options.headtail))
                 selectionCounter += 1
@@ -2300,6 +2330,7 @@ def Main():
     oParser.add_option('--storages', action='store_true', default=False, help='Include storages in report')
     oParser.add_option('-f', '--find', type=str, default='', help='Find D0CF11E0 MAGIC sequence (use l for listing, number for selecting)')
     oParser.add_option('-j', '--jsonoutput', action='store_true', default=False, help='produce json output')
+    oParser.add_option('-u', '--unuseddata', action='store_true', default=False, help='Include unused data after end of stream')
     oParser.add_option('--password', default=MALWARE_PASSWORD, help='The ZIP password to be used (default %s)' % MALWARE_PASSWORD)
     (options, args) = oParser.parse_args()
 
