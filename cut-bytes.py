@@ -2,8 +2,8 @@
 
 __description__ = 'Cut a section of bytes out of a file'
 __author__ = 'Didier Stevens'
-__version__ = '0.0.13'
-__date__ = '2020/12/08'
+__version__ = '0.0.14'
+__date__ = '2022/04/11'
 
 """
 
@@ -33,6 +33,7 @@ History:
   2020/02/18: 0.0.13 added #E#
   2020/10/21: Python 3 fix in cBinaryFile
   2020/12/08: base64dump fix
+  2022/04/11: 0.0.14 added data for prefix and suffix
 
 Todo:
 """
@@ -724,11 +725,11 @@ def Interpret(expression):
             return None
     return decoded
 
-def ParsePackExpression(data):
+def ParsePackExpression(expression, data):
     try:
-        packFormat, pythonExpression = data.split('#', 1)
-        data = struct.pack(packFormat, eval(pythonExpression))
-        return data
+        packFormat, pythonExpression = expression.split('#', 1)
+        result = struct.pack(packFormat, eval(pythonExpression))
+        return result
     except:
         return None
 
@@ -766,7 +767,7 @@ def DownloadFile(url):
     infile.close()
     return data, None
 
-def FilenameCheckHash(filename, literalfilename):
+def FilenameCheckHash(filename, literalfilename, data=b''):
     if literalfilename:
         return FCH_FILENAME, filename
     elif filename.startswith('#h#'):
@@ -787,7 +788,7 @@ def FilenameCheckHash(filename, literalfilename):
         else:
             return FCH_DATA, C2BIP3(result)
     elif filename.startswith('#p#'):
-        result = ParsePackExpression(filename[3:])
+        result = ParsePackExpression(filename[3:], data)
         if result == None:
             return FCH_ERROR, 'pack'
         else:
@@ -924,14 +925,14 @@ def CutBytes(expression, filename, options):
         data = CutData(data, expression)[0]
 
         if options.prefix != '':
-            fch, prefix = FilenameCheckHash(options.prefix, False)
+            fch, prefix = FilenameCheckHash(options.prefix, False, data)
             if fch != FCH_DATA:
                 raise Exception('Error %s parsing prefix: %s' % (prefix, options.prefix))
             else:
                 data = prefix + data
 
         if options.suffix != '':
-            fch, suffix = FilenameCheckHash(options.suffix, False)
+            fch, suffix = FilenameCheckHash(options.suffix, False, data)
             if fch != FCH_DATA:
                 raise Exception('Error %s parsing suffix: %s' % (suffix, options.suffix))
             else:
