@@ -4,8 +4,8 @@ from __future__ import print_function
 
 __description__ = 'Analyze Cobalt Strike beacons'
 __author__ = 'Didier Stevens'
-__version__ = '0.0.12'
-__date__ = '2022/02/22'
+__version__ = '0.0.13'
+__date__ = '2022/04/16'
 
 """
 Source code put in the public domain by Didier Stevens, no Copyright
@@ -50,6 +50,8 @@ History:
   2021/11/17: added missing field names (ebook FINDING BEACONS IN THE DARK)
   2021/12/12: 0.0.11 added 1768b.json support
   2022/02/22: 0.0.12 added private key to 1768.json (provided by alexzorila); fix json output; pyzipper support
+  2022/04/15: 0.0.13 added option -H and IdentifyShellcode
+  2022/04/16: continue IdentifyShellcode
 
 Todo:
   JSON output -> instructions
@@ -110,11 +112,13 @@ Option -c (--csv) is used to output the config parameters in CSV format.
 
 Option -J (--jsonoutput) is used to output the config parameters in JSON format.
 
+Use option -H to display the hashes of the analyzed file.
+
 A JSON file with name 1768.json placed in the same directory as 1768.py will be used to enhance fields with information, like the license-id field.
 
 It reads one or more files or stdin. This tool is very versatile when it comes to handling files, later full details will be provided.
 
-This Python script was first developed with Python 2.7 and tested with Python 2.7 and 3.7, now it is developed with Python 3.8 and tested with Python 3.8 and 2.7.
+This Python script was first developed with Python 2.7 and tested with Python 2.7 and 3.7, now it is developed with Python 3.9 and tested with Python 3.9.
 
 As stated at the beginning of this manual, this tool is very versatile when it comes to handling files. This will be explained now.
 
@@ -1559,11 +1563,29 @@ def FindAF_INET_PORT(operand):
         return ''
     return '%d' % struct.unpack('>H', operand[2:4])[0]
 
+def IdentifyShellcode(shellcode):
+    if hashlib.sha256(shellcode[:346]).hexdigest() == '946af5a23e5403ea1caccb2e0988ec1526b375a3e919189f16491eeabc3e7d8c':
+        return 'CS psexec psh x86 shellcode, opens named pipe'
+    elif hashlib.sha256(shellcode[:191]).hexdigest() == '02fd615831f5cc22d83ad681d33159d232afc3b18b69f647f1726280e2d7e3f3':
+        return 'CS reverse http x86 shellcode'
+    elif hashlib.sha256(shellcode[:271]).hexdigest() == 'bf413ba9b63b6777c4765581bf42c1fdb119f1ed22836cfaa80e616e2a3bf795':
+        return 'CS reverse http x64 shellcode'
+    elif hashlib.sha256(shellcode[:196]).hexdigest() == '52230666746fa8c9ec635083b05943d02bfe516fc45ea9c87eef300b9cd064e8':
+        return 'CS reverse https x86 shellcode'
+    elif hashlib.sha256(shellcode[:274]).hexdigest() == 'acffe4f9fd8f82044772627a4174f14abf873a8e783c31353bf094118f3c1706':
+        return 'CS reverse https x64 shellcode'
+    elif hashlib.sha256(shellcode[:330]).hexdigest() == 'a82872e2d839cd2ee1b0c2324b83f2686284ebe3eef5e9fb0c9e97db8d86cbf4':
+        return 'CS DNS x86 shellcode'
+    return ''
+
 def AnalyzeShellcode(shellcode, oOutput):
     dInstructions = {b'\x68': 'push', b'\xB8': 'mov eax'}
     dJSONData = GetJSONData()
     dLookupValues = dJSONData.get('dLookupValues', {})
 
+    identification = IdentifyShellcode(shellcode)
+    if identification != '':
+        oOutput.Line('Identification: %s' % identification)
     position = shellcode.rfind(b'\xFF\xFF')
     if position != -1:
         parameters = shellcode[position+2:]
@@ -2115,7 +2137,7 @@ def TryXORChainDecoding(data):
     formatstring = '<II'
     formatLength = struct.calcsize(formatstring)
     startLength = 16
-    for iIter in range(1, 0x100):
+    for iIter in range(1, 0x1000):
         bytesValues = data[iIter:iIter + formatLength + startLength]
         if len(bytesValues) != formatLength + startLength:
             return data, []
@@ -2175,6 +2197,10 @@ def ProcessBinaryFile(filename, content, cutexpression, flag, oOutput, oLogfile,
         data = content
         oOutput.Line('File: %s' % (filename))
 
+    if options.hash:
+        oOutput.Line('MD5   : %s' % hashlib.md5(data).hexdigest())
+        oOutput.Line('SHA1  : %s' % hashlib.sha1(data).hexdigest())
+        oOutput.Line('SHA256: %s' % hashlib.sha256(data).hexdigest())
     try:
         # ----- Put your data processing code here -----
         data, messages = TryExtractDecode(data)
@@ -2221,7 +2247,10 @@ def ProcessBinaryFile(filename, content, cutexpression, flag, oOutput, oLogfile,
                             if START_CONFIG_I in sectiondata or START_CONFIG_DOT in sectiondata:
                                 AnalyzeEmbeddedPEFile(data, oOutput, options)
                             elif TestShellcodeHeuristic(payload):
-                                oOutput.Line('Probably found shellcode:')
+                                if IdentifyShellcode(payload) == '':
+                                    oOutput.Line('Probably found shellcode:')
+                                else:
+                                    oOutput.Line('Found shellcode:')
                                 AnalyzeShellcode(payload, oOutput)
                                 oOutput.Line(cDump(payload).HexAsciiDump(rle=False))
                             elif positionMZ >= 0 and positionMZ < 0x20:
@@ -2236,7 +2265,10 @@ def ProcessBinaryFile(filename, content, cutexpression, flag, oOutput, oLogfile,
                         AnalyzeEmbeddedPEFile(payloadsectiondata, oOutput, options)
                     FinalTests(payload, oOutput)
         elif TestShellcodeHeuristic(data):
-            oOutput.Line('Probably found shellcode:')
+            if IdentifyShellcode(data) == '':
+                oOutput.Line('Probably found shellcode:')
+            else:
+                oOutput.Line('Found shellcode:')
             AnalyzeShellcode(data, oOutput)
             oOutput.Line(cDump(data).HexAsciiDump(rle=False))
             FinalTests(data, oOutput)
@@ -2447,6 +2479,7 @@ https://DidierStevens.com'''
     oParser.add_option('-c', '--csv', action='store_true', default=False, help='Output config in CSV format')
     oParser.add_option('-p', '--password', default='infected', help='The ZIP password to be used (default infected)')
     oParser.add_option('-n', '--noextraction', action='store_true', default=False, help='Do not extract from archive file')
+    oParser.add_option('-H', '--hash', action='store_true', default=False, help='Include hashes of file content')
     oParser.add_option('--literalfilenames', action='store_true', default=False, help='Do not interpret filenames')
     oParser.add_option('--recursedir', action='store_true', default=False, help='Recurse directories (wildcards and here files (@...) allowed)')
     oParser.add_option('--checkfilenames', action='store_true', default=False, help='Perform check if files exist prior to file processing')
