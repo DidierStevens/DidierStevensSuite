@@ -2,8 +2,8 @@
 
 __description__ = "Program to use Python's re.findall on files"
 __author__ = 'Didier Stevens'
-__version__ = '0.0.18'
-__date__ = '2021/09/21'
+__version__ = '0.0.19'
+__date__ = '2022/04/18'
 
 """
 
@@ -50,6 +50,7 @@ History:
   2021/05/05: added public ips filter
   2021/09/19: 0.0.18 map Python3 fix
   2021/09/21: added sys.stdin.reconfigure
+  2022/04/18: 0.0.19 Python3 fix stdin binary
 
 Todo:
   add hostname to header
@@ -481,10 +482,15 @@ def RESearchSingle(regex, filenames, oOutput, options):
     for filename in filenames:
         if filename == '':
             if options.fullread or options.extractstrings or options.grepall:
-                IfWIN32SetBinary(sys.stdin)
+                if sys.version_info[0] == 2:
+                    IfWIN32SetBinary(sys.stdin)
+                else:
+                    fIn = sys.stdin.buffer
             elif MinimalPythonVersion(3, 7):
                 sys.stdin.reconfigure(encoding=ParseOptionEncoding(options.encoding)[0], errors=ParseOptionEncoding(options.encoding)[1])
-            fIn = sys.stdin
+                fIn = sys.stdin
+            else:
+                fIn = sys.stdin
             fType = 1
         elif os.path.splitext(filename)[1].lower() == '.gz':
             fIn = gzip.GzipFile(filename, 'rb')
@@ -542,10 +548,15 @@ def RESearchCSV(csvFilename, filenames, oOutput, options):
     for filename in filenames:
         if filename == '':
             if options.fullread or options.extractstrings or options.grepall:
-                IfWIN32SetBinary(sys.stdin)
+                if sys.version_info[0] == 2:
+                    IfWIN32SetBinary(sys.stdin)
+                else:
+                    fIn = sys.stdin.buffer
             elif MinimalPythonVersion(3, 7):
                 sys.stdin.reconfigure(encoding=ParseOptionEncoding(options.encoding)[0], errors=ParseOptionEncoding(options.encoding)[1])
-            fIn = sys.stdin
+                fIn = sys.stdin
+            else:
+                fIn = sys.stdin
             fType = 1
         elif os.path.splitext(filename)[1].lower() == '.gz':
             fIn = gzip.GzipFile(filename, 'rb')

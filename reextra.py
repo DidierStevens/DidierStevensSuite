@@ -2,8 +2,8 @@
 
 __description__ = 're extra'
 __author__ = 'Didier Stevens'
-__version__ = '0.0.5'
-__date__ = '2020/12/28'
+__version__ = '0.0.6'
+__date__ = '2021/02/06'
 
 """
 
@@ -14,6 +14,7 @@ History:
   2018/07/15: 0.0.4 made decode_base58 more robust
   2020/12/08: 0.0.5 added DomainTLDValidate
   2020/12/28: Python 3
+  2021/02/06: 0.0.6 Fix execfile for Python 3; changed "extra" logic with groups
 
 Todo:
 """
@@ -1575,7 +1576,7 @@ def CountUniques(data):
     return len(dCount)
 
 def Script(filename):
-    execfile(filename, globals(), globals())
+    exec(open(filename, 'r').read(), globals(), globals())
 
 def Execute(pythoncode):
     exec(pythoncode, globals())
@@ -2529,7 +2530,8 @@ class cREExtra():
                 if self.Test(result):
                     results.append(result)
             if isinstance(result, tuple):
-                results.append(result)
+                if self.Test(result[0]):
+                    results.append(result)
         return results
 
     def Search(self, line, flags=0):
