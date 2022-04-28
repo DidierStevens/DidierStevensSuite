@@ -2,8 +2,8 @@
 
 __description__ = 'PowerPoint plugin for oledump.py'
 __author__ = 'Didier Stevens'
-__version__ = '0.0.1'
-__date__ = '2018/08/11'
+__version__ = '0.0.2'
+__date__ = '2022/04/26'
 
 """
 
@@ -14,6 +14,7 @@ Use at your own risk
 History:
   2014/11/15: start
   2018/08/11: second start, fix zip.decompress with FlateDecode
+  2022/04/26: 0.0.2 Python 3 fixes
 
 Todo:
 """
@@ -38,31 +39,14 @@ def HexASCII(data, length=16):
                     result.append(CombineHexASCII(hexDump, asciiDump, length))
                 hexDump = '%08X:' % i
                 asciiDump = ''
-            hexDump += ' %02X' % ord(b)
-            asciiDump += IFF(ord(b) >= 32, b, '.')
+            hexDump += ' %02X' % b
+            asciiDump += IFF(b >= 32, chr(b), '.')
         result.append(CombineHexASCII(hexDump, asciiDump, length))
     return result
 
-# if inflating fails, we try to inflate byte per byte (sample 4da299d6e52bbb79c0ac00bad6a1d51d4d5fe42965a8d94e88a359e5277117e2)
 def FlateDecode(data):
-    try:
-        return zlib.decompress(C2BIP3(data))
-    except:
-        if len(data) <= 10:
-            raise
-        oDecompress = zlib.decompressobj()
-        oStringIO = StringIO()
-        count = 0
-        for byte in C2BIP3(data):
-            try:
-                oStringIO.write(oDecompress.decompress(byte))
-                count += 1
-            except:
-                break
-        if len(data) - count <= 2:
-            return oStringIO.getvalue()
-        else:
-            raise
+    oDecompress = zlib.decompressobj()
+    return oDecompress.decompress(data)
 
 class cPPT(cPluginParent):
     macroOnly = False
@@ -75,7 +59,7 @@ class cPPT(cPluginParent):
         self.ran = False
 
     def AnalyzeSub(self, stream, indent, options):
-        while stream != '':
+        while stream != b'':
             formatcodes = '<HHI'
             formatsize = struct.calcsize(formatcodes)
             recVerInstance, recType, recLen = struct.unpack(formatcodes, stream[0:formatsize])

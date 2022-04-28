@@ -2,8 +2,8 @@
 
 __description__ = 'msi plugin for oledump.py'
 __author__ = 'Didier Stevens'
-__version__ = '0.0.1'
-__date__ = '2018/02/18'
+__version__ = '0.0.2'
+__date__ = '2021/10/26'
 
 """
 
@@ -13,6 +13,7 @@ Use at your own risk
 
 History:
   2018/02/18: start
+  2021/10/26: 0.0.2 Python 3 fix
 
 Todo:
 """
@@ -45,7 +46,7 @@ class cMSI(cPluginParent):
     def Analyze(self):
         self.ran = True
         result = []
-        result.append('%s %-16s %s' % ((repr('/'.join(map(lambda x: ''.join([Convert(y) for y in x.decode('utf8')]), self.streamname))) + ' ' * 100)[0:30], ''.join([IFF(ord(b) >= 32 and ord(b) < 127, b, '.') for b in self.stream[:16]]), hashlib.md5(self.stream).hexdigest()))
+        result.append('%s %-16s %s' % ((repr('/'.join(map(lambda x: ''.join([Convert(y) for y in x]), self.streamname))) + ' ' * 100)[0:30], bytes([IFF(b >= 32 and b < 127, b, ord('.')) for b in self.stream[:16]]), hashlib.md5(self.stream).hexdigest()))
 
         return result
 

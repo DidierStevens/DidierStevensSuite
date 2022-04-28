@@ -2,8 +2,8 @@
 
 __description__ = 'Analyze OLE files (Compound Binary Files)'
 __author__ = 'Didier Stevens'
-__version__ = '0.0.64'
-__date__ = '2022/03/04'
+__version__ = '0.0.65'
+__date__ = '2022/04/26'
 
 """
 
@@ -113,6 +113,7 @@ History:
   2021/08/11: 0.0.62 fix return code bug for multiple OLE files inside OOXML container
   2022/02/21: 0.0.63 Python 3 fix
   2022/03/04: 0.0.64 added option -u
+  2022/04/26: 0.0.65 added message for pyzipper
 
 Todo:
 
@@ -2179,7 +2180,11 @@ def OLEDump(filename, options):
         oZipfile.close()
     elif filename.lower().endswith('.zip'):
         oZipfile = CreateZipFileObject(filename, 'r')
-        oZipContent = oZipfile.open(oZipfile.infolist()[0], 'r', C2BIP3(options.password))
+        try:
+            oZipContent = oZipfile.open(oZipfile.infolist()[0], 'r', C2BIP3(options.password))
+        except NotImplementedError:
+            print('This ZIP file is possibly not readable with module zipfile.\nTry installing module pyzipper: pip install pyzipper')
+            return returnCode
         oStringIO = DataIO(oZipContent.read())
         oZipContent.close()
         oZipfile.close()
