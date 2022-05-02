@@ -2,8 +2,8 @@
 
 __description__ = 'VBA project stream plugin for oledump.py'
 __author__ = 'Didier Stevens'
-__version__ = '0.0.3'
-__date__ = '2020/08/15'
+__version__ = '0.0.4'
+__date__ = '2022/05/02'
 
 """
 
@@ -17,6 +17,7 @@ History:
   2020/07/20: added option -w
   2020/07/21: refactor
   2020/08/15: 0.0.3 bin bugfix
+  2022/05/02: 0.0.4 added support for plaintext passwords
 
 Todo:
 """
@@ -3640,7 +3641,6 @@ class cVBAProject(cPluginParent):
             for index, value in enumerate(IntegerToBinary(decoded[5] * 0x10000 + decoded[6] * 0x100 + decoded[7],24)):
                 data.append(decoded[8 + index] if value == '1' else 0x00)
             result.append('VBA project is password protected')
-#            result.append(' JtR hash: vbapassword:$dynamic_24$%s$HEX$%s' % (IntegersToHex(decoded[12:32]), IntegersToHex(decoded[8:12])))
             extractedsha1 = IntegersToHex(data[4:24])
             result.append(' JtR hash: vbapassword:$dynamic_24$%s$HEX$%s' % (extractedsha1, IntegersToHex(data[0:4])))
             result.append(' Hashcat hash (-m 110 --hex-salt): %s:%s' % (extractedsha1, IntegersToHex(data[0:4])))
@@ -3665,7 +3665,12 @@ class cVBAProject(cPluginParent):
         elif decoded == [1, 0, 0, 0, 0]:
             result.append('VBA project is not password protected')
         else:
-            result.append('Unexpected data: ' + repr(decoded))
+            length = struct.unpack('<I', bytes(decoded)[0:4])[0]
+            plaintext = bytes(decoded)[4:]
+            if length == len(plaintext):
+                result.append('Plaintext password: ' + plaintext.rstrip(b'\x00').decode())
+            else:
+                result.append('Unexpected data: ' + repr(decoded))
 
         self.ran = True
 
