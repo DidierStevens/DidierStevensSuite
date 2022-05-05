@@ -2,7 +2,7 @@
 
 __description__ = 'VBA project stream plugin for oledump.py'
 __author__ = 'Didier Stevens'
-__version__ = '0.0.4'
+__version__ = '0.0.5'
 __date__ = '2022/05/02'
 
 """
@@ -18,9 +18,12 @@ History:
   2020/07/21: refactor
   2020/08/15: 0.0.3 bin bugfix
   2022/05/02: 0.0.4 added support for plaintext passwords
+  2022/05/03: 0.0.5 added decoding of CMG and GC
 
 Todo:
 """
+
+# https://interoperability.blob.core.windows.net/files/MS-OVBA/%5bMS-OVBA%5d.pdf
 
 def GetDictionary(passwordfile):
     if passwordfile != '.':
@@ -3585,7 +3588,7 @@ def Decrypt(data):
     projectkey = data[2] ^ seed
     ignore = int((seed & 6) / 2)
 
-    result = ['seed: 0x%02x' % seed, 'version: 0x%02x' % version, 'projectkey: 0x%02x' % projectkey, 'ignore: %d' % ignore]
+    result = [' seed: 0x%02x' % seed, ' version: 0x%02x' % version, ' projectkey: 0x%02x' % projectkey, ' ignore: %d' % ignore]
 
     pb = projectkey
     decoded = []
@@ -3605,6 +3608,10 @@ def IntegersToHex(integers):
 def IntegerToBinary(value, bits):
     binary = bin(value)[2:]
     return '0' * (bits - len(binary)) + binary
+
+def IsBitSet(value, bitPosition):
+    mask = 2 ** bitPosition
+    return value & mask == mask
 
 class cVBAProject(cPluginParent):
 
@@ -3636,14 +3643,16 @@ class cVBAProject(cPluginParent):
         encoded = binascii.a2b_hex(oMatch.groups()[0])
         result, decoded = Decrypt(encoded)
 
+        result.insert(0, 'DPB="%s" decodes to:' % oMatch.groups()[0].decode())
         if decoded[0:4] == [29, 0, 0, 0]:
             data = []
             for index, value in enumerate(IntegerToBinary(decoded[5] * 0x10000 + decoded[6] * 0x100 + decoded[7],24)):
                 data.append(decoded[8 + index] if value == '1' else 0x00)
-            result.append('VBA project is password protected')
+            result.append(' VBA project is password protected')
             extractedsha1 = IntegersToHex(data[4:24])
-            result.append(' JtR hash: vbapassword:$dynamic_24$%s$HEX$%s' % (extractedsha1, IntegersToHex(data[0:4])))
-            result.append(' Hashcat hash (-m 110 --hex-salt): %s:%s' % (extractedsha1, IntegersToHex(data[0:4])))
+            extractedsalt = IntegersToHex(data[0:4])
+            result.append('  JtR hash: vbapassword:$dynamic_24$%s$HEX$%s' % (extractedsha1, extractedsalt))
+            result.append('  Hashcat hash (-m 110 --hex-salt): %s:%s' % (extractedsha1, extractedsalt))
 
             if options.wordlist == '':
                 filename = '.'
@@ -3659,20 +3668,47 @@ class cVBAProject(cPluginParent):
                 except UnicodeDecodeError:
                     calculatedsha1 = ''
                 if calculatedsha1 == extractedsha1:
-                    result.append(' Password: %s' % password)
+                    result.append('  Password: %s' % password)
                     break
 
         elif decoded == [1, 0, 0, 0, 0]:
-            result.append('VBA project is not password protected')
+            result.append(' VBA project is not password protected')
         else:
             length = struct.unpack('<I', bytes(decoded)[0:4])[0]
             plaintext = bytes(decoded)[4:]
             if length == len(plaintext):
-                result.append('Plaintext password: ' + plaintext.rstrip(b'\x00').decode())
+                result.append(' Plaintext password: ' + plaintext.rstrip(b'\x00').decode())
             else:
-                result.append('Unexpected data: ' + repr(decoded))
+                result.append(' Unexpected data: ' + repr(decoded))
 
         self.ran = True
+
+        oMatch = re.search(b'CMG="([A-F0-9]+)"', self.stream, re.I)
+        if oMatch != None:
+            encoded = binascii.a2b_hex(oMatch.groups()[0])
+            resultCMG, decodedCMG = Decrypt(encoded)
+            result.append('CMG="%s" decodes to:' % oMatch.groups()[0].decode())
+            result.extend(resultCMG)
+            if len(decodedCMG) != 8 or decodedCMG[0:4] != [4, 0, 0, 0]:
+                result.append(' Unexpected data: ' + repr(decodedCMG))
+            else:
+                projectProtectionState = struct.unpack('<I', bytes(decodedCMG)[4:8])[0]
+                result.append(' ProjectProtectionState: 0x%08x' % projectProtectionState)
+                result.append('  fUserProtected: %s' % IsBitSet(projectProtectionState, 0))
+                result.append('  fHostProtected: %s' % IsBitSet(projectProtectionState, 1))
+                result.append('  fVBEProtected:  %s' % IsBitSet(projectProtectionState, 2))
+
+        oMatch = re.search(b'GC="([A-F0-9]+)"', self.stream, re.I)
+        if oMatch != None:
+            encoded = binascii.a2b_hex(oMatch.groups()[0])
+            resultGC, decodedGC = Decrypt(encoded)
+            result.append('GC="%s" decodes to:' % oMatch.groups()[0].decode())
+            result.extend(resultGC)
+            if len(decodedGC) != 5 or decodedGC[0:4] != [1, 0, 0, 0]:
+                result.append(' Unexpected data: ' + repr(decodedGC))
+            else:
+                projectVisibilityState = struct.unpack('<B', bytes(decodedGC)[4:5])[0]
+                result.append(' ProjectVisibilityState: 0x%02x %s' % (projectVisibilityState, {0x00: 'Not visible', 0xFF: 'Visible'}.get(projectVisibilityState, 'UNKNOWN')))
 
         return result
 

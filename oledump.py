@@ -2,8 +2,8 @@
 
 __description__ = 'Analyze OLE files (Compound Binary Files)'
 __author__ = 'Didier Stevens'
-__version__ = '0.0.65'
-__date__ = '2022/04/26'
+__version__ = '0.0.66'
+__date__ = '2022/05/03'
 
 """
 
@@ -114,6 +114,7 @@ History:
   2022/02/21: 0.0.63 Python 3 fix
   2022/03/04: 0.0.64 added option -u
   2022/04/26: 0.0.65 added message for pyzipper
+  2022/05/03: 0.0.66 small refactoring
 
 Todo:
 
@@ -141,11 +142,6 @@ if sys.version_info[0] >= 3:
     from io import BytesIO as DataIO
 else:
     from cStringIO import StringIO as DataIO
-
-try:
-    import dslsimulationdb
-except ImportError:
-    dslsimulationdb = None
 
 try:
     import yara
@@ -1424,7 +1420,7 @@ def ParseCutTerm(argument):
         oMatch = re.match(r"\[u?\'(.+?)\'\](\d+)?([+-](?:0x[0-9a-f]+|\d+))?", argument)
     else:
         if len(oMatch.group(1)) % 2 == 1:
-            raise Exception("Uneven length hexadecimal string")
+            raise Exception('Uneven length hexadecimal string')
         else:
             return CUTTERM_FIND, (binascii.a2b_hex(oMatch.group(1)), int(Replace(oMatch.group(2), {None: '1'})), ParseInteger(Replace(oMatch.group(3), {None: '0'}))), argument[len(oMatch.group(0)):]
     if oMatch == None:
@@ -1497,7 +1493,7 @@ def CutData(stream, cutArgument):
             return ['', None, None]
         positionBegin += valueLeft[2]
     else:
-        raise Exception("Unknown value typeLeft")
+        raise Exception('Unknown value typeLeft')
 
     if typeRight == CUTTERM_NOTHING:
         positionEnd = len(stream)
@@ -1515,7 +1511,7 @@ def CutData(stream, cutArgument):
             positionEnd += len(valueRight[0])
         positionEnd += valueRight[2]
     else:
-        raise Exception("Unknown value typeRight")
+        raise Exception('Unknown value typeRight')
 
     return [stream[positionBegin:positionEnd], positionBegin, positionEnd]
 
@@ -2068,11 +2064,6 @@ def YARACompile(ruledata):
                 dFilepaths[filename] = filename
         return yara.compile(filepaths=dFilepaths, externals={'streamname': '', 'VBA': False}), ','.join(dFilepaths.values())
 
-def FilenameInSimulations(filename):
-    if dslsimulationdb == None:
-        return False
-    return filename in dslsimulationdb.dSimulations
-
 def PrintWarningSelection(select, selectionCounter):
     if select != '' and selectionCounter == 0:
         print('Warning: no stream was selected with expression %s' % select)
@@ -2086,7 +2077,7 @@ def CreateZipFileObject(arg1, arg2):
 def OLEDump(filename, options):
     returnCode = 0
 
-    if filename != '' and not FilenameInSimulations(filename) and not os.path.isfile(filename):
+    if filename != '' and not os.path.isfile(filename):
         print('Error: %s is not a file.' % filename)
         return returnCode
 
@@ -2169,15 +2160,6 @@ def OLEDump(filename, options):
             oStringIO = DataIO(sys.stdin.buffer.read())
         else:
             oStringIO = DataIO(sys.stdin.read())
-    elif FilenameInSimulations(filename):
-        oZipfile = CreateZipFileObject(dslsimulationdb.GetSimulation(filename), 'r')
-        oZipContent = oZipfile.open(oZipfile.infolist()[0], 'r', C2BIP3(options.password))
-        zipContent = oZipContent.read()
-        if zipContent.startswith('Neut'):
-            zipContent = OLEFILE_MAGIC + zipContent[4:]
-        oStringIO = DataIO(zipContent)
-        oZipContent.close()
-        oZipfile.close()
     elif filename.lower().endswith('.zip'):
         oZipfile = CreateZipFileObject(filename, 'r')
         try:

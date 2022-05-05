@@ -4,8 +4,8 @@ from __future__ import print_function
 
 __description__ = 'Analyze Cobalt Strike HTTP/DNS beacon traffic'
 __author__ = 'Didier Stevens'
-__version__ = '0.0.4'
-__date__ = '2021/12/12'
+__version__ = '0.0.5'
+__date__ = '2022/02/15'
 
 """
 
@@ -32,6 +32,7 @@ History:
   2021/11/20: added constants from https://github.com/verctor/Cobalt_Homework/blob/master/scripts/define.py
   2021/11/26: merging HTTP and DNS
   2021/12/12: 0.0.4 bugfix HMAC invalid; extra constants https://github.com/DidierStevens/Beta/issues/5
+  2022/02/15: 0.0.5 added error handling
 
 Todo:
   add support for non-default DNS labels
@@ -797,13 +798,21 @@ def AnalyzeCaptureHTTP(filename, options):
                 oOutput.Line('HTTP response (for request %d %s)' % (requestPacket, dMethods.get(requestPacket, '')))
             else:
                 oOutput.Line('HTTP response')
-            oCSParser.ProcessReplyPacketData(data_raw[0])
+            try:
+                oCSParser.ProcessReplyPacketData(data_raw[0])
+            except Exception as e:
+                oOutput.Line('* An error occured')
+                oOutput.Line(e)
 
         if hasattr(packet.http, 'request'):
             oOutput.Line('Packet number: %d' % packet.number)
             oOutput.Line('HTTP request %s' % dMethods.get(packet.number, ''))
             oOutput.Line(packet.http.full_uri)
-            oCSParser.ProcessPostPacketData(data_raw[0])
+            try:
+                oCSParser.ProcessPostPacketData(data_raw[0])
+            except Exception as e:
+                oOutput.Line('* An error occured')
+                oOutput.Line(e)
 
     capture.close()
 

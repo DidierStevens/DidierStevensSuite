@@ -2,8 +2,8 @@
 
 __description__ = 'BIFF plugin for oledump.py'
 __author__ = 'Didier Stevens'
-__version__ = '0.0.24'
-__date__ = '2021/08/12'
+__version__ = '0.0.25'
+__date__ = '2022/05/03'
 
 """
 
@@ -54,6 +54,7 @@ History:
   2021/06/18: added userdefinedfunction names (sample RANDBETWEEN)
   2021/07/23: 0.0.24 added CreateXorKey_Method1
   2021/08/12: continue xor deobfuscation
+  2022/05/03: 0.0.25 fix 0x1BA CODENAME
 
 Todo:
   updated parsing of records for BIFF5 record format
@@ -5053,7 +5054,6 @@ class cBIFF(cPluginParent):
             0x3D: 'WINDOW1 : Window Information',
             0x40: 'BACKUP : Save Backup Version of the File',
             0x41: 'PANE : Number of Panes and Their Position',
-            0x42: 'CODENAME : VBE Object Name',
             0x42: 'CODEPAGE : Default Code Page',
             0x4D: 'PLS : Environment-Specific Print Record',
             0x50: 'DCON : Data Consolidation Information',
@@ -5176,6 +5176,7 @@ class cBIFF(cPluginParent):
             0x1B6: 'TXO : Text Object',
             0x1B7: 'REFRESHALL : Refresh Flag',
             0x1B8: 'HLINK : Hyperlink',
+            0x1BA: 'CODENAME : VBE Object Name',
             0x1BB: 'SXFDBTYPE : SQL Datatype Identifier',
             0x1BC: 'PROT4REVPASS : Shared Workbook Protection Password',
             0x1BE: 'DV : Data Validation Criteria',
