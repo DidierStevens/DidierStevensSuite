@@ -2,8 +2,8 @@
 
 __description__ = 'ZIP dump utility'
 __author__ = 'Didier Stevens'
-__version__ = '0.0.21'
-__date__ = '2020/11/21'
+__version__ = '0.0.23'
+__date__ = '2022/05/12'
 
 """
 
@@ -54,6 +54,8 @@ History:
   2020/08/16: 0.0.21 Python 3 fixes
   2020/10/21: Python 3 fix in cBinaryFile
   2020/11/21: Python 3 fix extra info
+  2021/10/31: 0.0.22 added -y #x#
+  2022/05/12: Python 3 fix
 
 Todo:
 """
@@ -509,7 +511,7 @@ def File2Strings(filename):
     except:
         return None
     try:
-        return map(lambda line:line.rstrip('\n\r'), f.readlines())
+        return list(map(lambda line:line.rstrip('\n\r'), f.readlines()))
     except:
         return None
     finally:
@@ -541,6 +543,8 @@ def YARACompile(ruledata):
             rule = 'rule string {strings: $a = "%s" ascii wide nocase condition: $a}' % ruledata[3:]
         elif ruledata.startswith('#q#'):
             rule = ruledata[3:].replace("'", '"')
+        elif ruledata.startswith('#x#'):
+            rule = 'rule hexadecimal {strings: $a = { %s } condition: $a}' % ruledata[3:]
         else:
             rule = ruledata[1:]
         return yara.compile(source=rule)

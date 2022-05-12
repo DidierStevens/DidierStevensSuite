@@ -2,8 +2,8 @@
 
 __description__ = 'Extract base64 strings from file'
 __author__ = 'Didier Stevens'
-__version__ = '0.0.20'
-__date__ = '2021/12/28'
+__version__ = '0.0.21'
+__date__ = '2022/05/11'
 
 """
 
@@ -38,6 +38,7 @@ History:
   2021/11/14: 0.0.18 fixed DecodeDataDecimal
   2021/12/15: 0.0.19 Python 3 bugfix
   2021/12/28: 0.0.20 added zxcn decoding
+  2022/05/11: 0.0.21 added nbl decoding
 
 Todo:
   add base64 url
@@ -117,6 +118,7 @@ zxc stands for "zero hexadecimal comma" (0x), it looks like this: 0x90,0x90,0x90
 zxcn stands for "zero hexadecimal comma no-leading-zero" (0x), it looks like this: 0x90,0xA,0x2A,0x90...
 dec stands for "decimal", it looks like this: 80;75;3;4...
 nb stands for "NETBIOS", it looks like this: ENFKOIAA
+nbl stands for "NETBIOS lowercase", it looks like this: enfkoiaa
 b85 stands for BASE85 RFC 1924, it looks like this: X>D+Ca&#bLba`-Pb31o...
 a85 stands for ASCII85, it looks like this: BOu!rD]...
 
@@ -914,6 +916,16 @@ def DecodeDataNETBIOS(data, ProcessFunction):
             except:
                 continue
 
+def DecodeDataNETBIOSLowercase(data, ProcessFunction):
+    #find a - p sequence of letters
+    for netbiosstring in re.findall(b'[abcdefghijklmnop]+', data):
+        netbiosstring = ProcessFunction(netbiosstring)
+        if len(netbiosstring) % 2 == 0:
+            try:
+                yield (netbiosstring, NETBIOSDecode(netbiosstring.upper()))
+            except:
+                continue
+
 def YARACompile(ruledata):
     if ruledata.startswith('#'):
         if ruledata.startswith('#h#'):
@@ -1232,6 +1244,7 @@ def Main():
         'zxcn': ('0x hexadecimal 1 or 2 digits, comma-separated, example: 0x90,0xA,0x2A,0x90...', DecodeDataZXCN),
         'dec': ('decimal numbers, separated by an arbitrary separator, example: 80;75;3;4...', DecodeDataDecimal),
         'nb': ('NETBIOS, uppercase letters from A to P, example: ENFKOIAA', DecodeDataNETBIOS),
+        'nbl': ('NETBIOS, lowercase letters from a to p, example: enfkoiaa', DecodeDataNETBIOSLowercase),
         'b85': ('BASE85 RFC 1924, example: X>D+Ca&#bLba`-Pb31o...', DecodeDataBase85RFC1924),
         'a85': ('ASCII85, example: BOu!rD]...', DecodeDataAscii85),
     }

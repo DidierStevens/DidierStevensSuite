@@ -2,8 +2,8 @@
 
 __description__ = 'Analyze OLE files (Compound Binary Files)'
 __author__ = 'Didier Stevens'
-__version__ = '0.0.66'
-__date__ = '2022/05/03'
+__version__ = '0.0.67'
+__date__ = '2022/05/11'
 
 """
 
@@ -115,6 +115,7 @@ History:
   2022/03/04: 0.0.64 added option -u
   2022/04/26: 0.0.65 added message for pyzipper
   2022/05/03: 0.0.66 small refactoring
+  2022/05/11: 0.0.67 added PrintUserdefinedProperties
 
 Todo:
 
@@ -1796,6 +1797,15 @@ def ParseVBADIR(ole):
                             vbadirinfo.append(moduleinfo)
     return vbadirinfo
 
+def PrintUserdefinedProperties(ole, streamname):
+    if not 'get_userdefined_properties' in dir(ole):
+        return
+    userdefinedproperties = ole.get_userdefined_properties(streamname)
+    if len(userdefinedproperties) > 0:
+        print('User defined properties:')
+        for userdefinedproperty in userdefinedproperties:
+            print(' %s: %s' % (userdefinedproperty['property_name'], userdefinedproperty['value']))
+
 def OLESub(ole, data, prefix, rules, options):
     global plugins
     global pluginsOle
@@ -1814,6 +1824,8 @@ def OLESub(ole, data, prefix, rules, options):
                     print(' %s: %s %s' % (attribute, value, LookupCodepage(value)))
                 else:
                     print(' %s: %s' % (attribute, value))
+        PrintUserdefinedProperties(ole, ['\x05SummaryInformation'])
+
         print('Properties DocumentSummaryInformation:')
         for attribute in metadata.DOCSUM_ATTRIBS:
             value = getattr(metadata, attribute)
@@ -1822,6 +1834,8 @@ def OLESub(ole, data, prefix, rules, options):
                     print(' %s: %s %s' % (attribute, value, LookupCodepage(value)))
                 else:
                     print(' %s: %s' % (attribute, value))
+        PrintUserdefinedProperties(ole, ['\x05DocumentSummaryInformation'])
+
         return (returnCode, 0)
 
     if options.jsonoutput:

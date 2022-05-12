@@ -4,8 +4,8 @@ from __future__ import print_function
 
 __description__ = "Template for text file processing"
 __author__ = 'Didier Stevens'
-__version__ = '0.0.4'
-__date__ = '2021/02/27'
+__version__ = '0.0.5'
+__date__ = '2022/05/11'
 
 """
 
@@ -29,6 +29,8 @@ History:
   2020/11/11: 0.0.3 added option --encoding
   2021/02/14: 0.0.4 File2Strings fix & Strings2File
   2021/02/27: Changed encoding
+  2021/09/19: 0.0.5 updated encoding option
+  2022/05/11: added option --withfilename
 
 Todo:
 """
@@ -53,7 +55,8 @@ Manual:
 Errors occuring when opening a file are reported (and logged if logging is turned on), and the program moves on to the next file.
 Errors occuring when reading & processing a file are reported (and logged if logging is turned on), and the program stops unless option ignoreprocessingerrors is used.
 
-Option --encoding can be used to specify the encoding of the text file to be read. For example, to read a 16-bit Unicode text file, use option "--encoding utf-16".
+Option --encoding can be used to specify the encoding of the text file to be read and written. For example, to read a 16-bit Unicode text file, use option "--encoding utf-16".
+An example of the format is: i=latin,o=utf8:surrogateescape
 
 Option --grep can be used to select (grep) lines that have to be processed.
 If this option is not used, all lines will be processed.
@@ -87,6 +90,8 @@ When combining --begingrep and --endgrep, make sure that --endgrep does not matc
 
 Options --search and --replace can be used to replace every occurence of option value --search in each line by option value --replace (can be an empty string).
 --searchoptions are available too.
+
+Option --withfilename prefixes each printed line with the filename containing that line.
 
 The lines are written to standard output, except when option -o is used. When option -o is used, the lines are written to the filename specified by option -o.
 Filenames used with option -o starting with # have special meaning.
@@ -136,7 +141,7 @@ def File2Strings(filename):
     except:
         return None
     try:
-        return tuple(map(lambda line:line.rstrip('\n'), f.readlines()))
+        return list(map(lambda line:line.rstrip('\n'), f.readlines()))
     except:
         return None
     finally:
@@ -198,9 +203,11 @@ class cVariables():
         return astring
 
 class cOutput():
-    def __init__(self, filenameOption=None):
+    def __init__(self, filenameOption=None, encoding=''):
         self.starttime = time.time()
         self.filenameOption = filenameOption
+        self.encoding = encoding
+        self.encodingvalue, self.errorsvalue = ParseOptionEncoding('o', self.encoding)
         self.separateFiles = False
         self.progress = False
         self.console = False
@@ -209,9 +216,15 @@ class cOutput():
         if self.filenameOption:
             if self.ParseHash(self.filenameOption):
                 if not self.separateFiles and self.filename != '':
-                    self.fOut = open(self.filename, 'w')
+                    if sys.version_info[0] > 2:
+                        self.fOut = open(self.filename, 'w', encoding=self.encodingvalue, errors=self.errorsvalue)
+                    else:
+                        self.fOut = open(self.filename, 'w')
             elif self.filenameOption != '':
-                self.fOut = open(self.filenameOption, 'w')
+                if sys.version_info[0] > 2:
+                    self.fOut = open(self.filenameOption, 'w', encoding=self.encodingvalue, errors=self.errorsvalue)
+                else:
+                    self.fOut = open(self.filenameOption, 'w')
 
     def ParseHash(self, option):
         if option.startswith('#'):
@@ -293,7 +306,10 @@ class cOutput():
             oFilenameVariables.SetVariable('e', extension)
 
             self.Close()
-            self.fOut = open(oFilenameVariables.Instantiate(self.filename), 'w')
+            if sys.version_info[0] > 2:
+                self.fOut = open(oFilenameVariables.Instantiate(self.filename), 'w', encoding=self.encodingvalue, errors=self.errorsvalue)
+            else:
+                self.fOut = open(oFilenameVariables.Instantiate(self.filename), 'w')
 
     def Close(self):
         if self.fOut != None:
@@ -498,7 +514,7 @@ def ProcessFileWithoutContext(fIn, oBeginGrep, oGrep, oEndGrep, options, fullrea
     else:
         for line in fIn[0]:
             if fIn[1] == 2:
-                line = line.decode(*ParseOptionEncoding(options.encoding))
+                line = line.decode(*ParseOptionEncoding('i', options.encoding))
             line = line.rstrip('\n\r')
             if not begin:
                 begin, line = oBeginGrep.Grep(line)
@@ -544,7 +560,7 @@ def ProcessFileWithContext(fIn, oBeginGrep, oGrep, oEndGrep, context, options, f
         for line in fIn[0]:
             lineCounter += 1
             if fIn[1] == 2:
-                line = line.decode(*ParseOptionEncoding(options.encoding))
+                line = line.decode(*ParseOptionEncoding('i', options.encoding))
             line = line.rstrip('\n\r')
             if not begin:
                 begin, line = oBeginGrep.Grep(line)
@@ -599,14 +615,36 @@ def AnalyzeFileError(filename):
     except:
         pass
 
-def ParseOptionEncoding(encoding):
+def ParseOptionEncodingSub2(encoding):
     if encoding == '':
         encodingvalue = 'utf8'
         errorsvalue = 'surrogateescape'
+    elif ':' in encoding:
+        encodingvalue, errorsvalue = encoding.split(':', 1)
     else:
         encodingvalue = encoding
         errorsvalue = None
     return encodingvalue, errorsvalue
+
+def ParseOptionEncodingSub(entry):
+    if not entry.startswith('i=') and not entry.startswith('o='):
+        entry = 'i=' + entry
+    stream, encoding = entry.split('=', 1)
+    encodingvalue, errorsvalue = ParseOptionEncodingSub2(encoding)
+    return stream, encodingvalue, errorsvalue
+
+def ParseOptionEncoding(streamId, encoding):
+    dStreamsPresent = {'i': False, 'o': False}
+    dStreams = {'i': ['utf8', 'surrogateescape'], 'o': ['utf8', 'surrogateescape']}
+    if encoding != '':
+        for entry in encoding.split(','):
+            stream, encodingvalue, errorsvalue = ParseOptionEncodingSub(entry)
+            if dStreamsPresent[stream]:
+                raise Exception('Encoding option error: %s' % encoding)
+            else:
+                dStreamsPresent[stream] = True
+                dStreams[stream] = [encodingvalue, errorsvalue]
+    return dStreams[streamId]
 
 @contextmanager
 def TextFile(filename, oLogfile, options):
@@ -624,7 +662,10 @@ def TextFile(filename, oLogfile, options):
             fIn = None
     else:
         try:
-            fIn = open(filename, 'r', encoding=ParseOptionEncoding(options.encoding)[0], errors=ParseOptionEncoding(options.encoding)[1])
+            if sys.version_info[0] > 2:
+                fIn = open(filename, 'r', encoding=ParseOptionEncoding('i', options.encoding)[0], errors=ParseOptionEncoding('i', options.encoding)[1])
+            else:
+                fIn = open(filename, 'r')
         except:
             AnalyzeFileError(filename)
             oLogfile.LineError('Opening file %s %s' % (filename, repr(sys.exc_info()[1])))
@@ -646,7 +687,11 @@ def ProcessTextFile(filename, oBeginGrep, oGrep, oEndGrep, context, oOutput, oLo
         try:
             for line in ProcessFile(fIn, oBeginGrep, oGrep, oEndGrep, context, options, False):
                 # ----- Put your line processing code here -----
-                oOutput.Line(line)
+                result = line
+
+                if options.withfilename:
+                    result = '%s:%s' % (filename, result)
+                oOutput.Line(result)
                 # ----------------------------------------------
         except:
             oLogfile.LineError('Processing file %s %s' % (filename, repr(sys.exc_info()[1])))
@@ -659,7 +704,7 @@ def InstantiateCOutput(options):
     filenameOption = None
     if options.output != '':
         filenameOption = options.output
-    return cOutput(filenameOption)
+    return cOutput(filenameOption, options.encoding)
 
 def ParseNumber(number):
     negative = 1
@@ -735,6 +780,7 @@ https://DidierStevens.com'''
     oParser.add_option('--search', type=str, default='', help='Search term (search and replace)')
     oParser.add_option('--replace', type=str, default='', help='Replace term (search and replace)')
     oParser.add_option('--searchoptions', type=str, default='', help='Search options (search and replace)')
+    oParser.add_option('--withfilename', action='store_true', default=False, help='Include filename with output')
     oParser.add_option('--literalfilenames', action='store_true', default=False, help='Do not interpret filenames')
     oParser.add_option('--recursedir', action='store_true', default=False, help='Recurse directories (wildcards and here files (@...) allowed)')
     oParser.add_option('--checkfilenames', action='store_true', default=False, help='Perform check if files exist prior to file processing')
