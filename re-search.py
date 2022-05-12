@@ -2,8 +2,8 @@
 
 __description__ = "Program to use Python's re.findall on files"
 __author__ = 'Didier Stevens'
-__version__ = '0.0.19'
-__date__ = '2022/04/18'
+__version__ = '0.0.20'
+__date__ = '2022/05/06'
 
 """
 
@@ -51,6 +51,7 @@ History:
   2021/09/19: 0.0.18 map Python3 fix
   2021/09/21: added sys.stdin.reconfigure
   2022/04/18: 0.0.19 Python3 fix stdin binary
+  2022/05/06: 0.0.20 added input & output encoding
 
 Todo:
   add hostname to header
@@ -318,14 +319,16 @@ def StdoutWriteChunked(data):
         data = data[10000:]
 
 class cOutput():
-    def __init__(self, grepall, filename=None):
+    def __init__(self, grepall, filename=None, encoding=''):
         self.grepall = grepall
         self.filename = filename
+        self.encoding = encoding
+        self.encodingvalue, self.errorsvalue = ParseOptionEncoding('o', self.encoding)
         if self.filename and self.filename != '':
             if self.grepall:
                 self.f = open(self.filename, 'wb')
             else:
-                self.f = open(self.filename, 'w')
+                self.f = open(self.filename, 'w', encoding=self.encodingvalue, errors=self.errorsvalue)
         else:
             self.f = None
             if self.grepall:
@@ -396,9 +399,9 @@ def LibraryAllNames():
 class cOutputResult():
     def __init__(self, options):
         if options.output:
-            self.oOutput = cOutput(options.grepall, options.output)
+            self.oOutput = cOutput(options.grepall, options.output, options.encoding)
         else:
-            self.oOutput = cOutput(options.grepall)
+            self.oOutput = cOutput(options.grepall, None, options.encoding)
         self.options = options
         self.dLines = {}
 
@@ -433,7 +436,7 @@ def ProcessFile(fIn, fullread, fType, options):
     else:
         for line in fIn:
             if fType == 2:
-                line = line.decode(*ParseOptionEncoding(options.encoding))
+                line = line.decode(*ParseOptionEncoding('i', options.encoding))
             yield line.strip('\n\r')
 
 def Hex(data, dohex):
@@ -456,14 +459,36 @@ def ExtractStrings(data):
 def DumpFunctionStrings(data):
     return ''.join([extractedstring.decode() + '\n' for extractedstring in ExtractStrings(data)])
 
-def ParseOptionEncoding(encoding):
+def ParseOptionEncodingSub2(encoding):
     if encoding == '':
         encodingvalue = 'utf8'
         errorsvalue = 'surrogateescape'
+    elif ':' in encoding:
+        encodingvalue, errorsvalue = encoding.split(':', 1)
     else:
         encodingvalue = encoding
         errorsvalue = None
     return encodingvalue, errorsvalue
+
+def ParseOptionEncodingSub(entry):
+    if not entry.startswith('i=') and not entry.startswith('o='):
+        entry = 'i=' + entry
+    stream, encoding = entry.split('=', 1)
+    encodingvalue, errorsvalue = ParseOptionEncodingSub2(encoding)
+    return stream, encodingvalue, errorsvalue
+
+def ParseOptionEncoding(streamId, encoding):
+    dStreamsPresent = {'i': False, 'o': False}
+    dStreams = {'i': ['utf8', 'surrogateescape'], 'o': ['utf8', 'surrogateescape']}
+    if encoding != '':
+        for entry in encoding.split(','):
+            stream, encodingvalue, errorsvalue = ParseOptionEncodingSub(entry)
+            if dStreamsPresent[stream]:
+                raise Exception('Encoding option error: %s' % encoding)
+            else:
+                dStreamsPresent[stream] = True
+                dStreams[stream] = [encodingvalue, errorsvalue]
+    return dStreams[streamId]
 
 def MinimalPythonVersion(major, minor):
     if sys.version_info[0] < major:
@@ -487,7 +512,7 @@ def RESearchSingle(regex, filenames, oOutput, options):
                 else:
                     fIn = sys.stdin.buffer
             elif MinimalPythonVersion(3, 7):
-                sys.stdin.reconfigure(encoding=ParseOptionEncoding(options.encoding)[0], errors=ParseOptionEncoding(options.encoding)[1])
+                sys.stdin.reconfigure(encoding=ParseOptionEncoding('i', options.encoding)[0], errors=ParseOptionEncoding('i', options.encoding)[1])
                 fIn = sys.stdin
             else:
                 fIn = sys.stdin
@@ -499,7 +524,7 @@ def RESearchSingle(regex, filenames, oOutput, options):
             if options.fullread or options.extractstrings or options.grepall:
                 fIn = open(filename, 'rb')
             else:
-                fIn = open(filename, 'r', encoding=ParseOptionEncoding(options.encoding)[0], errors=ParseOptionEncoding(options.encoding)[1])
+                fIn = open(filename, 'r', encoding=ParseOptionEncoding('i', options.encoding)[0], errors=ParseOptionEncoding('i', options.encoding)[1])
             fType = 3
         for line in ProcessFile(fIn, options.fullread or options.extractstrings or options.grepall, fType, options):
             if options.extractstrings:
@@ -553,7 +578,7 @@ def RESearchCSV(csvFilename, filenames, oOutput, options):
                 else:
                     fIn = sys.stdin.buffer
             elif MinimalPythonVersion(3, 7):
-                sys.stdin.reconfigure(encoding=ParseOptionEncoding(options.encoding)[0], errors=ParseOptionEncoding(options.encoding)[1])
+                sys.stdin.reconfigure(encoding=ParseOptionEncoding('i', options.encoding)[0], errors=ParseOptionEncoding('i', options.encoding)[1])
                 fIn = sys.stdin
             else:
                 fIn = sys.stdin
@@ -562,7 +587,7 @@ def RESearchCSV(csvFilename, filenames, oOutput, options):
             fIn = gzip.GzipFile(filename, 'rb')
             fType = 2
         else:
-            fIn = open(filename, IFF(options.fullread or options.extractstrings or options.grepall, 'rb', 'r'), encoding=ParseOptionEncoding(options.encoding)[0], errors=ParseOptionEncoding(options.encoding)[1])
+            fIn = open(filename, IFF(options.fullread or options.extractstrings or options.grepall, 'rb', 'r'), encoding=ParseOptionEncoding('i', options.encoding)[0], errors=ParseOptionEncoding('i', options.encoding)[1])
             fType = 3
         for line in ProcessFile(fIn, options.fullread or options.extractstrings or options.grepall, fType, options):
             if options.extractstrings:
