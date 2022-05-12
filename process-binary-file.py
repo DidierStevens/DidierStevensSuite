@@ -4,8 +4,8 @@ from __future__ import print_function
 
 __description__ = 'Template binary file argument'
 __author__ = 'Didier Stevens'
-__version__ = '0.0.5'
-__date__ = '2021/05/23'
+__version__ = '0.0.6'
+__date__ = '2021/11/11'
 
 """
 Source code put in the public domain by Didier Stevens, no Copyright
@@ -47,6 +47,7 @@ History:
   2020/12/27: added Unpack
   2021/01/17: 0.0.4 fix cOutput binary bug
   2021/05/23: 0.0.5 changed binary output logic
+  2021/11/11: 0.0.6 added dReplacements to cOutput
 
 Todo:
   Document flag arguments in man page
@@ -1198,6 +1199,12 @@ class cOutput():
             self.fileoptions = 'wb'
         else:
             self.fileoptions = 'w'
+        self.dReplacements = {}
+
+    def Replace(self, line):
+        for key, value in self.dReplacements.items():
+            line = line.replace(key, value)
+        return line
 
     def Open(self, binary=False):
         if self.fOut != None:
@@ -1266,6 +1273,7 @@ class cOutput():
             iter += 1
 
     def LineSub(self, line, eol):
+        line = self.Replace(line)
         self.Open()
         if self.fOut == self.STDOUT or self.console:
             try:
