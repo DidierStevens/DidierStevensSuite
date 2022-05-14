@@ -2,8 +2,8 @@
 
 __description__ = 'MSG summary plugin for oledump.py'
 __author__ = 'Didier Stevens'
-__version__ = '0.0.1'
-__date__ = '2020/09/11'
+__version__ = '0.0.2'
+__date__ = '2022/05/15'
 
 """
 
@@ -14,6 +14,7 @@ Use at your own risk
 History:
   2020/08/18: start
   2020/09/11: added body
+  2022/05/15: 0.0.2 added URL extraction
 
 Todo:
 """
@@ -39,6 +40,14 @@ class cMSG(cPluginParentOle):
     def PreProcess(self):
         self.dAttachments = {}
         self.streamIndexCounter = 0
+        self.dURLs = {}
+
+    def ExtractURLs(self, stream):
+        result = []
+        for str in ExtractStrings(stream):
+            for url in re.findall(br'[a-zA-Z]+://[-a-zA-Z0-9._]+(?:/[-a-zA-Z0-9+&@#/%=~_|!:,.;$]*)?(?:\?[-a-zA-Z0-9+&@#/%=~_|!:,.;$]*)?', str):
+                result.append(url)
+        return result
 
     def Process(self, name, stream):
         self.streamIndexCounter += 1
@@ -81,6 +90,10 @@ class cMSG(cPluginParentOle):
                 self.body = stream.decode('utf16') if code.endswith('001F') else stream.decode()
                 self.bodyStreamIndex = self.streamIndexCounter
 
+        urls = self.ExtractURLs(stream)
+        if len(urls) > 0:
+            self.dURLs[self.streamIndexCounter] = urls
+
     def PostProcess(self):
         oParser = optparse.OptionParser()
         oParser.add_option('-j', '--json', action='store_true', default=False, help='Produce JSON output')
@@ -102,6 +115,12 @@ class cMSG(cPluginParentOle):
             print('Body stream index: %d' % self.bodyStreamIndex)
             for index in self.dAttachments.keys():
                 print('Attachment %d (stream index %d): %s %s %d %s' % (index, self.dAttachments[index].streamIndex, self.dAttachments[index].longfilename, self.dAttachments[index].mimetag, len(self.dAttachments[index].data), hashlib.sha256(self.dAttachments[index].data).hexdigest()))
+            if len(self.dURLs) > 0:
+                print('URLs:')
+                for key, value in self.dURLs.items():
+                    print(' Stream %d%s:' % (key, IFF(key == self.bodyStreamIndex, ' (body stream)', '')))
+                    for url in value:
+                        print('  %s' % url.decode('latin'))
             if options.body:
                 print('Body:')
                 print(self.body)
