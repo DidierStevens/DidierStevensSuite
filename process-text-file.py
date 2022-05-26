@@ -4,8 +4,8 @@ from __future__ import print_function
 
 __description__ = "Template for text file processing"
 __author__ = 'Didier Stevens'
-__version__ = '0.0.5'
-__date__ = '2022/05/11'
+__version__ = '0.0.6'
+__date__ = '2022/05/18'
 
 """
 
@@ -31,6 +31,7 @@ History:
   2021/02/27: Changed encoding
   2021/09/19: 0.0.5 updated encoding option
   2022/05/11: added option --withfilename
+  2022/05/18: 0.0.6 changed --withfilename to separator	
 
 Todo:
 """
@@ -689,8 +690,8 @@ def ProcessTextFile(filename, oBeginGrep, oGrep, oEndGrep, context, oOutput, oLo
                 # ----- Put your line processing code here -----
                 result = line
 
-                if options.withfilename:
-                    result = '%s:%s' % (filename, result)
+                if options.withfilename != '':
+                    result = filename + options.withfilename + result
                 oOutput.Line(result)
                 # ----------------------------------------------
         except:
@@ -780,7 +781,7 @@ https://DidierStevens.com'''
     oParser.add_option('--search', type=str, default='', help='Search term (search and replace)')
     oParser.add_option('--replace', type=str, default='', help='Replace term (search and replace)')
     oParser.add_option('--searchoptions', type=str, default='', help='Search options (search and replace)')
-    oParser.add_option('--withfilename', action='store_true', default=False, help='Include filename with output')
+    oParser.add_option('--withfilename', type=str, default='', help='Include filename with output with given separator')
     oParser.add_option('--literalfilenames', action='store_true', default=False, help='Do not interpret filenames')
     oParser.add_option('--recursedir', action='store_true', default=False, help='Recurse directories (wildcards and here files (@...) allowed)')
     oParser.add_option('--checkfilenames', action='store_true', default=False, help='Perform check if files exist prior to file processing')
