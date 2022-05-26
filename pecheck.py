@@ -2,8 +2,8 @@
 
 __description__ = 'Tool for displaying PE file info'
 __author__ = 'Didier Stevens'
-__version__ = '0.7.14'
-__date__ = '2021/12/27'
+__version__ = '0.7.15'
+__date__ = '2022/05/25'
 
 """
 
@@ -54,6 +54,7 @@ History:
   2021/02/25: 0.7.13 added signature hash
   2021/05/29: 0.7.14 added file size
   2021/12/27: support option -D with -l P
+  2022/05/25: 0.7.15 added extra information for overlay; now option verbose is needed to dump the signature
 
 Todo:
 """
@@ -72,6 +73,8 @@ import re
 import struct
 import textwrap
 import zlib
+import string
+import math
 if sys.version_info[0] >= 3:
     from io import StringIO
 else:
@@ -298,7 +301,7 @@ def Fixed_get_overlay_data_start_offset(oPE):
     else:
         return None
 
-def Signature(pe):
+def Signature(pe, options):
     try:
         security = pe.OPTIONAL_HEADER.DATA_DIRECTORY[pefile.DIRECTORY_ENTRY['IMAGE_DIRECTORY_ENTRY_SECURITY']]
     except IndexError:
@@ -348,14 +351,15 @@ def Signature(pe):
     }
     content, _ = der_decoder.decode(contentInfo.getComponentByName('content'), asn1Spec=contentInfoMap[contentType])
 
-    for line in content.prettyPrint().split('\n'):
-        print(line)
-        oMatch = re.match('( *)value=0x....(.+)', line)
-        if oMatch != None:
-            if sys.version_info[0] > 2:
-                print(oMatch.groups()[0] + '      ' + repr(binascii.a2b_hex(oMatch.groups()[1]).decode()))
-            else:
-                print(oMatch.groups()[0] + '      ' + repr(binascii.a2b_hex(oMatch.groups()[1])))
+    if options.verbose:
+        for line in content.prettyPrint().split('\n'):
+            print(line)
+            oMatch = re.match('( *)value=0x....(.+)', line)
+            if oMatch != None:
+                if sys.version_info[0] > 2:
+                    print(oMatch.groups()[0] + '      ' + repr(binascii.a2b_hex(oMatch.groups()[1]).decode()))
+                else:
+                    print(oMatch.groups()[0] + '      ' + repr(binascii.a2b_hex(oMatch.groups()[1])))
 
 #    for idx in range(len(content)):
 #        print(content.getNameByPosition(idx))
@@ -413,7 +417,67 @@ def ProcessDumpInfo(oPE):
         if not skipLine:
             result.append(line)
     return '\n'.join(result)
-    
+
+#Convert 2 Integer If Python 2
+def C2IIP2(data):
+    if sys.version_info[0] > 2:
+        return data
+    else:
+        return ord(data)
+
+def CalculateByteStatistics(dPrevalence=None, data=None):
+    averageConsecutiveByteDifference = None
+    if dPrevalence == None:
+        dPrevalence = {iter: 0 for iter in range(0x100)}
+        sumDifferences = 0.0
+        previous = None
+        if len(data) > 1:
+            for byte in data:
+                byte = C2IIP2(byte)
+                dPrevalence[byte] += 1
+                if previous != None:
+                    sumDifferences += abs(byte - previous)
+                previous = byte
+            averageConsecutiveByteDifference = sumDifferences /float(len(data)-1)
+    sumValues = sum(dPrevalence.values())
+    countNullByte = dPrevalence[0]
+    countControlBytes = 0
+    countWhitespaceBytes = 0
+    countUniqueBytes = 0
+    for iter in range(1, 0x21):
+        if chr(iter) in string.whitespace:
+            countWhitespaceBytes += dPrevalence[iter]
+        else:
+            countControlBytes += dPrevalence[iter]
+    countControlBytes += dPrevalence[0x7F]
+    countPrintableBytes = 0
+    for iter in range(0x21, 0x7F):
+        countPrintableBytes += dPrevalence[iter]
+    countHighBytes = 0
+    for iter in range(0x80, 0x100):
+        countHighBytes += dPrevalence[iter]
+    countHexadecimalBytes = 0
+    countBASE64Bytes = 0
+    for iter in range(0x30, 0x3A):
+        countHexadecimalBytes += dPrevalence[iter]
+        countBASE64Bytes += dPrevalence[iter]
+    for iter in range(0x41, 0x47):
+        countHexadecimalBytes += dPrevalence[iter]
+    for iter in range(0x61, 0x67):
+        countHexadecimalBytes += dPrevalence[iter]
+    for iter in range(0x41, 0x5B):
+        countBASE64Bytes += dPrevalence[iter]
+    for iter in range(0x61, 0x7B):
+        countBASE64Bytes += dPrevalence[iter]
+    countBASE64Bytes += dPrevalence[ord('+')] + dPrevalence[ord('/')] + dPrevalence[ord('=')]
+    entropy = 0.0
+    for iter in range(0x100):
+        if dPrevalence[iter] > 0:
+            prevalence = float(dPrevalence[iter]) / float(sumValues)
+            entropy += - prevalence * math.log(prevalence, 2)
+            countUniqueBytes += 1
+    return sumValues, entropy, countUniqueBytes, countNullByte, countControlBytes, countWhitespaceBytes, countPrintableBytes, countHighBytes, countHexadecimalBytes, countBASE64Bytes, averageConsecutiveByteDifference
+
 def SingleFileInfo(filename, data, signatures, options):
     pe = pefile.PE(data=data)
     raw = pe.write()
@@ -432,7 +496,7 @@ def SingleFileInfo(filename, data, signatures, options):
 
     print('Signature:')
     try:
-        Signature(pe)
+        Signature(pe, options)
     except Exception as e:
         print(' Error occured: %s' % e)
     print('')
@@ -466,12 +530,15 @@ def SingleFileInfo(filename, data, signatures, options):
     if overlayOffset == None:
         print(' No overlay')
     else:
-        print(' Start offset: 0x%08x' % overlayOffset)
+        print(' Start offset:   0x%08x' % overlayOffset)
         overlaySize = len(raw[overlayOffset:])
-        print(' Size:         0x%08x %s %.2f%%' %     (overlaySize, NumberOfBytesHumanRepresentation(overlaySize), float(overlaySize) / float(len(raw)) * 100.0))
-        print(' MD5:          %s' % hashlib.md5(raw[overlayOffset:]).hexdigest())
-        print(' SHA-256:      %s' % hashlib.sha256(raw[overlayOffset:]).hexdigest())
-        print(' MAGIC:        %s' % GenerateMAGIC(raw[overlayOffset:][:4]))
+        print(' Size:           0x%08x %s %.2f%%' %     (overlaySize, NumberOfBytesHumanRepresentation(overlaySize), float(overlaySize) / float(len(raw)) * 100.0))
+        print(' MD5:            %s' % hashlib.md5(raw[overlayOffset:]).hexdigest())
+        print(' SHA-256:        %s' % hashlib.sha256(raw[overlayOffset:]).hexdigest())
+        print(' MAGIC:          %s' % GenerateMAGIC(raw[overlayOffset:][:4]))
+        resultCalculateByteStatistics = CalculateByteStatistics(data=raw[overlayOffset:])
+        print(' Entropy:        %.2f' % resultCalculateByteStatistics[1])
+        print(' Unique bytes:   %d' % resultCalculateByteStatistics[2])
         print(' PE file without overlay:')
         print('  MD5:          %s' % hashlib.md5(raw[:overlayOffset]).hexdigest())
         print('  SHA-256:      %s' % hashlib.sha256(raw[:overlayOffset]).hexdigest())
