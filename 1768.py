@@ -4,8 +4,8 @@ from __future__ import print_function
 
 __description__ = 'Analyze Cobalt Strike beacons'
 __author__ = 'Didier Stevens'
-__version__ = '0.0.13'
-__date__ = '2022/04/16'
+__version__ = '0.0.14'
+__date__ = '2022/05/20'
 
 """
 Source code put in the public domain by Didier Stevens, no Copyright
@@ -52,6 +52,7 @@ History:
   2022/02/22: 0.0.12 added private key to 1768.json (provided by alexzorila); fix json output; pyzipper support
   2022/04/15: 0.0.13 added option -H and IdentifyShellcode
   2022/04/16: continue IdentifyShellcode
+  2022/05/20: 0.0.14 skipping 0x20 bytes
 
 Todo:
   JSON output -> instructions
@@ -2177,6 +2178,48 @@ def FinalTests(data, oOutput):
     if b'\x8B\x46\x04\x8B\x08\x8B\x50\x04\x83\xC0\x08\x89\x55\x08\x89\x45\x0C\x85\xC9\x75\x04\x85\xD2\x74\x23\x3B\xCA\x73\xE6\x8B\x06\x8D\x3C\x08\x33\xD2' in data:
         oOutput.Line('Sleep mask 32-bit 4.2 deobfuscation routine found.')
 
+#a# this is a kludge, to fix later when I have time
+def ProcessBinaryFileSub(sectiondata, data, oOutput, options):
+    payloadType, payloadSize, intxorkey, id2, sectiondata = Unpack('<IIII', sectiondata)
+    oOutput.Line('payloadType: 0x%08x' % payloadType)
+    oOutput.Line('payloadSize: 0x%08x' % payloadSize)
+    oOutput.Line('intxorkey: 0x%08x' % intxorkey)
+    oOutput.Line('id2: 0x%08x' % id2)
+    payload = Xor(sectiondata[:payloadSize], struct.pack('<I', intxorkey))
+    if payloadSize > len(sectiondata):
+        oOutput.Line('Error: payload size too large: 0x%08x' % payloadSize)
+        oOutput.Line('.data section size: 0x%08x' % len(sectiondata))
+        return False
+    error, payloadsectiondata = GetDataSection(payload)
+    if error != None:
+        positionMZ = payload.find(b'MZ')
+        if positionMZ != 0:
+            if START_CONFIG_I in sectiondata or START_CONFIG_DOT in sectiondata:
+                AnalyzeEmbeddedPEFile(data, oOutput, options)
+            elif TestShellcodeHeuristic(payload):
+                if IdentifyShellcode(payload) == '':
+                    oOutput.Line('Probably found shellcode:')
+                else:
+                    oOutput.Line('Found shellcode:')
+                AnalyzeShellcode(payload, oOutput)
+                oOutput.Line(cDump(payload).HexAsciiDump(rle=False))
+            elif positionMZ >= 0 and positionMZ < 0x20:
+                oOutput.Line('MZ header found position %d' % positionMZ)
+                AnalyzeEmbeddedPEFile(payload[positionMZ:], oOutput, options)
+            elif len(payload) == 0:
+                return False
+            else:
+                oOutput.Line('MZ header not found, truncated dump:')
+                oOutput.Line(cDump(payload[:0x1000]).HexAsciiDump(rle=True))
+                return False
+        else:
+            oOutput.Line('Error: embedded PE file error: %s' % error)
+            return False
+    else:
+        AnalyzeEmbeddedPEFile(payloadsectiondata, oOutput, options)
+    FinalTests(payload, oOutput)
+    return True
+
 def ProcessBinaryFile(filename, content, cutexpression, flag, oOutput, oLogfile, options):
     if content == None:
         try:
@@ -2225,45 +2268,12 @@ def ProcessBinaryFile(filename, content, cutexpression, flag, oOutput, oLogfile,
                     oOutput.Line('Error: PE file error: %s' % error)
                 elif len(sectiondata) < 16:
                     oOutput.Line('Error: section .data too small: %d' % len(sectiondata))
+                elif ProcessBinaryFileSub(sectiondata, data, oOutput, options):
+                    pass
                 else:
-                    payloadType, payloadSize, intxorkey, id2, sectiondata = Unpack('<IIII', sectiondata)
-                    xorkey = struct.pack('<I', intxorkey)
-                    oOutput.Line('payloadType: 0x%08x' % payloadType)
-                    oOutput.Line('payloadSize: 0x%08x' % payloadSize)
-                    oOutput.Line('intxorkey: 0x%08x' % intxorkey)
-                    oOutput.Line('id2: 0x%08x' % id2)
-                    if payloadSize > len(sectiondata):
-                        oOutput.Line('Error: payload size too large: 0x%08x' % payloadSize)
-                        oOutput.Line('.data section size: 0x%08x' % len(sectiondata))
-                        return
-        #            if payloadSize <= 0:
-        #                oOutput.Line('Error: payload size too small: 0x%08x' % payloadSize)
-        #                return
-                    payload = Xor(sectiondata[:payloadSize], xorkey)
-                    error, payloadsectiondata = GetDataSection(payload)
-                    if error != None:
-                        positionMZ = payload.find(b'MZ')
-                        if positionMZ != 0:
-                            if START_CONFIG_I in sectiondata or START_CONFIG_DOT in sectiondata:
-                                AnalyzeEmbeddedPEFile(data, oOutput, options)
-                            elif TestShellcodeHeuristic(payload):
-                                if IdentifyShellcode(payload) == '':
-                                    oOutput.Line('Probably found shellcode:')
-                                else:
-                                    oOutput.Line('Found shellcode:')
-                                AnalyzeShellcode(payload, oOutput)
-                                oOutput.Line(cDump(payload).HexAsciiDump(rle=False))
-                            elif positionMZ >= 0 and positionMZ < 0x20:
-                                oOutput.Line('MZ header found position %d' % positionMZ)
-                                AnalyzeEmbeddedPEFile(payload[positionMZ:], oOutput, options)
-                            else:
-                                oOutput.Line('MZ header not found, truncated dump:')
-                                oOutput.Line(cDump(payload[:0x1000]).HexAsciiDump(rle=True))
-                        else:
-                            oOutput.Line('Error: embedded PE file error: %s' % error)
-                    else:
-                        AnalyzeEmbeddedPEFile(payloadsectiondata, oOutput, options)
-                    FinalTests(payload, oOutput)
+                    bytesToSkip = 0x20
+                    oOutput.Line('Skipping %d bytes' % bytesToSkip)
+                    ProcessBinaryFileSub(sectiondata[bytesToSkip:], data, oOutput, options)
         elif TestShellcodeHeuristic(data):
             if IdentifyShellcode(data) == '':
                 oOutput.Line('Probably found shellcode:')

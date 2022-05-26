@@ -2,10 +2,10 @@
 
 __description__ = 'pdf-parser, use it to parse a PDF document'
 __author__ = 'Didier Stevens'
-__version__ = '0.7.5'
-__date__ = '2021/07/03'
+__version__ = '0.7.6'
+__date__ = '2022/05/24'
 __minimum_python_version__ = (2, 5, 1)
-__maximum_python_version__ = (3, 9, 5)
+__maximum_python_version__ = (3, 10, 4)
 
 """
 Source code put in public domain by Didier Stevens, no Copyright
@@ -70,6 +70,8 @@ History:
   2019/09/26: V0.7.3 added multiple id selection to option -o; added man page (-m); added environment variable PDFPARSER_OPTIONS; bug fixes
   2019/11/05: V0.7.4 fixed plugin path when compiled with pyinstaller, replaced eval with int
   2021/07/03: V0.7.5 bug fixes; fixed ASCII85Decode Python 3 bug thanks to R Primus
+  2021/11/23: V0.7.6 Python 3 bug fixes
+  2022/05/24: bug fixes
 
 Todo:
   - handle printf todo
@@ -498,6 +500,9 @@ class cPDFElementIndirectObject:
                 position -= 1
             if position < 0:
                 return
+            if self.content[position][1].endswith('endstream\n'):
+                self.content = self.content[0:position] + [(self.content[position][0], self.content[position][1][:-len('endstream\n')])] + [(CHAR_REGULAR, 'endstream')] + self.content[position+1:]
+                return
             if self.content[position][0] != CHAR_REGULAR:
                 return
             if self.content[position][1] == 'endstream':
@@ -561,6 +566,8 @@ class cPDFElementIndirectObject:
         streamData = self.Stream(filter, overridingfilters)
         if filter and streamData == 'No filters':
             streamData = self.Stream(False, overridingfilters)
+        if isinstance(streamData, bytes):
+            keyword = keyword.encode()
         if regex:
             return re.search(keyword, streamData, IIf(casesensitive, 0, re.I))
         elif casesensitive:
@@ -795,6 +802,7 @@ class cPDFParseDictionary:
                 else:
                     value.append(ConditionalCanonicalize(tokens[0][1], self.nocanonicalizedoutput))
             tokens = tokens[1:]
+        return None, tokens
 
     def Retrieve(self):
         return self.parsed
