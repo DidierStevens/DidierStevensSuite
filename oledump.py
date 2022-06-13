@@ -2,8 +2,8 @@
 
 __description__ = 'Analyze OLE files (Compound Binary Files)'
 __author__ = 'Didier Stevens'
-__version__ = '0.0.67'
-__date__ = '2022/05/11'
+__version__ = '0.0.68'
+__date__ = '2022/06/07'
 
 """
 
@@ -116,6 +116,7 @@ History:
   2022/04/26: 0.0.65 added message for pyzipper
   2022/05/03: 0.0.66 small refactoring
   2022/05/11: 0.0.67 added PrintUserdefinedProperties
+  2022/06/07: 0.0.68 added extra info parameters %CTIME% %MTIME% %CTIMEHEX% %MTIMEHEX%
 
 Todo:
 
@@ -135,6 +136,7 @@ import string
 import codecs
 import json
 import struct
+import datetime
 if sys.version_info[0] >= 3:
     from io import StringIO
 else:
@@ -592,6 +594,10 @@ If you need more data than the MD5 of each stream, use option -E (extra). This o
   %CLSID%: storage/stream class ID
   %CLSIDDESC%: storage/stream class ID description
   %MODULEINFO%: for module streams: size of compiled code & size of compressed code; otherwise 'N/A' (you must use option -i)
+  %CTIME%: creation time
+  %MTIME%: modification time
+  %CTIMEHEX%: creation time in hexadecimal
+  %MTIMEHEX%: modification time in hexadecimal
 
 The parameter for -E may contain other text than the variables, which will be printed. Escape characters \\n and \\t are supported.
 Example displaying the MD5 and SHA256 hash per stream, separated by a space character:
@@ -1631,7 +1637,15 @@ def ExtraInfoBYTESTATS(data):
     sumValues, entropy, countNullByte, countControlBytes, countWhitespaceBytes, countPrintableBytes, countHighBytes = CalculateByteStatistics(dPrevalence)
     return '%d,%d,%d,%d,%d' % (countNullByte, countControlBytes, countWhitespaceBytes, countPrintableBytes, countHighBytes)
 
-def GenerateExtraInfo(extra, index, indicator, moduleinfo, name, entry_clsid, stream):
+def FormatFiletime(filetime):
+    if filetime == 0:
+        return '0'
+
+    FILETIME19700101 = 116444736000000000
+    oDatetime = datetime.datetime.fromtimestamp((filetime - FILETIME19700101) / 10000000, datetime.timezone.utc)
+    return oDatetime.isoformat()
+
+def GenerateExtraInfo(extra, index, indicator, moduleinfo, name, entry_metadata, stream):
     if extra == '':
         return ''
     if extra.startswith('!'):
@@ -1647,7 +1661,7 @@ def GenerateExtraInfo(extra, index, indicator, moduleinfo, name, entry_clsid, st
     if KNOWN_CLSIDS == {}:
         clsidDesc = '<oletools missing>'
     else:
-        clsidDesc = KNOWN_CLSIDS.get(entry_clsid.upper(), '')
+        clsidDesc = KNOWN_CLSIDS.get(entry_metadata[0].upper(), '')
     dExtras = {'%INDEX%': lambda x: index,
                '%INDICATOR%': lambda x: indicator,
                '%LENGTH%': lambda x: '%d' % len(stream),
@@ -1662,9 +1676,13 @@ def GenerateExtraInfo(extra, index, indicator, moduleinfo, name, entry_clsid, st
                '%TAILASCII%': ExtraInfoTAILASCII,
                '%HISTOGRAM%': ExtraInfoHISTOGRAM,
                '%BYTESTATS%': ExtraInfoBYTESTATS,
-               '%CLSID%': lambda x: entry_clsid,
+               '%CLSID%': lambda x: entry_metadata[0],
                '%CLSIDDESC%': lambda x: clsidDesc,
                '%MODULEINFO%': lambda x: moduleinfo,
+               '%CTIME%': lambda x: FormatFiletime(entry_metadata[1]),
+               '%MTIME%': lambda x: FormatFiletime(entry_metadata[2]),
+               '%CTIMEHEX%': lambda x: '%016x' % entry_metadata[1],
+               '%MTIMEHEX%': lambda x: '%016x' % entry_metadata[2],
               }
     for variable in dExtras:
         if variable in extra:
@@ -1703,7 +1721,7 @@ def GetUnusedData(ole, fname):
 def OLEGetStreams(ole, storages, unuseddata):
     olestreams = []
     if storages:
-        olestreams.append([0, [ole.root.name], ole.root.entry_type, ole.root.clsid, '', 0])
+        olestreams.append([0, [ole.root.name], ole.root.entry_type, [ole.root.clsid, ole.root.createTime, ole.root.modifyTime], '', 0])
     for fname in ole.listdir(storages=storages):
         unusedData = b''
         if ole.get_type(fname) == 1:
@@ -1712,13 +1730,14 @@ def OLEGetStreams(ole, storages, unuseddata):
             data = ole.openstream(fname).read()
             if unuseddata:
                 unusedData = GetUnusedData(ole, fname)
-        olestreams.append([0, fname, ole.get_type(fname), ole.getclsid(fname), data + unusedData, len(unusedData)])
+        direntry = ole.direntries[ole._find(fname)]
+        olestreams.append([0, fname, ole.get_type(fname), [ole.getclsid(fname), direntry.createTime, direntry.modifyTime], data + unusedData, len(unusedData)])
     for sid in range(len(ole.direntries)):
         entry = ole.direntries[sid]
         if entry is None:
             entry = ole._load_direntry(sid)
             if entry.entry_type == 2:
-                olestreams.append([1, entry.name, entry.entry_type, '', ole._open(entry.isectStart, entry.size).read(), 0])
+                olestreams.append([1, entry.name, entry.entry_type, ['', 0, 0], ole._open(entry.isectStart, entry.size).read(), 0])
     return olestreams
 
 def SelectPart(stream, part, moduleinfodata):
@@ -1842,13 +1861,13 @@ def OLESub(ole, data, prefix, rules, options):
         object = []
         counter = 1
         if options.vbadecompress:
-            for orphan, fname, entry_type, entry_clsid, stream, sizeUnusedData in OLEGetStreams(ole, options.storages, options.unuseddata):
+            for orphan, fname, entry_type, entry_metadata, stream, sizeUnusedData in OLEGetStreams(ole, options.storages, options.unuseddata):
                 vbacode = SearchAndDecompress(stream, '')
                 if vbacode != '':
                     object.append({'id': counter, 'name': PrintableName(fname), 'content': C2SIP3(binascii.b2a_base64(vbacode.encode())).strip('\n')})
                 counter += 1
         else:
-            for orphan, fname, entry_type, entry_clsid, stream, sizeUnusedData in OLEGetStreams(ole, options.storages, options.unuseddata):
+            for orphan, fname, entry_type, entry_metadata, stream, sizeUnusedData in OLEGetStreams(ole, options.storages, options.unuseddata):
                 object.append({'id': counter, 'name': PrintableName(fname), 'content': C2SIP3(binascii.b2a_base64(stream)).strip('\n')})
                 counter += 1
         print(json.dumps({'version': 2, 'id': 'didierstevens.com', 'type': 'content', 'fields': ['id', 'name', 'content'], 'items': object}))
@@ -1867,7 +1886,7 @@ def OLESub(ole, data, prefix, rules, options):
         for oPluginOle in objectsPluginOle:
             oPluginOle.PreProcess()
 
-        for orphan, fname, entry_type, entry_clsid, stream, sizeUnusedData in OLEGetStreams(ole, options.storages, options.unuseddata):
+        for orphan, fname, entry_type, entry_metadata, stream, sizeUnusedData in OLEGetStreams(ole, options.storages, options.unuseddata):
             indicator = ' '
             macroPresent = False
             if options.info:
@@ -1916,7 +1935,7 @@ def OLESub(ole, data, prefix, rules, options):
                     line += ' %s' % hashlib.md5(streamForExtra).hexdigest()
                 if options.extra.startswith('!'):
                     line = ''
-                line += GenerateExtraInfo(options.extra, index, indicator, moduleinfo, PrintableName(fname, orphan), entry_clsid, streamForExtra)
+                line += GenerateExtraInfo(options.extra, index, indicator, moduleinfo, PrintableName(fname, orphan), entry_metadata, streamForExtra)
                 print(line)
             for cPlugin in plugins:
                 try:
@@ -2039,7 +2058,7 @@ def OLESub(ole, data, prefix, rules, options):
         else:
             selection = options.select
             part = ''
-        for orphan, fname, entry_type, entry_clsid, stream, sizeUnusedData in OLEGetStreams(ole, options.storages, options.unuseddata):
+        for orphan, fname, entry_type, entry_metadata, stream, sizeUnusedData in OLEGetStreams(ole, options.storages, options.unuseddata):
             if selection == 'a' or ('%s%d' % (prefix, counter)) == selection.upper() or prefix == 'A' and str(counter) == selection or PrintableName(fname).lower() == selection.lower():
                 StdoutWriteChunked(HeadTail(DumpFunction(DecompressFunction(DecodeFunction(decoders, options, CutData(SelectPart(stream, part, dModuleinfo.get(''.join([c + '\x00' for c in fname[-1]]), None)), options.cut)[0]))), options.headtail))
                 selectionCounter += 1
