@@ -2,8 +2,8 @@
 
 __description__ = "Program to evaluate a Python expression for each line in the provided text file(s)"
 __author__ = 'Didier Stevens'
-__version__ = '0.0.7'
-__date__ = '2020/04/19'
+__version__ = '0.0.8'
+__date__ = '2022/06/06'
 
 """
 
@@ -29,6 +29,7 @@ History:
   2019/04/20: added import binascii
   2020/03/02: 0.0.7 added option --encoding
   2020/04/19: updated man page
+  2022/06/06: 0.0.8 added option -l, fixed xrange for Python 3
 
 Todo:
 """
@@ -144,6 +145,13 @@ Example:
  Number 5
  Number 7
  Number 9
+
+Option -l is used to provide a list of lines (comma separated) and use that as input, in stead of a file.
+Example:
+ python-per-line.py -l Python,Lisp,C "line + '!'"
+ Python!
+ Lisp!
+ C!
 
 Option --grep can be used to select (grep) lines that have to be processed.
 If this option is not used, all lines will be processed.
@@ -483,9 +491,12 @@ def ProcessFile(fIn, oBeginGrep, oGrep, oEndGrep, fullread):
     end = False
     returnendline = False
 
-    if type(fIn) == list:
-        for index in xrange(fIn[0], fIn[1], fIn[2]):
+    if isinstance(fIn, list) and isinstance(fIn[0], int):
+        for index in range(fIn[0], fIn[1], fIn[2]):
             yield str(index)
+    elif isinstance(fIn, list):
+        for item in fIn:
+            yield item
     elif fullread:
         yield fIn.read()
     else:
@@ -521,7 +532,7 @@ def PythonPerLineSingle(expression, filename, oBeginGrep, oGrep, oEndGrep, oOutp
         if options.encoding != '':
             sys.stdin.reconfigure(encoding=options.encoding)
         fIn = sys.stdin
-    elif type(filename) == list:
+    elif isinstance(filename, list):
         fIn = filename
     elif os.path.splitext(filename)[1].lower() == '.gz':
         fIn = gzip.GzipFile(filename, 'rb')
@@ -617,7 +628,8 @@ https://DidierStevens.com'''
     oParser.add_option('-o', '--output', type=str, default='', help='Output to file (# supported)')
     oParser.add_option('-s', '--script', type=str, default='', help='Script with definitions to include')
     oParser.add_option('-e', '--execute', default='', help='Commands to execute')
-    oParser.add_option('-r', '--range', type=str, default='', help='Parameters to generate input with xrange')
+    oParser.add_option('-r', '--range', type=str, default='', help='Parameters to generate input with range')
+    oParser.add_option('-l', '--list', type=str, default='', help='List with lines to process (comma separated)')
     oParser.add_option('-i', '--ignore', action='store_true', default=False, help='Ignore errors when evaluating the expression')
     oParser.add_option('--grep', type=str, default='', help='Grep expression')
     oParser.add_option('--grepoptions', type=str, default='', help='Grep options (ivF)')
@@ -633,6 +645,8 @@ https://DidierStevens.com'''
 
     if options.range != '':
         PythonPerLine(args[0], [ParseRange(options.range)], options)
+    elif options.list != '':
+        PythonPerLine(args[0], [options.list.split(',')], options)
     elif len(args) == 1:
         PythonPerLine(args[0], [''], options)
     else:
