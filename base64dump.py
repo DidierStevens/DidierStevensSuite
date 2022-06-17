@@ -2,8 +2,8 @@
 
 __description__ = 'Extract base64 strings from file'
 __author__ = 'Didier Stevens'
-__version__ = '0.0.21'
-__date__ = '2022/05/11'
+__version__ = '0.0.22'
+__date__ = '2022/06/17'
 
 """
 
@@ -39,6 +39,7 @@ History:
   2021/12/15: 0.0.19 Python 3 bugfix
   2021/12/28: 0.0.20 added zxcn decoding
   2022/05/11: 0.0.21 added nbl decoding
+  2022/06/17: 0.0.22 added statistics for encodings
 
 Todo:
   add base64 url
@@ -162,22 +163,37 @@ It's also possible to try all encodings: all
 Example:
 base64dump.py -e all -n 80 sample.vir
 
-Enc  Size    Encoded          Decoded          MD5 decoded
----  ----    -------          -------          -----------
-b64:     176 bebafeca41414141 m.+}t.p^5p^5p^5p e3bed37dcd137c9bb5da103d3c45be49
-hex:     176 bebafeca41414141 +..-AAAAAAAAAAAA 56464bd2b2c42bbf2edda87d54ab91f5
-b64:     192 28000e1358000e13 .-4-fwt-4-fwm.+} 81c587874b1c3ddc5479a283179d29f7
-hex:     192 28000e1358000e13 (...X...+..-AAAA 3a604ca304d1dbbcc1734a430cf6dc82
-b64:    2144 6064a1000000008b dN+k]4+M4+O.pM8. 46d100d435a37f89f3ab0ac6db3e9cac
-hex:    2144 6064a1000000008b .d......@.%....f a2ae7b55955262ada177862ceb683977
-b64:    3640 48895C2408488974 p-=S-+++<=....tp f0384b0c74e9402ab3f1aacc4a270ed3
-hex:    3640 48895C2408488974 H.\$.H.t$.H.|$.U 3320b9e508862886d2c3f556cacc67ec
-b64:  213024 5555555566666666 tPytPyd..d....Z. c7ff5e1a5a01698f99f67fd3f0d20d6d
-hex:  213024 5555555566666666 UUUUffffMZ...... 7a618dc1ef3f52693b8ec22dbe0300ec
-b64:  246816 5555555566666666 tPytPyd..d....Z. bdec177dc760d4296aefbbdc4c47bcf2
-hex:  246816 5555555566666666 UUUUffffMZ...... a69fa966087f38241544523d437f9a8b
+Enc  Size    Chars Encoded          Decoded          md5 decoded
+---  ----    ----- -------          -------          -----------
+b64:     176    11 bebafeca41414141 m..}...^5.^5.^5. e3bed37dcd137c9bb5da103d3c45be49
+hex:     176    11 bebafeca41414141 ....AAAAAAAAAAAA 56464bd2b2c42bbf2edda87d54ab91f5
+a85:     178    13 <bebafeca4141414 Vj...4V.2| .;... 9385715088c31ac9a8b4fa06166ccb97
+b85:     178    13 <bebafeca4141414 ......Q..B...{.. 1b14eef572cc16916b30e32c490f2cc9
+b64:     192    13 28000e1358000e13 ..4..w..4..wm..} 81c587874b1c3ddc5479a283179d29f7
+hex:     192    13 28000e1358000e13 (...X.......AAAA 3a604ca304d1dbbcc1734a430cf6dc82
+a85:     194    15 <28000e1358000e1 T...1*..H.(`2x9. b714fd16ad0d77d5e5391d9197ad1b9f
+b85:     194    15 <28000e1358000e1 .5v..v.E..%..<." d3c57839bf4900e64ea17f035382bb52
+b64:    2144    16 6064a1000000008b .N.k]4.M4.O..M8. 46d100d435a37f89f3ab0ac6db3e9cac
+hex:    2144    16 6064a1000000008b `d......@.%....f a2ae7b55955262ada177862ceb683977
+a85:    2146    18 <6064a1000000008 T.v....q/:..I.#Y 76f1028223f9196c18ea2a0f64f304ef
+b85:    2146    18 <6064a1000000008 .Z..p........?N. a890225330f60c170e2c588fa6e82f90
+b64:    3640    16 48895C2408488974 ..=.-...<.....t. f0384b0c74e9402ab3f1aacc4a270ed3
+hex:    3640    16 48895C2408488974 H.\$.H.t$.H.|$.U 3320b9e508862886d2c3f556cacc67ec
+a85:    3642    18 <48895C240848897 T...?z.uHD.XE'X. 053a28dd24051ea7b2131a95c34b99ee
+b85:    3642    18 <48895C240848897 .H6...DW......VR 5f57fa2b2288577e7844e28d6e9548ca
+b64:  213024    22 5555555566666666 ..y..y........Z. c7ff5e1a5a01698f99f67fd3f0d20d6d
+hex:  213024    22 5555555566666666 UUUUffffMZ...... 7a618dc1ef3f52693b8ec22dbe0300ec
+a85:  213026    24 <555555556666666 T..[>...B...B... 5784f2d34e1881202f88a39dc2d64ffe
+b85:  213026    24 <555555556666666 .Q?............. d227c899ea11f605aa1b78700cbc5f71
+b64:  246816    22 5555555566666666 ..y..y........Z. bdec177dc760d4296aefbbdc4c47bcf2
+hex:  246816    22 5555555566666666 UUUUffffMZ...... a69fa966087f38241544523d437f9a8b
+a85:  246818    24 <555555556666666 T..[>...B...B... 1b925074b51c31454e68f50db73ea4a7
+b85:  246818    24 <555555556666666 .Q?............. 80d002c19cc64ff2ab61c0cde01e6ddf
 
 The list is sorted by increasing size.
+
+Column Chars contains the number of unique characters found in the encoding.
+The reason that sometimes 22 unique characters are found for the hex encoding in this example, and not 16 at most, is that this sample both uses lowercase and uppercase letters for hexadecimal.
 
 Identical decoded content can be made unique with option -u.
 
@@ -1084,8 +1100,8 @@ def BASE64Dump(filename, options):
         jsonObject = []
 
     if options.encoding == 'all' or options.yara != None:
-        formatString = '%3s  %-7s %-16s %-16s %-32s'
-        columnNames = ('Enc', 'Size', 'Encoded', 'Decoded', '%s decoded' % CalculateChosenHash(b'')[1])
+        formatString = '%3s  %-7s %-3s %-16s %-16s %-32s'
+        columnNames = ('Enc', 'Size', 'Chars', 'Encoded', 'Decoded', '%s decoded' % CalculateChosenHash(b'')[1])
         print(formatString % columnNames)
         print(formatString % tuple(['-' * len(s) for s in columnNames]))
     elif options.select == '' and not options.jsonoutput:
@@ -1171,7 +1187,7 @@ def BASE64Dump(filename, options):
                 if options.unique and decodeddata in dDecodedData:
                     continue
                 dDecodedData[decodeddata] = True
-                report.append([len(encodeddata), '%3s: %7d %-16s %-16s %s' % (encoding, len(encodeddata), encodeddata[0:16].decode('latin'), AsciiDump(decodeddata[0:16]), CalculateChosenHash(decodeddata)[0])])
+                report.append([len(encodeddata), '%3s: %7d %5d %-16s %-16s %s' % (encoding, len(encodeddata), CalculateFileMetaData(encodeddata)[5], encodeddata[0:16].decode('latin'), AsciiDump(decodeddata[0:16]), CalculateChosenHash(decodeddata)[0])])
         for key, value in sorted(report):
             print(value)
     else:
@@ -1205,7 +1221,7 @@ def BASE64Dump(filename, options):
                     jsonObject.append({'id': counter, 'name': encodeddata[0:16].decode('latin'), 'content': binascii.b2a_base64(decodeddata).strip(b'\n').decode()})
                 elif DumpFunction == None:
                     filehash, magicPrintable, magicHex, fileSize, entropy, countUniqueBytes, countNullByte, countControlBytes, countWhitespaceBytes, countPrintableBytes, countHighBytes = CalculateFileMetaData(CutData(decodeddata, options.cut)[0])
-                    print('Info:')
+                    print('Info decoded data:')
                     print(' %s: %s' % (CalculateChosenHash(b'')[1], filehash))
                     print(' %s: %d' % ('Filesize', fileSize))
                     print(' %s: %f' % ('Entropy', entropy))
@@ -1217,6 +1233,12 @@ def BASE64Dump(filename, options):
                     print(' %s: %s' % ('Whitespace bytes', countWhitespaceBytes))
                     print(' %s: %s' % ('Printable bytes', countPrintableBytes))
                     print(' %s: %s' % ('High bytes', countHighBytes))
+                    print('')
+                    print('Info encoded data:')
+                    filehash, magicPrintable, magicHex, fileSize, entropy, countUniqueBytes, countNullByte, countControlBytes, countWhitespaceBytes, countPrintableBytes, countHighBytes = CalculateFileMetaData(encodeddata)
+                    print(' %s: %d' % ('Filesize', fileSize))
+                    print(' %s: %f' % ('Entropy', entropy))
+                    print(' %s: %d' % ('Unique bytes', countUniqueBytes))
                 else:
                     StdoutWriteChunked(HeadTail(DumpFunction(DecodeFunction(decoders, options, CutData(decodeddata, options.cut)[0])), options.headtail))
             counter += 1
