@@ -2,8 +2,8 @@
 
 __description__ = 'Cut a section of bytes out of a file'
 __author__ = 'Didier Stevens'
-__version__ = '0.0.14'
-__date__ = '2022/04/11'
+__version__ = '0.0.15'
+__date__ = '2022/06/27'
 
 """
 
@@ -34,6 +34,7 @@ History:
   2020/10/21: Python 3 fix in cBinaryFile
   2020/12/08: base64dump fix
   2022/04/11: 0.0.14 added data for prefix and suffix
+  2022/06/27: 0.0.15 Python 3 fix
 
 Todo:
 """
@@ -692,7 +693,7 @@ def Interpret(expression):
             if bytes == None:
                 print('Error: argument should be a byte sequence: %s' % arguments[1][1])
                 return None
-            decoded += number * bytes
+            decoded += number * bytes.decode('latin')
         elif functionname == FUNCTIONNAME_RANDOM:
             if CheckFunction(functionname, arguments, 1):
                 return None

@@ -2,8 +2,8 @@
 
 __description__ = 'This is essentialy a wrapper for the struct module'
 __author__ = 'Didier Stevens'
-__version__ = '0.0.13'
-__date__ = '2020/02/04'
+__version__ = '0.0.14'
+__date__ = '2022/06/27'
 
 """
 Source code put in public domain by Didier Stevens, no Copyright
@@ -48,6 +48,9 @@ History:
   2020/01/25: added DSS_DEFAULT_HASH_ALGORITHMS; Python 3 fixes
   2020/01/26: 0.0.12 ParsePackExpression replaced eval with int
   2020/02/04: 0.0.13 added suffix for tlv; added support to -s for multiple selection; added j:b for bitstream
+  2020/10/21: 0.0.14 Python 3 fix in cBinaryFile
+  2022/06/15: update option find
+  2022/06/27: Python 3 fix
 
 Todo:
 """
@@ -325,13 +328,25 @@ s:signed u:unsigned l:little-endian b:big-endian m:mixed-endian
 04 8F: l -0.000000 b 358946151129582029215291849393230786808315346836706673156033999581834828933214436444158528577134449241373022018959436034143150814561128186558682352782632064229834752.000000
 04 16G: b 6218EECE-3AC3-179F-6B74-28FBEB2AD62A m {CEEE1862-C33A-9F17-6B74-28FBEB2AD62A}
 
-To search for a value inside the provided file(s), use option -F. For the moment, only integers can be searched. Start the option value with #i# followed by the decimal number to search for.
+To search for a value inside the provided file(s), use option -F. For the moment, only numbers (integers and reals) can be searched.
+To search for integers, start the option value with #i# followed by the decimal number to search for.
 Example:
 
 format-bytes.py -F #i#6083 random.bin
 File: random.bin
-0x00000009 <h 0xc317
-0x00000009 <H 0xc317
+0x00000009 <h 6083 0 0xb'c317'
+0x00000009 <H 6083 0 0xb'c317'
+
+To search for a range of integers, use option v (variation). Here is an example with v5 (variation 5). This means that numbers 6078 (6083 - 5) through 6088 (6083 + 5) will be searched for.
+Example:
+
+format-bytes.py -F #iv5#6080 random.bin
+File: random.bin
+0x00000009 <h 6080 3 0xb'c317'
+0x00000009 <H 6080 3 0xb'c317'
+
+To search for real numbers, start the option value with #r# followed by the real number to search for.
+Option v is not implemented for real numbers.
 
 
 As stated at the beginning of this manual, this tool is very versatile when it comes to handling files. This will be explained now.
@@ -782,7 +797,7 @@ def Interpret(expression):
             if bytes == None:
                 print('Error: argument should be a byte sequence: %s' % arguments[1][1])
                 return None
-            decoded += number * bytes
+            decoded += number * bytes.decode('latin')
         elif functionname == FUNCTIONNAME_RANDOM:
             if CheckFunction(functionname, arguments, 1):
                 return None
@@ -929,7 +944,7 @@ def File2Strings(filename):
     except:
         return None
     try:
-        return map(lambda line:line.rstrip('\n'), f.readlines())
+        return list(map(lambda line:line.rstrip('\n'), f.readlines()))
     except:
         return None
     finally:
@@ -1683,6 +1698,48 @@ def ParseAnnotations(annotations, dAnnotations):
         elif index != None:
             dAnnotations[index] = token.strip()
 
+def StartsWithGetRemainder(strIn, strStart):
+    if strIn.startswith(strStart):
+        return True, strIn[len(strStart):]
+    else:
+        return False, None
+    
+def ParseFind(value):
+    errorvalues = False, []
+
+    found, remainder = StartsWithGetRemainder(value, '#')
+    if not found:
+        return errorvalues
+    result = remainder.split('#', 1)
+    if len(result) != 2:
+        return errorvalues
+    options = result[0]
+    format = ''
+    variation = 0
+    number = 0
+    while len(options) > 0:
+        option = options[0]
+        options = options[1:]
+        if option == 'i':
+            format = 'i'
+            number = int(result[1])
+        elif option == 'r':
+            format = 'r'
+            number = float(result[1])
+        elif option == 'v':
+            digits = ''
+            while len(options) > 0 and options[0] >= '0' and options[0] <= '9':
+                digits += options[0]
+                options = options[1:]
+            if digits == '':
+                return errorvalues
+            variation = int(digits)
+        else:
+            return errorvalues
+    if format == '':
+            return errorvalues
+    return True, [format, number, variation]
+
 def FormatBytesSingle(filename, cutexpression, content, options):
     MergeUserLibrary()
 
@@ -1842,19 +1899,23 @@ def FormatBytesSingle(filename, cutexpression, content, options):
         if options.select.DoSelect and options.select.selectionCounter == 0:
             print('Warning: no item was selected with expression %s' % options.select.option)
     elif options.find != '':
-        if not options.find.startswith('#i#'):
+        validFindOption, parametersFindOption = ParseFind(options.find)
+        if not validFindOption:
             raise Exception('Unknown find option format: %s' % options.find)
         searches = []
-        for c in 'bBhHiIqQ':
+        formats = {'i': 'bBhHiIqQ', 'r': 'fd'}[parametersFindOption[0]]
+        number = parametersFindOption[1]
+        for c in formats:
             for e in '<>':
                 format = e + c
-                try:
-                    searches.append([format, struct.pack(format, int(options.find[3:]))])
-                except struct.error:
-                    pass
+                for variation in range(-parametersFindOption[2], parametersFindOption[2] + 1):
+                    try:
+                        searches.append([format, number, variation, struct.pack(format, number + variation)])
+                    except struct.error:
+                        pass
         for search in searches:
-            for position in FindAll(data, search[1]):
-                print('0x%08x %s 0x%s' % (position, search[0], binascii.b2a_hex(search[1])))
+            for position in FindAll(data, search[3]):
+                print('0x%08x %s %d %d 0x%s' % (position, search[0], search[1], search[2], binascii.b2a_hex(search[3])))
     elif options.count == 1:
         FormatBytesData(data, -1, options)
     else:
