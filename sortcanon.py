@@ -2,8 +2,8 @@
 
 __description__ = 'Sort with canonicalization function'
 __author__ = 'Didier Stevens'
-__version__ = '0.0.1'
-__date__ = '2022/06/19'
+__version__ = '0.0.2'
+__date__ = '2022/07/17'
 
 """
 
@@ -15,6 +15,7 @@ History:
   2015/07/07: start
   2015/07/08: added output option
   2022/06/19: update for Python 3
+  2022/07/17: 0.0.2 added email
 
 Todo:
 """
@@ -28,7 +29,8 @@ import textwrap
 dLibrary = {
             'domain': "lambda x: '.'.join(x.split('.')[::-1])",
             'length': "lambda x: len(x)",
-            'ipv4':   "lambda x: [int(n) for n in x.split('.')]"
+            'ipv4':   "lambda x: [int(n) for n in x.split('.')]",
+            'email':  "lambda x: '.'.join(x.split('@', 1)[1].split('.')[::-1]) + '@' + x.split('@', 1)[0]"
            }
 
 def PrintManual():
