@@ -2,8 +2,8 @@
 
 __description__ = 'Analyze OLE files (Compound Binary Files)'
 __author__ = 'Didier Stevens'
-__version__ = '0.0.68'
-__date__ = '2022/06/07'
+__version__ = '0.0.69'
+__date__ = '2022/07/22'
 
 """
 
@@ -117,6 +117,7 @@ History:
   2022/05/03: 0.0.66 small refactoring
   2022/05/11: 0.0.67 added PrintUserdefinedProperties
   2022/06/07: 0.0.68 added extra info parameters %CTIME% %MTIME% %CTIMEHEX% %MTIMEHEX%
+  2022/07/22: 0.0.69 minor documentation change
 
 Todo:
 
@@ -155,7 +156,7 @@ try:
     import olefile
 except ImportError:
     print('This program requires module olefile.\nhttp://www.decalage.info/python/olefileio\n')
-    print("You can use PIP to install olefile like this: pip install olefile\npip is located in Python's Scripts folder.\n")
+    print("You can use PIP to install olefile like this: pip install olefile\nWindows: pip is located in Python's Scripts folder.\n")
     exit(-1)
 
 try:
