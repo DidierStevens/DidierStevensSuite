@@ -2,8 +2,8 @@
 
 __description__ = 're extra'
 __author__ = 'Didier Stevens'
-__version__ = '0.0.6'
-__date__ = '2021/02/06'
+__version__ = '0.0.7'
+__date__ = '2022/07/19'
 
 """
 
@@ -15,6 +15,7 @@ History:
   2020/12/08: 0.0.5 added DomainTLDValidate
   2020/12/28: Python 3
   2021/02/06: 0.0.6 Fix execfile for Python 3; changed "extra" logic with groups
+  2022/07/19: 0.0.7 Python 3 fix
 
 Todo:
 """
@@ -132,7 +133,7 @@ def decode_base58(bc, length):
         n = n * 58 + digits58.index(char)
 #    print(n.to_bytes(length, 'big'))
 #    return n.to_bytes(length, 'big')
-    return ''.join([chr((n >> i*8) & 0xff) for i in reversed(range(length))])
+    return bytes([((n >> i*8) & 0xff) for i in reversed(range(length))])
 
 def BTCValidate(bc):
     bcbytes = decode_base58(bc, 25)
@@ -2542,4 +2543,3 @@ class cREExtra():
             return oMatch
         else:
             return None
-

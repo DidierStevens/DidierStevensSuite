@@ -2,8 +2,8 @@
 
 __description__ = "Program to use Python's re.findall on files"
 __author__ = 'Didier Stevens'
-__version__ = '0.0.20'
-__date__ = '2022/05/06'
+__version__ = '0.0.21'
+__date__ = '2022/07/24'
 
 """
 
@@ -52,6 +52,7 @@ History:
   2021/09/21: added sys.stdin.reconfigure
   2022/04/18: 0.0.19 Python3 fix stdin binary
   2022/05/06: 0.0.20 added input & output encoding
+  2022/07/24: 0.0.21 added UNC regex
 
 Todo:
   add hostname to header
@@ -91,6 +92,7 @@ dLibrary = {
             'btc': r'(?#extra=P:BTCValidate)\b[13][a-km-zA-HJ-NP-Z1-9]{25,34}\b',
             'onion': r'[a-zA-Z2-7]{16}\.onion',
             'domaintld': r'(?#extra=P:DomainTLDValidate)\b[a-zA-Z0-9.-]+\.[a-zA-Z-]+\b',
+            'unc': r'\\\\[a-z0-9 %._-]+\\[a-z0-9 $%._-]+(?:\\[a-z0-9 $%._\\-]+)?',
            }
 
 excludeRegexesForAll = ['str', 'str-e', 'str-u', 'str-eu', 'url-domain', 'email-domain']
