@@ -4,8 +4,8 @@ from __future__ import print_function
 
 __description__ = 'Analyze Cobalt Strike beacons'
 __author__ = 'Didier Stevens'
-__version__ = '0.0.14'
-__date__ = '2022/05/20'
+__version__ = '0.0.15'
+__date__ = '2022/08/17'
 
 """
 Source code put in the public domain by Didier Stevens, no Copyright
@@ -53,6 +53,8 @@ History:
   2022/04/15: 0.0.13 added option -H and IdentifyShellcode
   2022/04/16: continue IdentifyShellcode
   2022/05/20: 0.0.14 skipping 0x20 bytes
+  2022/07/31: 0.0.15 update class cAPIOptions
+  2022/08/17: added option --sanitycheck; refactored FinalTests
 
 Todo:
   JSON output -> instructions
@@ -114,6 +116,15 @@ Option -c (--csv) is used to output the config parameters in CSV format.
 Option -J (--jsonoutput) is used to output the config parameters in JSON format.
 
 Use option -H to display the hashes of the analyzed file.
+
+Option -S (--sanitycheck) performs a sanity check on the extracted configuration, and ignores the extracted configuration when it does not pass a sanity check.
+The sanity check checks for the presence of config values 1 and 7, and check if their values are plausible:
+1 -> known payload type
+7 -> public key starts with 308
+
+Option -V (--verbose) produces more output:
+- verbosity for config values (like the private key for leaked keys)
+- hex/ascii dump of found signatures
 
 A JSON file with name 1768.json placed in the same directory as 1768.py will be used to enhance fields with information, like the license-id field.
 
@@ -325,6 +336,9 @@ QUOTE = '"'
 
 START_CONFIG_I = b'ihihik'
 START_CONFIG_DOT = b'././.,'
+
+ERROR_NO_CONFIG = 'Error: config not found'
+ERROR_SANITY_CHECK = 'Error: config does not pass sanity check'
 
 def PrintError(*args, **kwargs):
     print(*args, file=sys.stderr, **kwargs)
@@ -1691,6 +1705,17 @@ def DetermineCSVersionFromConfig(dJSON):
     else:
         return ('4.4', maximumID)
 
+def SanityCheckExtractedConfig(dJSON):
+    if not 1 in dJSON:
+        return False
+    if not 8 in dJSON:
+        return False
+    if LookupConfigValue(1, dJSON[1]['rawvalue']) == '':
+        return False
+    if not dJSON[7]['rawvalue'].startswith('308'):
+        return False
+    return True
+
 def GetJSONData():
     filename = os.path.join(GetScriptPath(), '1768b.json')
     if os.path.isfile(filename):
@@ -1903,7 +1928,7 @@ def AnalyzeEmbeddedPEFileSub(payloadsectiondata, options):
             xorKey = b'.'
             startconfig, endconfig = StatisticalSearch(payloadsectiondata, xorKey)
         if startconfig == None:
-            result.append('Error: config not found')
+            result.append(ERROR_NO_CONFIG)
             return [result, dJSON]
         else:
             result.append('Config found (statistical): xorkey %s 0x%08x 0x%08x' % (xorKey, startconfig, endconfig))
@@ -2074,6 +2099,10 @@ def AnalyzeEmbeddedPEFileSub(payloadsectiondata, options):
                 result.append(" 'i'-encoded: %s" % ToHexadecimal(Xor(ntlBytes + parameter, b'i')))
                 result.append(" '.'-encoded: %s" % ToHexadecimal(Xor(ntlBytes + parameter, b'.')))
     result.append('Guessing Cobalt Strike version: %s (max 0x%04x)' % DetermineCSVersionFromConfig(dJSON))
+    sanityCheck = SanityCheckExtractedConfig(dJSON)
+    result.append('Sanity check Cobalt Strike config: %s' % ('OK' if sanityCheck else 'NOK'))
+    if options.sanitycheck and not sanityCheck:
+        return [[ERROR_SANITY_CHECK], {}]
     return [result, dJSON]
 
 def AnalyzeEmbeddedPEFile(payloadsectiondata, oOutput, options):
@@ -2172,11 +2201,20 @@ def TryExtractDecode(data):
 def TestShellcodeHeuristic(data):
     return b'hwini' in data[:0x1000] or b'hws2_' in data[:0x1000] or (data[0:1] == b'\xFC' and len(data) < 0x1000)
 
-def FinalTests(data, oOutput):
-    if b'\x4C\x8B\x53\x08\x45\x8B\x0A\x45\x8B\x5A\x04\x4D\x8D\x52\x08\x45\x85\xC9\x75\x05\x45\x85\xDB\x74\x33\x45\x3B\xCB\x73\xE6\x49\x8B\xF9\x4C\x8B\x03' in data:
-        oOutput.Line('Sleep mask 64-bit 4.2 deobfuscation routine found.')
-    if b'\x8B\x46\x04\x8B\x08\x8B\x50\x04\x83\xC0\x08\x89\x55\x08\x89\x45\x0C\x85\xC9\x75\x04\x85\xD2\x74\x23\x3B\xCA\x73\xE6\x8B\x06\x8D\x3C\x08\x33\xD2' in data:
-        oOutput.Line('Sleep mask 32-bit 4.2 deobfuscation routine found.')
+def FinalTests(data, options, oOutput):
+    dSignatures = {
+        # https://www.elastic.co/blog/detecting-cobalt-strike-with-memory-signatures
+        'Sleep mask 64-bit 4.2 deobfuscation routine': b'\x4C\x8B\x53\x08\x45\x8B\x0A\x45\x8B\x5A\x04\x4D\x8D\x52\x08\x45\x85\xC9\x75\x05\x45\x85\xDB\x74\x33\x45\x3B\xCB\x73\xE6\x49\x8B\xF9\x4C\x8B\x03',
+        'Sleep mask 32-bit 4.2 deobfuscation routine': b'\x8B\x46\x04\x8B\x08\x8B\x50\x04\x83\xC0\x08\x89\x55\x08\x89\x45\x0C\x85\xC9\x75\x04\x85\xD2\x74\x23\x3B\xCA\x73\xE6\x8B\x06\x8D\x3C\x08\x33\xD2',
+    }
+
+    for name, signature in dSignatures.items():
+        for position in FindAll(data, signature):
+            oOutput.Line('%s found: 0x%08x' % (name, position))
+            if options.verbose:
+                oOutput.Line(cDump(data[position-0x100:position], '  ', position-0x100).HexAsciiDump(rle=True), eol='')
+                oOutput.Line('  ... signature ...')
+                oOutput.Line(cDump(data[position+len(signature):position+len(signature)+0x100], '  ', position+len(signature)).HexAsciiDump(rle=True), eol='')
 
 #a# this is a kludge, to fix later when I have time
 def ProcessBinaryFileSub(sectiondata, data, oOutput, options):
@@ -2217,7 +2255,7 @@ def ProcessBinaryFileSub(sectiondata, data, oOutput, options):
             return False
     else:
         AnalyzeEmbeddedPEFile(payloadsectiondata, oOutput, options)
-    FinalTests(payload, oOutput)
+    FinalTests(payload, options, oOutput)
     return True
 
 def ProcessBinaryFile(filename, content, cutexpression, flag, oOutput, oLogfile, options):
@@ -2253,13 +2291,13 @@ def ProcessBinaryFile(filename, content, cutexpression, flag, oOutput, oLogfile,
             extracted, messages = GetXorChainSection(data)
             if extracted != None:
                 resultChain, dJSON = AnalyzeEmbeddedPEFileSub(extracted, options)
-                if resultChain != ['Error: config not found']:
+                if resultChain != [ERROR_NO_CONFIG]:
                     oOutput.JSON(dJSON)
                     for message in messages:
                         oOutput.Line(message)
                     for message in resultChain:
                         oOutput.Line(message)
-                    FinalTests(extracted, oOutput)
+                    FinalTests(extracted, options, oOutput)
                 else:
                     extracted = None
             if extracted == None:
@@ -2281,7 +2319,7 @@ def ProcessBinaryFile(filename, content, cutexpression, flag, oOutput, oLogfile,
                 oOutput.Line('Found shellcode:')
             AnalyzeShellcode(data, oOutput)
             oOutput.Line(cDump(data).HexAsciiDump(rle=False))
-            FinalTests(data, oOutput)
+            FinalTests(data, options, oOutput)
         else:
             dConfigs = {}
             for position in FindAll(data, START_CONFIG_I) + FindAll(data, START_CONFIG_DOT):
@@ -2289,10 +2327,11 @@ def ProcessBinaryFile(filename, content, cutexpression, flag, oOutput, oLogfile,
                 configSha256 = hashlib.sha256(''.join(result).encode()).hexdigest()
                 if not configSha256 in dConfigs:
                     dConfigs[configSha256] = True
-                    oOutput.JSON(dJSON)
-                    for line in result:
-                        oOutput.Line(line)
-            FinalTests(data, oOutput)
+                    if result != [ERROR_SANITY_CHECK]:
+                        oOutput.JSON(dJSON)
+                        for line in result:
+                            oOutput.Line(line)
+            FinalTests(data, options, oOutput)
         # ----------------------------------------------
     except:
         oLogfile.LineError('Processing file %s %s' % (filename, repr(sys.exc_info()[1])))
@@ -2413,11 +2452,11 @@ class cOutputJSON(object):
     def JSON(self, dJSON):
         self.JSONs.append(dJSON)
 
-    def Line(self, line):
+    def Line(self, line, eol='\n'):
         if self.options.jsonoutput:
             self.messages.append(line)
         else:
-            self.oOutput.Line(line)
+            self.oOutput.Line(line, eol)
 
     def Filename(self, filename, index, total):
         self.oOutput.Filename(filename, index, total)
@@ -2430,6 +2469,7 @@ class cAPIOptions(object):
         self.ignoreprocessingerrors = False
         self.raw = False
         self.verbose = False
+        self.hash = False
 
 class cAPIOutput(object):
     def __init__(self):
@@ -2484,6 +2524,7 @@ https://DidierStevens.com'''
     oParser.add_option('-m', '--man', action='store_true', default=False, help='Print manual')
     oParser.add_option('-r', '--raw', action='store_true', default=False, help='Search through the file as a binary file, do not parse as a PE file')
     oParser.add_option('-s', '--select', default='', help='Field to select')
+    oParser.add_option('-S', '--sanitycheck', action='store_true', default=False, help='Exclude configs that do not pass sanity check')
     oParser.add_option('-o', '--output', type=str, default='', help='Output to file (# supported)')
     oParser.add_option('-l', '--licenseids', default='', help='License ID(s)/Watermark(s) to generate YARA rules for')
     oParser.add_option('-c', '--csv', action='store_true', default=False, help='Output config in CSV format')
