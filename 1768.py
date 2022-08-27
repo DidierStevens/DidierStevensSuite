@@ -4,8 +4,8 @@ from __future__ import print_function
 
 __description__ = 'Analyze Cobalt Strike beacons'
 __author__ = 'Didier Stevens'
-__version__ = '0.0.15'
-__date__ = '2022/08/17'
+__version__ = '0.0.16'
+__date__ = '2022/08/20'
 
 """
 Source code put in the public domain by Didier Stevens, no Copyright
@@ -55,9 +55,10 @@ History:
   2022/05/20: 0.0.14 skipping 0x20 bytes
   2022/07/31: 0.0.15 update class cAPIOptions
   2022/08/17: added option --sanitycheck; refactored FinalTests
+  2022/08/20: 0.0.16 added output instructions to JSON output
 
 Todo:
-  JSON output -> instructions
+
 """
 
 import optparse
@@ -1379,7 +1380,7 @@ def Quote(value, separator, quote):
     else:
         return value
 
-def MakeCSVLine(row, separator, quote):
+def MakeCSVLine(row, separator=',', quote='"'):
     return separator.join([Quote(value, separator, quote) for value in row])
 
 class cLogfile():
@@ -2062,7 +2063,7 @@ def AnalyzeEmbeddedPEFileSub(payloadsectiondata, options):
         resultID = dConfigIdentifiers.get(number, '')
         dJSON[number] = {'id': resultID, 'type': resultType, 'info': info, 'rawvalue': rawvalue}
         if options.csv:
-            result.append(MakeCSVLine((resultNumber, resultID, resultType, resultLength, info), ',', '"'))
+            result.append(MakeCSVLine((resultNumber, resultID, resultType, resultLength, info)))
         else:
             resultID = ('%-' + str(max([len(value) for value in dConfigIdentifiers.values()])) + 's') % resultID
             result.append('%s %s %s %s%s' % (resultNumber, resultID, resultType, resultLength, PrefixIfNeeded(info)))
@@ -2071,19 +2072,25 @@ def AnalyzeEmbeddedPEFileSub(payloadsectiondata, options):
             for index, instruction in enumerate(instructions):
                 if isinstance(instruction, str):
                     if options.csv:
-                        result.append(MakeCSVLine(('', '', '', '', instruction, ',', '"')))
+                        result.append(MakeCSVLine(('', '', '', '', instruction)))
                     else:
                         result.append('  %s' % instruction)
                 else:
-                    buildOpcodes = '[' + ','.join([':'.join(opcode) for opcode in opcodes[index]]) + ']'
-                    dJSON[number] = {'id': resultID, 'type': resultType, 'info': buildOpcodes, 'rawvalue': binascii.b2a_hex(parameter).decode()}
-                    if options.csv:
-                        result.append(MakeCSVLine(('', '', '', '', '%s:%s' % (instruction[0], buildOpcodes), ',', '"')))
+                    buildOpcodes = ','.join([':'.join(opcode) for opcode in opcodes[index]])
+                    if number in dJSON:
+                        if dJSON[number]['info'] == '':
+                            dJSON[number]['info'] = buildOpcodes
+                        else:
+                            dJSON[number]['info'] += ';' + buildOpcodes
                     else:
-                        result.append('  %s: %s' % (instruction[0], buildOpcodes))
+                        dJSON[number] = {'id': resultID, 'type': resultType, 'info': buildOpcodes, 'rawvalue': binascii.b2a_hex(parameter).decode()}
+                    if options.csv:
+                        result.append(MakeCSVLine(('', '', '', '', '%s:[%s]' % (instruction[0], buildOpcodes))))
+                    else:
+                        result.append('  %s: [%s]' % (instruction[0], buildOpcodes))
                     for buildStep in instruction[1:]:
                         if options.csv:
-                            result.append(MakeCSVLine(('', '', '', '', buildStep, ',', '"')))
+                            result.append(MakeCSVLine(('', '', '', '', buildStep)))
                         else:
                             result.append('   %s' % buildStep)
 #            for string in ExtractStringsASCII(parameter):
@@ -2470,6 +2477,7 @@ class cAPIOptions(object):
         self.raw = False
         self.verbose = False
         self.hash = False
+        self.sanitycheck = False
 
 class cAPIOutput(object):
     def __init__(self):
