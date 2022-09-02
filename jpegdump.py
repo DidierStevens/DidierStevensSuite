@@ -2,8 +2,8 @@
 
 __description__ = 'JPEG file analysis tool'
 __author__ = 'Didier Stevens'
-__version__ = '0.0.9'
-__date__ = '2022/02/08'
+__version__ = '0.0.10'
+__date__ = '2022/08/31'
 
 """
 Source code put in public domain by Didier Stevens, no Copyright
@@ -28,6 +28,7 @@ History:
   2020/10/21: 0.0.8 Python 3 fix in cBinaryFile
   2022/02/04: 0.0.9 added AddExtraInfo
   2022/02/08: updated man
+  2022/08/31: 0.0.10 added select #d
 
 Todo:
 """
@@ -131,6 +132,12 @@ File: j.jpg
 
 To display more than one hash, use a comma to separate the desired hashes.
 
+If an hash appears more than once, then it will be followed by the index if the segment between paranthese, like this:
+
+15 p=0x0000fe10 d=0: m=ffc4 DHT   l=  418 e=7.009735 a=14.149398 md5=fc293d732e9e8ce63b9033a754454494(4)
+
+This means that the hash of the data of segment 15, equal to fc293d732e9e8ce63b9033a754454494, is the same as the hash of the data of segment 4.
+
 Segments can be selected to inspect their data. This can be done with option -s and the index number.
 Example:
 
@@ -170,6 +177,9 @@ jpegdump.py -s 6i j.jpg
       00010045: B1 82 10 1E 42 1B 9F BD  50 E4 1C B7 2B 5F 40 D7  ....B...P...+_@.
       00010055: 2C 4B 7A F1 C7 6A 85 6D  DA D1 91 F0 09 FE EB 8E  ,Kz..j.m........
       00010065: A2 AE 32 26 50 08 ED 05  CD C2 8D DB 55 9B 90 2A  ..2&P.......U..*
+
+If there is data between segments (difference value d= is not 0), then you can select this data by appending d to the index number.
+For example, if the difference value of segment 10 is not 0, you can select that data that precedes segment 10, by selecting 10d: jpegdump.py -s 10d j.jpg
 
 By default, and hexadecimal/ascii dump of the data dis produced (option -a).
 Use option -x for an hexadecimal dump.
@@ -1115,17 +1125,38 @@ def ConvertNone(value, replacement=''):
     else:
         return value
 
-def AddExtraInfo(extra, line, data):
+def AddExtraInfo(extra, line, data, counter, dHashes):
     extrainfo = []
     if extra == '':
         return ''
     for item in extra.split(','):
         if item == 'md5':
-            extrainfo.append('md5=%s' % hashlib.md5(data).hexdigest())
+            hash = hashlib.md5(data).hexdigest()
+            temp = 'md5=%s' % hash
+            if hash in dHashes:
+                temp += '(%s)' % ','.join([str(number) for number in dHashes[hash]])
+                dHashes[hash].append(counter)
+            else:
+                dHashes[hash] = [counter]
+            extrainfo.append(temp)
         elif item == 'sha1':
-            extrainfo.append('sha1=%s' % hashlib.sha1(data).hexdigest())
+            hash = hashlib.sha1(data).hexdigest()
+            temp = 'sha1=%s' % hash
+            if hash in dHashes:
+                temp += '(%s)' % ','.join([str(number) for number in dHashes[hash]])
+                dHashes[hash].append(counter)
+            else:
+                dHashes[hash] = [counter]
+            extrainfo.append(temp)
         elif item == 'sha256':
-            extrainfo.append('sha256=%s' % hashlib.sha256(data).hexdigest())
+            hash = hashlib.sha256(data).hexdigest()
+            temp = 'sha256=%s' % hash
+            if hash in dHashes:
+                temp += '(%s)' % ','.join([str(number) for number in dHashes[hash]])
+                dHashes[hash].append(counter)
+            else:
+                dHashes[hash] = [counter]
+            extrainfo.append(temp)
         else:
             raise Exception('Unknown extra options: %s' % extra)
     return ' ' + ' '.join(extrainfo)
@@ -1151,6 +1182,7 @@ def ProcessJPEGFileSub(data, options, startposition=0):
     noPrevious = True
     positionSOI = None
     positionEOI = None
+    dHashes = {}
     while True:
         found = data.find(C2BIP3('\xFF'), position)
         if found == -1 or positionEOI != None and options.trailing:
@@ -1200,6 +1232,19 @@ def ProcessJPEGFileSub(data, options, startposition=0):
                 oOutput.PrintC('%3d p=0x%08x %s: m=%02x%02x %s' % (counter, found, GetDelta(found, endOfPrevious, noPrevious), struct.unpack('Bx', marker[0:2])[0], markerType, markerName))
                 if options.findsoi and options.compliant and markerType == 0xD9:
                     return oOutput, positionSOI, found
+                if options.select == '%dd' % counter:
+                    selectionCounterTotal += 1
+                    cutBegin = endOfPrevious
+                    cutEnd = found
+                    if options.dump:
+                        IfWIN32SetBinary(sys.stdout)
+                        StdoutWriteChunked(data[cutBegin:cutEnd])
+                    elif options.hexdump:
+                        oOutput.Print(cDump(data[cutBegin:cutEnd], '', cutBegin).HexDump()[:-1])
+                    elif options.asciidumprle:
+                        oOutput.Print(cDump(data[cutBegin:cutEnd], '', cutBegin).HexAsciiDump(True)[:-1])
+                    else:
+                        oOutput.Print(cDump(data[cutBegin:cutEnd], '', cutBegin).HexAsciiDump()[:-1])
                 position = found + 2
                 endOfPrevious = position
                 noPrevious = False
@@ -1208,7 +1253,7 @@ def ProcessJPEGFileSub(data, options, startposition=0):
                 size = struct.unpack('>xxH', marker)[0]
                 stats = CalculateByteStatistics(data=data[found+4:found+2+size])
                 line = '%3d p=0x%08x %s: m=%02x%02x %-5s l=%5d e=%f a=%f' % (counter, found, GetDelta(found, endOfPrevious, noPrevious), struct.unpack('Bx', marker[0:2])[0], markerType, markerName, size, stats[1], ConvertNone(stats[10], 0.0))
-                line += AddExtraInfo(options.extra, line, data[found+4:found+2+size])
+                line += AddExtraInfo(options.extra, line, data[found+4:found+2+size], counter, dHashes)
                 # http://vip.sugovica.hu/Sardi/kepnezo/JPEG%20File%20Layout%20and%20Format.htm
                 if markerType == 0xDB:
                     line += ' remark: %d/65 = %f' % (size - 2, (size - 2.0) / 65.0)
@@ -1219,17 +1264,23 @@ def ProcessJPEGFileSub(data, options, startposition=0):
                     info = struct.unpack('>B', data[found+4:found+2+size][:1])
                     line += ' remark: c=%d' % info
                 oOutput.PrintC(line)
-                if options.select == str(counter):
+                if options.select == str(counter) or options.select == '%dd' % counter:
                     selectionCounterTotal += 1
+                    if options.select.endswith('d'):
+                        cutBegin = endOfPrevious
+                        cutEnd = found
+                    else:
+                        cutBegin = found+4
+                        cutEnd = found+2+size
                     if options.dump:
                         IfWIN32SetBinary(sys.stdout)
-                        StdoutWriteChunked(data[found+4:found+2+size])
+                        StdoutWriteChunked(data[cutBegin:cutEnd])
                     elif options.hexdump:
-                        oOutput.Print(cDump(data[found+4:found+2+size], '', found + 4).HexDump()[:-1])
+                        oOutput.Print(cDump(data[cutBegin:cutEnd], '', cutBegin).HexDump()[:-1])
                     elif options.asciidumprle:
-                        oOutput.Print(cDump(data[found+4:found+2+size], '', found + 4).HexAsciiDump(True)[:-1])
+                        oOutput.Print(cDump(data[cutBegin:cutEnd], '', cutBegin).HexAsciiDump(True)[:-1])
                     else:
-                        oOutput.Print(cDump(data[found+4:found+2+size], '', found + 4).HexAsciiDump()[:-1])
+                        oOutput.Print(cDump(data[cutBegin:cutEnd], '', cutBegin).HexAsciiDump()[:-1])
                 position = found + 2 + size
                 endOfPrevious = position
                 noPrevious = False
