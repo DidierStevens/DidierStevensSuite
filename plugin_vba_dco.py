@@ -2,7 +2,7 @@
 
 __description__ = 'VBA declare/createobject plugin for oledump.py'
 __author__ = 'Didier Stevens'
-__version__ = '0.0.4'
+__version__ = '0.0.5'
 __date__ = '2022/07/21'
 
 """
@@ -16,11 +16,18 @@ History:
   2015/11/04: added keywords
   2019/11/25: 0.0.3 update for GetObject, Callbyname and Shell
   2022/07/21: 0.0.4 added generalization
+  2022/09/04: 0.0.5 improved generalization and added option -p
 
 Todo:
 """
 
 import re
+
+#https://github.com/decalage2/oletools/blob/f2cbbbaea5e8a809360ab338bd54ae281e4fd54f/oletools/olevba.py
+RESERVED_KEYWORDS = ['AutoExec', 'AutoOpen', 'DocumentOpen', 'AutoExit', 'AutoClose', 'Document_Close', 'DocumentBeforeClose', 'DocumentChange', 'AutoNew', 'Document_New', 'NewDocument', 'Document_Open', 'Document_BeforeClose', 'Auto_Open', 'Workbook_Open', 'Workbook_Activate', 'Auto_Ope', 'Auto_Close', 'Workbook_Close', 'Workbook_BeforeClose', 'Worksheet_Calculate']
+
+def IsReservedKeyword(keyword):
+    return keyword.lower() in [reserved.lower() for reserved in RESERVED_KEYWORDS]
 
 def ContainsString(stringsToFind, containingString):
     containingString = containingString.lower()
@@ -34,9 +41,14 @@ def ExtractDeclareFunctionSub(line):
         oMatch = re.search(r'(function|sub)\s+(\S+)\s+', line, re.I)
         if oMatch == None:
             return None
-        return oMatch.group(2)
+        keyword = oMatch.group(2)
+        oMatch = re.search(r'\s+alias\s+"([^"]+)"', line, re.I)
+        if oMatch == None:
+            return keyword, None
+        else:
+            return keyword, oMatch.group(1)
     else:
-        return None
+        return None, None
 
 def ExtractSetObjectVariable(line):
     if ContainsString(['createobject', 'getobject'], line):
@@ -47,12 +59,22 @@ def ExtractSetObjectVariable(line):
     else:
         return None
 
+def SpecialTrim(input):
+    unwanteds = ['(', ',']
+    for unwanted in unwanteds:
+        position = input.find(unwanted)
+        if position == -1:
+            continue
+        input = input[:position]
+    return input
+
 def ExtractDimVariable(line):
     if ContainsString(['dim'], line):
         oMatch = re.search(r'\s*Dim\s+(\S+)', line, re.I)
         if oMatch == None:
             return None
-        return oMatch.group(1)
+        variableName = SpecialTrim(oMatch.group(1))
+        return variableName
     else:
         return None
 
@@ -84,7 +106,8 @@ def ExtractVariableEqual(line):
         oMatch = re.search(r'\s*(\S+)\s*=', line, re.I)
         if oMatch == None:
             return None
-        return oMatch.group(1)
+        variableName = SpecialTrim(oMatch.group(1))
+        return variableName
     else:
         return None
 
@@ -128,7 +151,7 @@ def ReplaceOutsideStrings(line, search, replace):
     newline = ''
     for index, value in enumerate(result):
         if index % 2 == 0:
-            value = value.replace(search, replace)
+            value = re.sub(r'\b%s\b' % search, replace, value)
         newline += value
     return newline
 
@@ -146,19 +169,30 @@ class cVBADCO(cPluginParent):
         oParser = optparse.OptionParser()
         oParser.add_option('-g', '--generalize', action='store_true', default=False, help='Generalize identifiers')
         oParser.add_option('-a', '--all', action='store_true', default=False, help='Output all lines when option -g is used')
+        oParser.add_option('-p', '--predefine', default='', help='Predefine identifiers')
         (options, args) = oParser.parse_args(self.options.split(' '))
 
         self.ran = True
+
+        dAliases = {}
+        dPredefinitions = {}
+        for predefinition in options.predefine.split(','):
+            if predefinition == '':
+                continue
+            key, value = predefinition.split(':', 1)
+            dPredefinitions[int(key)] = value
 
         oREDCO = re.compile(r'\b(declare|createobject|getobject|callbyname|shell)\b', re.I)
         result = [line.strip() for line in self.stream.split('\n') if re.search(oREDCO, line) != None]
         keywords = []
         for line in result:
-            keyword = ExtractDeclareFunctionSub(line)
-            if keyword != None and not keyword in keywords:
+            keyword, alias = ExtractDeclareFunctionSub(line)
+            if keyword != None and not keyword in keywords and not IsReservedKeyword(keyword):
                 keywords.append(keyword)
+            if alias != None:
+                dAliases[keyword] = alias
             keyword = ExtractSetObjectVariable(line)
-            if keyword != None and not keyword in keywords:
+            if keyword != None and not keyword in keywords and not IsReservedKeyword(keyword):
                 keywords.append(keyword)
         keywordLines = [line.strip() for line in self.stream.split('\n') if ContainsString(keywords, line)]
         if keywordLines != []:
@@ -170,11 +204,16 @@ class cVBADCO(cPluginParent):
 
         dKeywords = {}
         for index, keyword in enumerate(keywords):
-            dKeywords[keyword] = 'Identifier%04d' % (index + 1)
+            index = index + 1
+            if keyword in dAliases:
+                dKeywords[keyword] = dAliases[keyword]
+            else:
+                dKeywords[keyword] = dPredefinitions.get(index, 'Identifier%04d' % (index))
         for line in self.stream.split('\n'):
             for variable in ExtractMoreVariables(line):
-                if not variable in dKeywords:
-                    dKeywords[variable] = 'Identifier%04d' % (len(dKeywords) + 1)
+                if not variable in dKeywords and not IsReservedKeyword(variable):
+                    index = len(dKeywords) + 1
+                    dKeywords[variable] = dPredefinitions.get(index, 'Identifier%04d' % (index))
                 
         if options.all:
             toprocess = self.stream.split('\n')
