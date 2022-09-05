@@ -2,8 +2,8 @@
 
 __description__ = 'Hex to bin'
 __author__ = 'Didier Stevens'
-__version__ = '0.0.5'
-__date__ = '2020/04/16'
+__version__ = '0.0.6'
+__date__ = '2022/09/04'
 
 """
 
@@ -22,6 +22,7 @@ History:
   2020/02/05: 0.0.4 added --bitstream
   2020/04/15: 0.0.5 added option --hexonly
   2020/04/16: added option --upperonly and --loweronly
+  2022/09/04: 0.0.6 added error handling for non-hexadecimal digits
 
 Todo:
   Get rid of Python2/Python3 conversion kludge
@@ -277,7 +278,23 @@ def Hex2Bin(filename, options):
     if options.bitstream:
         data = DecodeBitstream(y)
     else:
-        data = binascii.unhexlify(y)
+        try:
+            data = binascii.unhexlify(y)
+        except binascii.Error:
+            print('The following non-hexadecimal digits were found:')
+            dHexadecimal = {}
+            for i in range(0x30, 0x3A):
+                dHexadecimal[i] = True
+            for i in range(0x41, 0x47):
+                dHexadecimal[i] = True
+            for i in range(0x61, 0x67):
+                dHexadecimal[i] = True
+            for value in y:
+                if value in dHexadecimal:
+                    continue
+                dHexadecimal[value] = False
+                print('%s 0x%02x' % (repr(chr(value)), value))
+            raise
     StdoutWriteChunked(data)
 
 def Main():

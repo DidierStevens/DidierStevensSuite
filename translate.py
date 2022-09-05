@@ -2,8 +2,8 @@
 
 __description__ = 'Translate bytes according to a Python expression'
 __author__ = 'Didier Stevens'
-__version__ = '2.5.11'
-__date__ = '2020/12/20'
+__version__ = '2.5.12'
+__date__ = '2022/09/04'
 
 """
 
@@ -45,6 +45,7 @@ History:
   2020/11/04: 2.5.10 Python 3 fix
   2020/12/08: 2.5.11 Bug fix
   2020/12/20: added shl and shr
+  2022/09/04: 2.5.12 updated Xor
 
 Todo:
 """
@@ -221,7 +222,23 @@ def ZlibD(data):
 def ZlibRawD(data):
     return zlib.decompress(data, -8)
 
-def Xor(data, key):
+def Xor(data, key, hexadecimal=False, rotation=0):
+    if hexadecimal:
+        key = binascii.a2b_hex(key.replace(' ', '').encode())
+    if rotation != 0:
+        if rotation in ['c', 'cr']:
+            if rotation == 'c':
+                position = data.find(key)
+            else:
+                position = data.rfind(key)
+            if position == -1:
+                raise Exception('Xor rotation argument calculate: key not found in data')
+            rotation = position % len(key)
+            if rotation != 0:
+                rotation = len(key) - rotation
+        elif rotation >= len(key):
+            raise Exception('Xor rotation argument is too large (compared to key size)')
+        key = key[rotation:] + key[:rotation]
     if sys.version_info[0] > 2:
         return bytes([byte ^ key[index % len(key)] for index, byte in enumerate(data)])
     else:
