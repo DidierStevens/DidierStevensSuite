@@ -2,8 +2,8 @@
 
 __description__ = 'Program to search VirusTotal reports with search terms (MD5, SHA1, SHA256, URL) found in the argument file'
 __author__ = 'Didier Stevens'
-__version__ = '0.1.6'
-__date__ = '2020/10/18'
+__version__ = '0.1.7'
+__date__ = '2022/08/25'
 
 """
 
@@ -40,6 +40,7 @@ History:
   2016/01/17: 0.1.4 added support for stdin
   2019/01/07: 0.1.5 added option -e, -t
   2020/10/18: 0.1.6 Python 3 update (Python 2 no longer supported)
+  2022/08/25: 0.1.7 added option --limitrequests
 
 Todo:
 """
@@ -284,7 +285,7 @@ def GetReports(searchTerms, reports, withComment, extra, type, dNotFound=None):
         oLogger.PrintAndLog(formats, parameters)
         return statuscode
 
-    for iIter in range(len(searchTerms)):
+    for iIter in range(len(oResults)):
         if oResults[iIter]['response_code'] == 1:
             reports[searchTermComments[iIter][0]] = oResults[iIter]
         elif oResults[iIter]['response_code'] == 0 and dNotFound != None and not searchTermComments[iIter][0] in dNotFound:
@@ -470,21 +471,31 @@ def VirusTotalSearch(filename, options):
             searchTermsToRequest = []
             for searchTermIter in searchTerms:
                 searchTerm, comment = ParseSearchterm(searchTermIter, options.comment)
-                if searchTerm in searchtermsNotfound:
+                if searchTerm in dNotFound:
                     LogResult(searchTerm, comment, {'response_code': 0, 'verbose_msg': 'The requested resource is not among the finished, queued or pending scans'}, False, options.comment, options.extra)
                 else:
                     searchTermsToRequest.append(searchTermIter)
 
+    requestCounter = 0
     while searchTermsToRequest != []:
         statuscode = GetReports(searchTermsToRequest[0:4], reports, options.comment, options.extra, options.type, dNotFound)
+        requestCounter += 1
         if statuscode == 204 and not options.waitquota:
             break
         if statuscode == 204:
+            if options.notfound:
+                Strings2File(options.notfound, dNotFound.keys())
+            if not options.noupdate:
+                SerializeDictionary(GetPickleFile(options.globaldb), reports)
+            requestCounter = 0
             time.sleep(60 * 60)
         else:
             searchTermsToRequest = searchTermsToRequest[4:]
             if searchTermsToRequest != []:
+                if options.limitrequests != 0 and requestCounter > options.limitrequests:
+                    break
                 time.sleep(options.delay)
+
     if options.notfound:
         Strings2File(options.notfound, dNotFound.keys())
     if not options.noupdate:
@@ -511,6 +522,7 @@ def Main():
     oParser.add_option('-s', '--separator', default=';', help='Separator character (default ;)')
     oParser.add_option('-e', '--extra', default='', help='Extra fields to include (use , as separator)')
     oParser.add_option('-t', '--type', default='file', help='Type of resource to query (file, url)')
+    oParser.add_option('-l', '--limitrequests', type=int, default=0, help='Limit number of requests')
     (options, args) = oParser.parse_args()
 
     if not (len(args) <= 1 or (options.refresh or options.refreshrandom) and len(args) == 0):
