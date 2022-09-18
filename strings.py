@@ -4,8 +4,8 @@ from __future__ import print_function
 
 __description__ = 'Strings command in Python'
 __author__ = 'Didier Stevens'
-__version__ = '0.0.7'
-__date__ = '2021/01/05'
+__version__ = '0.0.8'
+__date__ = '2022/07/30'
 
 """
 Source code put in the public domain by Didier Stevens, no Copyright
@@ -32,6 +32,7 @@ History:
   2020/10/21: Python 3 fix in cBinaryFile
   2020/12/10: 0.0.6 added option -a
   2021/01/05: 0.0.7 added : to option -P
+  2022/07/30: 0.0.8 added option -N and goodware fix
 
 Todo:
 """
@@ -107,6 +108,8 @@ For example, to define the counter as a little-endian 32-bit unsigned integer, u
 In case the preceding number needs a calculation to match the length of the found string, let the format value of option -P be followed by a colon (:) and an integer (positive or negative) to calculate the length.
 For example strings in compiled Lua 5.2 code are preceded by a 32-bit little-endian integer that is equal to the length of the string (including the 0x00 terminator). Since strings.py does not take NUL characters (0x00) into account, the length needs to be adapted with a calculation: -1.
 Like this: '-P "<I:-1"'.
+
+Option -N selects C strings: strings that end with a NUL byte (0x00) for ASCII and 2 NUL bytes for UNICODE.
 
 Use option -f to prefix each string with the name of the file it was found it.
 
@@ -1413,9 +1416,10 @@ def ExtractStringsASCII(data, options):
     else:
         regex = REGEX_STANDARD + '{%d,}'
 
-    if options.pascal == '':
-        return re.findall(C2BIP3(regex % options.bytes), data)
-    else:
+    if options.null:
+        regex += '\x00'
+
+    if options.pascal != '':
         structFormat, correction = ParsePascalOption(options.pascal)
         structFormatLength = struct.calcsize(structFormat)
         foundStrings = []
@@ -1426,6 +1430,10 @@ def ExtractStringsASCII(data, options):
                 if struct.unpack(structFormat, data[oMatch.start(0) - structFormatLength:oMatch.start(0)])[0] + correction == len(foundString):
                     foundStrings.append(foundString)
         return foundStrings
+    elif options.null:
+        return [str[:-1] for str in re.findall(C2BIP3(regex % options.bytes), data)]
+    else:
+        return re.findall(C2BIP3(regex % options.bytes), data)
 
 def ExtractStringsUNICODE(data, options):
     if options.regex != '':
@@ -1435,6 +1443,9 @@ def ExtractStringsUNICODE(data, options):
     else:
         regex = '((' + REGEX_STANDARD + '\x00){%d,})'
 
+
+    if options.null:
+        regex += '\x00'
 
     if options.pascal == '':
         return [foundunicodestring.replace(C2BIP3('\x00'), C2BIP3('')) for foundunicodestring, dummy in re.findall(C2BIP3(regex % options.bytes), data)]
@@ -1510,7 +1521,10 @@ def LoadGoodwareStrings():
         return None
     collection = pickle.loads(fDB.read())
     fDB.close()
-    return collection
+    dGoodware = {}
+    for key, value in collection.items():
+        dGoodware[key.encode()] = value
+    return dGoodware
 
 def ProcessBinaryFile(filename, content, cutexpression, goodware, oLogfile, options):
     if content == None:
@@ -1640,6 +1654,7 @@ https://DidierStevens.com'''
     oParser.add_option('-f', '--filename', action='store_true', default=False, help='Include filename (as prefix)')
     oParser.add_option('-T', '--trim', type=int, default=0, help='Trim strings to given maximum length')
     oParser.add_option('-P', '--pascal', default='', help='Counter format for pascal strings')
+    oParser.add_option('-N', '--null', action='store_true', default=False, help='Strings must be NULL terminated')
     oParser.add_option('-a', '--stats', action='store_true', default=False, help='Produce statistics')
     oParser.add_option('--password', default='infected', help='The ZIP password to be used (default infected)')
     oParser.add_option('--noextraction', action='store_true', default=False, help='Do not extract from archive file')
