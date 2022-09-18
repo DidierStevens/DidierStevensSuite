@@ -4,8 +4,8 @@ from __future__ import print_function
 
 __description__ = 'Template binary file argument'
 __author__ = 'Didier Stevens'
-__version__ = '0.0.6'
-__date__ = '2021/11/11'
+__version__ = '0.0.7'
+__date__ = '2022/06/27'
 
 """
 Source code put in the public domain by Didier Stevens, no Copyright
@@ -48,6 +48,7 @@ History:
   2021/01/17: 0.0.4 fix cOutput binary bug
   2021/05/23: 0.0.5 changed binary output logic
   2021/11/11: 0.0.6 added dReplacements to cOutput
+  2022/06/27: 0.0.7 Python 3 fix
 
 Todo:
   Document flag arguments in man page
@@ -566,7 +567,7 @@ def Interpret(expression):
             if bytes == None:
                 print('Error: argument should be a byte sequence: %s' % arguments[1][1])
                 return None
-            decoded += number * bytes
+            decoded += number * bytes.decode('latin')
         elif functionname == FUNCTIONNAME_RANDOM:
             if CheckFunction(functionname, arguments, 1):
                 return None
