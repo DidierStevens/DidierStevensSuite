@@ -4,8 +4,8 @@ from __future__ import print_function
 
 __description__ = "Template for text file processing"
 __author__ = 'Didier Stevens'
-__version__ = '0.0.6'
-__date__ = '2022/05/18'
+__version__ = '0.0.7'
+__date__ = '2022/09/18'
 
 """
 
@@ -32,6 +32,7 @@ History:
   2021/09/19: 0.0.5 updated encoding option
   2022/05/11: added option --withfilename
   2022/05/18: 0.0.6 changed --withfilename to separator	
+  2022/09/18: 0.0.7 added option --trim
 
 Todo:
 """
@@ -91,6 +92,8 @@ When combining --begingrep and --endgrep, make sure that --endgrep does not matc
 
 Options --search and --replace can be used to replace every occurence of option value --search in each line by option value --replace (can be an empty string).
 --searchoptions are available too.
+
+Option --trim can be used to trim each line with a Python slice: begin:end.
 
 Option --withfilename prefixes each printed line with the filename containing that line.
 
@@ -503,6 +506,13 @@ class cGrep():
 def SearchAndReplace(line, search, replace, searchoptions):
     return line.replace(search, replace)
 
+def FinalProcessing(line, options):
+    if options.search != '':
+        line = SearchAndReplace(line, options.search, options.replace, options.searchoptions)
+    if options.trim != '':
+        line = line[options.trim]
+    return line
+
 def ProcessFileWithoutContext(fIn, oBeginGrep, oGrep, oEndGrep, options, fullread):
     if fIn[0] == None:
         return
@@ -534,8 +544,7 @@ def ProcessFileWithoutContext(fIn, oBeginGrep, oGrep, oEndGrep, options, fullrea
                 continue
             if end and returnendline:
                 returnendline = False
-            if options.search != '':
-                line = SearchAndReplace(line, options.search, options.replace, options.searchoptions)
+            line = FinalProcessing(line, options)
             yield line
 
 def ProcessFileWithContext(fIn, oBeginGrep, oGrep, oEndGrep, context, options, fullread):
@@ -588,8 +597,7 @@ def ProcessFileWithContext(fIn, oBeginGrep, oGrep, oEndGrep, context, options, f
                         break
             if end and returnendline:
                 returnendline = False
-            if options.search != '':
-                line = SearchAndReplace(line, options.search, options.replace, options.searchoptions)
+            line = FinalProcessing(line, options)
             yield line
         for line in lineNumbers:
             for lineKey, lineValue in queue:
@@ -751,6 +759,18 @@ def ProcessTextFiles(filenames, oLogfile, options):
     else:
         context = ParseContext(options.context)
 
+    if options.trim != '':
+        begin, end = options.trim.split(':', 2)
+        if begin == '':
+            begin = None
+        else:
+            begin = int(begin)
+        if end == '':
+            end = None
+        else:
+            end = int(end)
+        options.trim = slice(begin, end)
+    
     for index, filename in enumerate(filenames):
         oOutput.Filename(filename, index, len(filenames))
         ProcessTextFile(filename, oBeginGrep, oGrep, oEndGrep, context, oOutput, oLogfile, options)
@@ -781,6 +801,7 @@ https://DidierStevens.com'''
     oParser.add_option('--search', type=str, default='', help='Search term (search and replace)')
     oParser.add_option('--replace', type=str, default='', help='Replace term (search and replace)')
     oParser.add_option('--searchoptions', type=str, default='', help='Search options (search and replace)')
+    oParser.add_option('--trim', type=str, default='', help='Trim line with a Python slice (begin:end)')
     oParser.add_option('--withfilename', type=str, default='', help='Include filename with output with given separator')
     oParser.add_option('--literalfilenames', action='store_true', default=False, help='Do not interpret filenames')
     oParser.add_option('--recursedir', action='store_true', default=False, help='Recurse directories (wildcards and here files (@...) allowed)')
