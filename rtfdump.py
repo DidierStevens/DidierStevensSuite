@@ -2,8 +2,8 @@
 
 __description__ = 'Analyze RTF files'
 __author__ = 'Didier Stevens'
-__version__ = '0.0.10'
-__date__ = '2020/12/23'
+__version__ = '0.0.11'
+__date__ = '2022/09/27'
 
 """
 
@@ -43,6 +43,8 @@ History:
   2020/12/07: Bug fixes, special characters, removed option -n; added options -v -T; cutdata update
   2020/12/08: added option -I
   2020/12/23: added option -O
+  2022/08/06: 0.0.11 added option -F
+  2022/09/27: added --jsonoutput for -F and -O
 
 Todo:
 """
@@ -88,6 +90,8 @@ Like this: set DSS_DEFAULT_HASH_ALGORITHMS=SHA256
 With option -T (--headtail), output can be truncated to the first 10 lines and last 10 lines of output.
 
 With option -j, oledump will output the content of the ole file as a JSON object that can be piped into other tools that support this JSON format.
+
+For the use of option -F, read this blog post:
 
 '''
     for line in manual.split('\n'):
@@ -620,9 +624,9 @@ def ParseCutTerm(argument):
     else:
         if argument.startswith("[u'"):
             # convert ascii to unicode 16 byte sequence
-            searchtext = oMatch.group(1).decode('unicode_escape').encode('utf16')[2:]
+            searchtext = oMatch.group(1).encode('utf16')[2:]
         else:
-            searchtext = oMatch.group(1)
+            searchtext = oMatch.group(1).encode()
         return CUTTERM_FIND, (searchtext, int(Replace(oMatch.group(2), {None: '1'})), ParseInteger(Replace(oMatch.group(3), {None: '0'}))), argument[len(oMatch.group(0)):]
 
 def ParseCutArgument(argument):
@@ -747,7 +751,7 @@ def HexBinCount(hexstream):
     return hexcount, bincount
 
 class cAnalysis():
-    def __init__(self, index, leader, level, beginPosition, endPosition, countChildren, countUnexpectedCharacters, controlWord, content, hexstring, longestContiguousHexstring, oleInfo):
+    def __init__(self, index, leader, level, beginPosition, endPosition, countChildren, countUnexpectedCharacters, controlWord, content, hexstring, longestContiguousHexstring, oleInfo, oleScan):
         self.index = index
         self.leader = leader
         self.level = level
@@ -760,12 +764,43 @@ class cAnalysis():
         self.hexstring = hexstring
         self.longestContiguousHexstring = longestContiguousHexstring
         self.oleInfo = oleInfo
+        self.oleScan = oleScan
 
 def GenerateMAGIC(data):
     if sys.version_info[0] > 2:
         return binascii.b2a_hex(data).decode() + ' ' + ''.join([IFF(c >= 32 and c < 127, chr(c), '.') for c in data])
     else:
         return binascii.b2a_hex(data) + ' ' + ''.join([IFF(ord(c) >= 32 and c < 127, c, '.') for c in data])
+
+def Scan(hexstring, rules, options):
+    result = []
+    cutExpression = options.findcutexpression
+    saveHexshift = options.hexshift
+
+    options.hexshift = False
+    decoded = HexDecode(hexstring, options)
+    if options.yara == None:
+        found = CutData(decoded, cutExpression)
+        if len(found[0]) > 0:
+            result.append([found[0], ''])
+    else:
+        matches = [yararesult.rule for yararesult in rules.match(data=decoded)]
+        if len(matches) > 0:
+            result.append([decoded, ','.join(matches)])
+
+    options.hexshift = True
+    decoded = HexDecode(hexstring, options)
+    if options.yara == None:
+        found = CutData(decoded, cutExpression)
+        if len(found[0]) > 0:
+            result.append([found[0], ''])
+    else:
+        matches = [yararesult.rule for yararesult in rules.match(data=decoded)]
+        if len(matches) > 0:
+            result.append([decoded, ','.join(matches)])
+
+    options.hexshift = saveHexshift
+    return result
 
 def RTFSub(oBytesIO, prefix, rules, options):
     returnCode = 0
@@ -819,21 +854,8 @@ def RTFSub(oBytesIO, prefix, rules, options):
             leader = 'Remainder      '
         else:
             leader = '%sLevel %2d                      ' % (' ' * (oIteminfo.level - 1), oIteminfo.level)
-        dAnalysis[counter] = cAnalysis(counter, leader, oIteminfo.level, oIteminfo.beginPosition, oIteminfo.endPosition + IFF(oIteminfo.level == 0, 1, 0), oIteminfo.countChildren, countUnexpectedCharacters, controlWord, content, hexstring, longestContiguousHexstring, ExtractOleInfo(HexDecode(hexstring, options)))
+        dAnalysis[counter] = cAnalysis(counter, leader, oIteminfo.level, oIteminfo.beginPosition, oIteminfo.endPosition + IFF(oIteminfo.level == 0, 1, 0), oIteminfo.countChildren, countUnexpectedCharacters, controlWord, content, hexstring, longestContiguousHexstring, ExtractOleInfo(HexDecode(hexstring, options)), Scan(hexstring, rules, options))
         counter += 1
-
-    if options.jsonoutput:
-        object = []
-        for counter in range(1, len(dAnalysis) + 1):
-            data = HexDecodeIfRequested(dAnalysis[counter], options)
-            if options.extract and len(data) > 0:
-                try:
-                    data = ExtractPackage(data)
-                except:
-                    data = b''
-            object.append({'id': counter, 'name': str(counter), 'content': binascii.b2a_base64(data).decode().strip('\n')})
-        print(json.dumps({'version': 2, 'id': 'didierstevens.com', 'type': 'content', 'fields': ['id', 'name', 'content'], 'items': object}))
-        return
 
     if options.objects:
         dObjects = {}
@@ -846,7 +868,12 @@ def RTFSub(oBytesIO, prefix, rules, options):
                     dObjects[counter] = analysis
                     counter += 1
 
-        if options.select == '':
+        if options.jsonoutput:
+            object = []
+            for key, value in dObjects.items():
+                object.append({'id': key, 'name': str(key), 'content': binascii.b2a_base64(value.oleInfo[5]).decode().strip('\n')})
+            print(json.dumps({'version': 2, 'id': 'didierstevens.com', 'type': 'content', 'fields': ['id', 'name', 'content'], 'items': object}))
+        elif options.select == '':
             for key in sorted(dObjects.keys()):
                 oleInfo = dObjects[key].oleInfo
                 print('%d: Name: %s' % (key, oleInfo[0]))
@@ -879,6 +906,70 @@ def RTFSub(oBytesIO, prefix, rules, options):
                 return
             for key in sorted(dObjects.keys()):
                 StdoutWriteChunked(HeadTail(DumpFunction(CutData(dObjects[key].oleInfo[5], options.cut)[0]), options.headtail))
+    elif options.find:
+        dObjects = {}
+        dHashes = {}
+        counter = 1
+        for analysis in dAnalysis.values():
+            for object, rule in analysis.oleScan:
+                objectHash = CalculateChosenHash(object)[0]
+                if not objectHash in dHashes:
+                    dHashes[objectHash] = counter
+                    dObjects[counter] = [object, rule]
+                    counter += 1
+
+        if options.jsonoutput:
+            object = []
+            for key, value in dObjects.items():
+                object.append({'id': key, 'name': str(key), 'content': binascii.b2a_base64(value[0]).decode().strip('\n')})
+            print(json.dumps({'version': 2, 'id': 'didierstevens.com', 'type': 'content', 'fields': ['id', 'name', 'content'], 'items': object}))
+        elif options.select == '':
+            for key in sorted(dObjects.keys()):
+                oleScan, rule = dObjects[key]
+                print('%d:' % key)
+                if rule != '':
+                    print('   Rule:  %s' % rule)
+                print('   Magic: %s' % GenerateMAGIC(oleScan[:4]))
+                print('   Size:  %d' % len(oleScan))
+                hashDigest, hashType = CalculateChosenHash(oleScan)
+                print('   %s:   %s' % (hashType, hashDigest))
+        else:
+            if options.dump:
+                DumpFunction = lambda x:x
+                IfWIN32SetBinary(sys.stdout)
+            elif options.hexdump:
+                DumpFunction = HexDump
+            elif options.info:
+                DumpFunction = Info
+            elif options.asciidumprle:
+                DumpFunction = lambda x: HexAsciiDump(x, True)
+            else:
+                DumpFunction = HexAsciiDump
+            if options.extract:
+                ExtractFunction = ExtractPackage
+            else:
+                ExtractFunction = lambda x:x
+
+            keys = list(dObjects.keys())
+            for key in keys:
+                if options.select != 'a' and options.select != str(key):
+                    del dObjects[key]
+            if len(dObjects) == 0:
+                print('Warning: no item was selected with expression %s' % options.select)
+                return
+            for key in sorted(dObjects.keys()):
+                StdoutWriteChunked(HeadTail(DumpFunction(CutData(dObjects[key][0], options.cut)[0]), options.headtail))
+    elif options.jsonoutput:
+        object = []
+        for counter in range(1, len(dAnalysis) + 1):
+            data = HexDecodeIfRequested(dAnalysis[counter], options)
+            if options.extract and len(data) > 0:
+                try:
+                    data = ExtractPackage(data)
+                except:
+                    data = b''
+            object.append({'id': counter, 'name': str(counter), 'content': binascii.b2a_base64(data).decode().strip('\n')})
+        print(json.dumps({'version': 2, 'id': 'didierstevens.com', 'type': 'content', 'fields': ['id', 'name', 'content'], 'items': object}))
     else:
         if options.select == '':
             for counter in range(1, len(dAnalysis) + 1):
@@ -1034,6 +1125,8 @@ def Main():
     oParser.add_option('-i', '--info', action='store_true', default=False, help='print extra info for selected item')
     oParser.add_option('-E', '--extract', action='store_true', default=False, help='extract package')
     oParser.add_option('-f', '--filter', type=str, default='', help='filter')
+    oParser.add_option('-F', '--find', action='store_true', default=False, help='Find embedded content')
+    oParser.add_option('--findcutexpression', type=str, default='[d0cf11e0]:', help='Cut expression for Find option (default "[d0cf11e0]:")')
     oParser.add_option('-I', '--ignore', type=str, default='', help='control words to ignore')
     oParser.add_option('--recursionlimit', type=int, default=2000, help='set recursionlimit for Python (default 2000)')
     oParser.add_option('-j', '--jsonoutput', action='store_true', default=False, help='produce json output')
