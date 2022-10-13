@@ -2,8 +2,8 @@
 
 __description__ = 'Extract base64 strings from file'
 __author__ = 'Didier Stevens'
-__version__ = '0.0.23'
-__date__ = '2022/07/17'
+__version__ = '0.0.24'
+__date__ = '2022/10/13'
 
 """
 
@@ -42,6 +42,7 @@ History:
   2022/06/17: 0.0.22 added statistics for encodings
   2022/07/15: 0.0.23 added option --jsoninput & --postprocess
   2022/07/17: continue
+  2022/10/13: 0.0.24 update CalculateByteStatistics
 
 Todo:
   add base64 url
@@ -503,14 +504,57 @@ def Magic(data):
             magicHex += '%02x' % P23Ord(data[iter])
     return magicPrintable, magicHex
 
-def CalculateByteStatistics(dPrevalence):
+def CalculateByteStatistics(dPrevalence=None, data=None):
+    longestString = 0
+    longestBASE64String = 0
+    longestHEXString = 0
+    base64digits = b'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789+/'
+    hexdigits = b'abcdefABCDEF0123456789'
+    averageConsecutiveByteDifference = None
+    if dPrevalence == None:
+        dPrevalence = {iter: 0 for iter in range(0x100)}
+        sumDifferences = 0.0
+        previous = None
+        if len(data) > 1:
+            lengthString = 0
+            lengthBASE64String = 0
+            lengthHEXString = 0
+            for byte in data:
+                dPrevalence[byte] += 1
+                if previous != None:
+                    sumDifferences += abs(byte - previous)
+                    if byte >= 0x20 and byte < 0x7F:
+                        lengthString += 1
+                    else:
+                        longestString = max(longestString, lengthString)
+                        lengthString = 0
+                    if byte in base64digits:
+                        lengthBASE64String += 1
+                    else:
+                        longestBASE64String = max(longestBASE64String, lengthBASE64String)
+                        lengthBASE64String = 0
+                    if byte in hexdigits:
+                        lengthHEXString += 1
+                    else:
+                        longestHEXString = max(longestHEXString, lengthHEXString)
+                        lengthHEXString = 0
+                else:
+                    if byte >= 0x20 and byte < 0x7F:
+                        lengthString = 1
+                    if byte in hexdigits:
+                        lengthHEXString = 1
+                previous = byte
+            averageConsecutiveByteDifference = sumDifferences /float(len(data)-1)
+            longestString = max(longestString, lengthString)
+            longestBASE64String = max(longestBASE64String, lengthBASE64String)
+            longestHEXString = max(longestHEXString, lengthHEXString)
     sumValues = sum(dPrevalence.values())
     countNullByte = dPrevalence[0]
     countControlBytes = 0
     countWhitespaceBytes = 0
     countUniqueBytes = 0
     for iter in range(1, 0x21):
-        if P23Chr(iter) in string.whitespace:
+        if chr(iter) in string.whitespace:
             countWhitespaceBytes += dPrevalence[iter]
         else:
             countControlBytes += dPrevalence[iter]
@@ -521,24 +565,32 @@ def CalculateByteStatistics(dPrevalence):
     countHighBytes = 0
     for iter in range(0x80, 0x100):
         countHighBytes += dPrevalence[iter]
+    countHexadecimalBytes = 0
+    countBASE64Bytes = 0
+    for iter in range(0x30, 0x3A):
+        countHexadecimalBytes += dPrevalence[iter]
+        countBASE64Bytes += dPrevalence[iter]
+    for iter in range(0x41, 0x47):
+        countHexadecimalBytes += dPrevalence[iter]
+    for iter in range(0x61, 0x67):
+        countHexadecimalBytes += dPrevalence[iter]
+    for iter in range(0x41, 0x5B):
+        countBASE64Bytes += dPrevalence[iter]
+    for iter in range(0x61, 0x7B):
+        countBASE64Bytes += dPrevalence[iter]
+    countBASE64Bytes += dPrevalence[ord('+')] + dPrevalence[ord('/')] + dPrevalence[ord('=')]
     entropy = 0.0
     for iter in range(0x100):
         if dPrevalence[iter] > 0:
             prevalence = float(dPrevalence[iter]) / float(sumValues)
             entropy += - prevalence * math.log(prevalence, 2)
             countUniqueBytes += 1
-    return sumValues, entropy, countUniqueBytes, countNullByte, countControlBytes, countWhitespaceBytes, countPrintableBytes, countHighBytes
+    return sumValues, entropy, countUniqueBytes, countNullByte, countControlBytes, countWhitespaceBytes, countPrintableBytes, countHighBytes, countHexadecimalBytes, countBASE64Bytes, averageConsecutiveByteDifference, longestString, longestHEXString, longestBASE64String
 
 def CalculateFileMetaData(data):
-    dPrevalence = {}
-    for iter in range(256):
-        dPrevalence[iter] = 0
-    for char in data:
-        dPrevalence[P23Ord(char)] += 1
-
-    fileSize, entropy, countUniqueBytes, countNullByte, countControlBytes, countWhitespaceBytes, countPrintableBytes, countHighBytes = CalculateByteStatistics(dPrevalence)
+    fileSize, entropy, countUniqueBytes, countNullByte, countControlBytes, countWhitespaceBytes, countPrintableBytes, countHighBytes, countHexadecimalBytes, countBASE64Bytes, averageConsecutiveByteDifference, longestString, longestHEXString, longestBASE64String = CalculateByteStatistics(data=data)
     magicPrintable, magicHex = Magic(data[0:4])
-    return CalculateChosenHash(data)[0], magicPrintable, magicHex, fileSize, entropy, countUniqueBytes, countNullByte, countControlBytes, countWhitespaceBytes, countPrintableBytes, countHighBytes
+    return CalculateChosenHash(data)[0], magicPrintable, magicHex, fileSize, entropy, countUniqueBytes, countNullByte, countControlBytes, countWhitespaceBytes, countPrintableBytes, countHighBytes, countHexadecimalBytes, countBASE64Bytes, averageConsecutiveByteDifference, longestString, longestHEXString, longestBASE64String
 
 CUTTERM_NOTHING = 0
 CUTTERM_POSITION = 1
@@ -1404,7 +1456,7 @@ def BASE64Dump(filename, options):
                 if options.jsonoutput:
                     jsonObject.append({'id': counter, 'name': encodeddata[0:16].decode('latin'), 'content': binascii.b2a_base64(decodeddata).strip(b'\n').decode()})
                 elif DumpFunction == None:
-                    filehash, magicPrintable, magicHex, fileSize, entropy, countUniqueBytes, countNullByte, countControlBytes, countWhitespaceBytes, countPrintableBytes, countHighBytes = CalculateFileMetaData(CutData(decodeddata, options.cut)[0])
+                    filehash, magicPrintable, magicHex, fileSize, entropy, countUniqueBytes, countNullByte, countControlBytes, countWhitespaceBytes, countPrintableBytes, countHighBytes, countHexadecimalBytes, countBASE64Bytes, averageConsecutiveByteDifference, longestString, longestHEXString, longestBASE64String = CalculateFileMetaData(CutData(decodeddata, options.cut)[0])
                     print('Info decoded data:')
                     print(' %s: %s' % (CalculateChosenHash(b'')[1], filehash))
                     print(' %s: %d' % ('Filesize', fileSize))
@@ -1417,9 +1469,15 @@ def BASE64Dump(filename, options):
                     print(' %s: %s' % ('Whitespace bytes', countWhitespaceBytes))
                     print(' %s: %s' % ('Printable bytes', countPrintableBytes))
                     print(' %s: %s' % ('High bytes', countHighBytes))
+                    print(' %s: %s' % ('Hexadecimal bytes', countHexadecimalBytes))
+                    print(' %s: %s' % ('BASE64 bytes', countBASE64Bytes))
+                    print(' %s: %f' % ('ACBD', averageConsecutiveByteDifference))
+                    print(' %s: %s' % ('Longest printable byte sequence', longestString))
+                    print(' %s: %s' % ('Longest hexadecimal byte sequence', longestHEXString))
+                    print(' %s: %s' % ('Longest BASE64 byte sequence', longestBASE64String))
                     print('')
                     print('Info encoded data:')
-                    filehash, magicPrintable, magicHex, fileSize, entropy, countUniqueBytes, countNullByte, countControlBytes, countWhitespaceBytes, countPrintableBytes, countHighBytes = CalculateFileMetaData(encodeddata)
+                    filehash, magicPrintable, magicHex, fileSize, entropy, countUniqueBytes, countNullByte, countControlBytes, countWhitespaceBytes, countPrintableBytes, countHighBytes, countHexadecimalBytes, countBASE64Bytes, averageConsecutiveByteDifference, longestString, longestHEXString, longestBASE64String = CalculateFileMetaData(encodeddata)
                     print(' %s: %d' % ('Filesize', fileSize))
                     print(' %s: %f' % ('Entropy', entropy))
                     print(' %s: %d' % ('Unique bytes', countUniqueBytes))
