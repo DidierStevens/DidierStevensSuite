@@ -2,8 +2,8 @@
 
 __description__ = 'Analyze RTF files'
 __author__ = 'Didier Stevens'
-__version__ = '0.0.11'
-__date__ = '2022/09/27'
+__version__ = '0.0.12'
+__date__ = '2022/10/22'
 
 """
 
@@ -45,6 +45,7 @@ History:
   2020/12/23: added option -O
   2022/08/06: 0.0.11 added option -F
   2022/09/27: added --jsonoutput for -F and -O
+  2022/10/22: 0.0.12 added CreateZipFileObject
 
 Todo:
 """
@@ -52,7 +53,6 @@ Todo:
 import optparse
 import sys
 import os
-import zipfile
 import binascii
 import textwrap
 import re
@@ -61,6 +61,10 @@ import hashlib
 import json
 import zlib
 import struct
+try:
+    import pyzipper as zipfile
+except ImportError:
+    import zipfile
 if sys.version_info[0] >= 3:
     from io import StringIO
 else:
@@ -1075,6 +1079,11 @@ def YARACompile(ruledata):
                 dFilepaths[filename] = filename
         return yara.compile(filepaths=dFilepaths, externals={'streamname': '', 'VBA': False}), ','.join(dFilepaths.values())
 
+def CreateZipFileObject(arg1, arg2):
+    if 'AESZipFile' in dir(zipfile):
+        return zipfile.AESZipFile(arg1, arg2)
+    else:
+        return zipfile.ZipFile(arg1, arg2)
 
 def RTFDump(filename, options):
     returnCode = 0
@@ -1095,7 +1104,7 @@ def RTFDump(filename, options):
         else:
             oBytesIO = BytesIO(sys.stdin.read())
     elif filename.lower().endswith('.zip'):
-        oZipfile = zipfile.ZipFile(filename, 'r')
+        oZipfile = CreateZipFileObject(filename, 'r')
         oZipContent = oZipfile.open(oZipfile.infolist()[0], 'r', C2BIP3(MALWARE_PASSWORD))
         oBytesIO = BytesIO(oZipContent.read())
         oZipContent.close()

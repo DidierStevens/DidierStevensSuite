@@ -2,8 +2,8 @@
 
 __description__ = 'Calculate byte statistics'
 __author__ = 'Didier Stevens'
-__version__ = '0.0.8'
-__date__ = '2020/12/21'
+__version__ = '0.0.9'
+__date__ = '2022/10/17'
 
 """
 Source code put in public domain by Didier Stevens, no Copyright
@@ -25,6 +25,7 @@ History:
   2017/09/13: 0.0.7 added average consecutive byte difference, refactoring (cCalculateByteStatistics)
   2017/11/01: added option -g
   2020/12/21: 0.0.8 Python 3
+  2022/10/17: 0.0.9 added statistics for longest strings
 
 Todo:
 """
@@ -83,6 +84,9 @@ Printable bytes:         94  36.72%
 High bytes:             128  50.00%
 Hexadecimal bytes:       22   8.59%
 BASE64 bytes:            65  25.39%
+Longest string:          95  37.11%
+Longest hex:             10   3.91%
+Longest base64:          26  10.16%
 
 First byte-stats.py will display a histogram of byte values found in the file(s). The first column is the byte value in hex (Byte), the second column is its ASCII value, third column tells us how many times the byte value appears (Count) and the last column is the percentage (Pct).
 This histogram is sorted by Count (ascending). To change the order use option -d (descending), to sort by byte value use option -k (key).
@@ -101,6 +105,9 @@ Finally, the following statistics for the files(s) are displayed:
 * Number and percentage of High bytes (0x80 through 0xFF).
 * Number and percentage of Hexadecimal bytes (0123456789abcdefABCDEF).
 * Number and percentage of BASE64 bytes (ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/=).
+* Length and percentage of the longest Printable ASCII string
+* Length and percentage of the longest Hexadecimal ASCII string (including uneven lengths)
+* Length and percentage of the longest Base64 ASCII string (without conting = padding)
 
 byte-stats.py will also split the file in equally sized parts (called buckets) and perform the same calculations for these buckets. The default size of a bucket is 10KB (10240 bytes), but can be chosen with option -b (bucket). If the file is smaller than the bucket size, no bucket calculations are performed. If the file size is not an exact multiple of the bucket size, then no calculations are done for the last bucket (because it is incomplete).
 
@@ -136,6 +143,9 @@ Printable bytes:      27278  36.49%      3680  35.94%      3812  37.23%
 High bytes:           37557  50.24%      5096  49.77%      5211  50.89%
 Hexadecimal bytes:     6531   8.74%       862   8.42%       933   9.11%
 BASE64 bytes:         18935  25.33%      2518  24.59%      2646  25.84%
+Longest string:          10   0.01%         6   0.06%        10   0.10%
+Longest hex:              5   0.01%         3   0.03%         5   0.05%
+Longest base64:           7   0.01%         6   0.06%         7   0.07%
 
 Besides the file size (74752), the size of the bucket (10240) and the number of buckets (7) is displayed.
 And next to the entropy and byte counters for the complete file, the entropy and byte counters are calculated for each bucket. The minimum values for the bucket entropy and byte counters are displayed (Minimum buckets), and also the maximum values (Maximum buckets).
@@ -173,6 +183,9 @@ Printable bytes:     303975  34.64%      2476  24.18%      5219  50.97%
 High bytes:          441124  50.27%      3728  36.41%      6772  66.13%
 Hexadecimal bytes:    63064   7.19%       166   1.62%       987   9.64%
 BASE64 bytes:        209139  23.83%      1555  15.19%      3587  35.03%
+Longest string:          45   0.01%         4   0.04%        45   0.44%
+Longest hex:              6   0.00%         1   0.01%         6   0.06%
+Longest base64:          32   0.00%         3   0.03%        32   0.31%
 
 The entropy for the file is 7.815519 (encrypted or compressed), but there is one part of the file (bucket) with an entropy of (5.156678). This part is not encrypted or compressed.
 To locate this part, option -l (list) can be used to list the entropy values for each bucket:
@@ -236,6 +249,9 @@ Printable bytes:     303975  34.64%      2476  24.18%      5219  50.97%
 High bytes:          441124  50.27%      3728  36.41%      6772  66.13%
 Hexadecimal bytes:    63064   7.19%       166   1.62%       987   9.64%
 BASE64 bytes:        209139  23.83%      1555  15.19%      3587  35.03%
+Longest string:          45   0.01%         4   0.04%        45   0.44%
+Longest hex:              6   0.00%         1   0.01%         6   0.06%
+Longest base64:          32   0.00%         3   0.03%        32   0.31%
 
 Position    Length Diff Bytes
 0x00013984:    246  128 0x8000800080008000800080008000800080008000...
@@ -282,6 +298,9 @@ Printable bytes:       1504  36.72%
 High bytes:            2048  50.00%
 Hexadecimal bytes:      352   8.59%
 BASE64 bytes:          1040  25.39%
+Longest string:          95   2.32%
+Longest hex:             10   0.24%
+Longest base64:          26   0.63%
 
 Position    Length Diff Bytes
 0x00000000:   4096    1 0x000102030405060708090a0b0c0d0e0f10111213...
@@ -385,17 +404,48 @@ def P23Ord(value):
 
 class cCalculateByteStatistics():
 
-    def __init__(self):
+    def __init__(self, data=None):
         self.dPrevalence = {iter: 0 for iter in range(0x100)}
         self.previous = None
         self.sumDifference = 0
         self.count = 0
+        self.hexLength = 0
+        self.hexLengthMax = 0
+        self.base64Length = 0
+        self.base64LengthMax = 0
+        self.printableStringLength = 0
+        self.printableStringLengthMax = 0
+        if data != None:
+            for byte in data:
+                self.Process(byte)
 
     def Process(self, byte):
         self.dPrevalence[byte] += 1
         if self.previous != None:
             self.sumDifference += abs(byte - self.previous)
             self.count += 1
+
+        if byte >= 0x30 and byte <= 0x39 or byte >= 0x41 and byte <= 0x46 or byte >= 0x61 and byte <= 0x66:
+            self.hexLength += 1
+        else:
+            if self.hexLength > 0:
+                self.hexLengthMax = max(self.hexLength, self.hexLengthMax)
+                self.hexLength = 0
+
+        if byte >= 0x30 and byte <= 0x39 or byte >= 0x41 and byte <= 0x5A or byte >= 0x61 and byte <= 0x7A or byte == 0x2B or byte == 0x2F:
+            self.base64Length += 1
+        else:
+            if self.base64Length > 0:
+                self.base64LengthMax = max(self.base64Length, self.base64LengthMax)
+                self.base64Length = 0
+
+        if byte >= 0x20 and byte <= 0x7E or byte == 0x09:
+            self.printableStringLength += 1
+        else:
+            if self.printableStringLength > 0:
+                self.printableStringLengthMax = max(self.printableStringLength, self.printableStringLengthMax)
+                self.printableStringLength = 0
+
         self.previous = byte
 
     def Prevalence(self):
@@ -432,7 +482,7 @@ class cCalculateByteStatistics():
             countBASE64Bytes += self.dPrevalence[iter]
         for iter in range(0x61, 0x7B):
             countBASE64Bytes += self.dPrevalence[iter]
-        countBASE64Bytes += self.dPrevalence[P23Ord('+')] + self.dPrevalence[P23Ord('/')] + self.dPrevalence[P23Ord('=')]
+        countBASE64Bytes += self.dPrevalence[ord('+')] + self.dPrevalence[ord('/')] + self.dPrevalence[ord('=')]
         entropy = 0.0
         for iter in range(0x100):
             if self.dPrevalence[iter] > 0:
@@ -443,7 +493,10 @@ class cCalculateByteStatistics():
             averageConsecutiveByteDifference = None
         else:
             averageConsecutiveByteDifference = float(self.sumDifference) / float(self.count)
-        return sumValues, entropy, countUniqueBytes, countNullByte, countControlBytes, countWhitespaceBytes, countPrintableBytes, countHighBytes, countHexadecimalBytes, countBASE64Bytes, averageConsecutiveByteDifference
+        self.hexLength = max(self.hexLength, self.hexLengthMax)
+        self.base64Length = max(self.base64Length, self.base64LengthMax)
+        self.printableStringLength = max(self.printableStringLength, self.printableStringLengthMax)
+        return sumValues, entropy, countUniqueBytes, countNullByte, countControlBytes, countWhitespaceBytes, countPrintableBytes, countHighBytes, countHexadecimalBytes, countBASE64Bytes, averageConsecutiveByteDifference, self.printableStringLength, self.hexLength, self.base64Length
 
 def GenerateLine(prefix, counter, sumValues, buckets, index, options):
     line = '%-18s%9d %6.2f%%' % (prefix + ':', counter, float(counter) / sumValues * 100.0)
@@ -570,7 +623,7 @@ def ByteStats(args, options):
         print('Empty file(s)! Statistics can not be calculated.')
         return
 
-    sumValues, entropy, countUniqueBytes, countNullByte, countControlBytes, countWhitespaceBytes, countPrintableBytes, countHighBytes, countHexadecimalBytes, countBASE64Bytes, averageConsecutiveByteDifference = oCalculateByteStatistics.Stats()
+    sumValues, entropy, countUniqueBytes, countNullByte, countControlBytes, countWhitespaceBytes, countPrintableBytes, countHighBytes, countHexadecimalBytes, countBASE64Bytes, averageConsecutiveByteDifference, maxPrintableStringLength, maxHexLength, maxBase64Length = oCalculateByteStatistics.Stats()
     dProperties = {'e': 1, 'u': 2, 'n': 3, 'c': 4, 'w': 5, 'p': 6, 'h': 7, 'x': 8, 'b': 9, 'a': 10}
     if options.list:
         if options.property not in dProperties:
@@ -678,6 +731,9 @@ def ByteStats(args, options):
         print(GenerateLine('High bytes', countHighBytes, sumValues, buckets, 7, options))
         print(GenerateLine('Hexadecimal bytes', countHexadecimalBytes, sumValues, buckets, 8, options))
         print(GenerateLine('BASE64 bytes', countBASE64Bytes, sumValues, buckets, 9, options))
+        print(GenerateLine('Longest string', maxPrintableStringLength, sumValues, buckets, 11, options))
+        print(GenerateLine('Longest hex', maxHexLength, sumValues, buckets, 12, options))
+        print(GenerateLine('Longest base64', maxBase64Length, sumValues, buckets, 13, options))
 
     if options.sequence:
         print('')
