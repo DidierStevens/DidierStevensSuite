@@ -2,8 +2,8 @@
 
 __description__ = 'Analyze OLE files (Compound Binary Files)'
 __author__ = 'Didier Stevens'
-__version__ = '0.0.70'
-__date__ = '2022/09/04'
+__version__ = '0.0.71'
+__date__ = '2022/11/09'
 
 """
 
@@ -119,6 +119,7 @@ History:
   2022/06/07: 0.0.68 added extra info parameters %CTIME% %MTIME% %CTIMEHEX% %MTIMEHEX%
   2022/07/22: 0.0.69 minor documentation change
   2022/09/04: 0.0.70 bumping version for update to plugin(s), no changes to oledump.py
+  2022/11/09: 0.0.71 bumping version for update to plugin(s), no changes to oledump.py
 
 Todo:
 

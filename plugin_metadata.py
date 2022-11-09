@@ -2,8 +2,8 @@
 
 __description__ = 'metadata plugin for oledump.py'
 __author__ = 'Didier Stevens'
-__version__ = '0.0.1'
-__date__ = '2022/04/26'
+__version__ = '0.0.2'
+__date__ = '2022/10/27'
 
 """
 
@@ -15,12 +15,25 @@ History:
   2015/02/28: start
   2022/04/25: start again for second propertyset (VSTO files)
   2022/04/26: refactor
+  2022/09/24: 0.0.2 added ParseASN
+  2022/09/25: continue
+  2022/10/09: added PropertySetSystemIdentifier
+  2022/10/27: added options: option -s
 
 Todo:
   implement remaining types
 """
 
 import datetime
+
+try:
+    from pyasn1.codec.der import decoder as der_decoder
+except ImportError:
+    print(' Signature present but error importing pyasn1 module')
+try:
+    from pyasn1_modules import rfc2315
+except ImportError:
+    print(' Signature present but error importing pyasn1_modules module')
 
 # [MS-OLEPS].pdf
 # https://docs.microsoft.com/en-us/openspecs/windows_protocols/ms-oleps/bf7aeae8-c47a-4939-9f45-700158dac3bc
@@ -29,6 +42,58 @@ DICTIONARY_PROPERTY_IDENTIFIER = 0x00000000
 CODEPAGE_PROPERTY_IDENTIFIER   = 0x00000001
 LOCALE_PROPERTY_IDENTIFIER     = 0x80000000
 BEHAVIOR_PROPERTY_IDENTIFIER   = 0x80000003
+
+# https://www.cryptosys.net/pki/manpki/pki_distnames.html
+def PrintComponents(obj):
+    dOIDs = {
+        '2.5.4.3': 'CN',
+        '2.5.4.4': 'SN',
+        '2.5.4.5': 'SERIALNUMBER',
+        '2.5.4.6': 'C',
+        '2.5.4.7': 'L',
+        '2.5.4.8': 'S', # or ST
+        '2.5.4.9': 'STREET',
+        '2.5.4.10': 'O',
+        '2.5.4.11': 'OU',
+        '2.5.4.12': 'T', # or  or TITLE
+        '2.5.4.42': 'G', #  or GN
+        '1.2.840.113549.1.9.1': 'E',
+        '0.9.2342.19200300.100.1.1': 'UID',
+        '0.9.2342.19200300.100.1.25': 'DC',
+    }
+
+    result = []
+    for component1 in obj.components[0]:
+        for component2 in component1:
+            oid = list(component2.values())[0].prettyPrint()
+            value = list(component2.values())[1][2:]
+            result.append('%s=%s' % (dOIDs.get(oid, oid), value))
+    return ','.join(result)
+
+def ParseASN(data):
+    position = data.find(b'\x30')
+    signature = data[position:]
+
+    contentInfo, _ = der_decoder.decode(signature, asn1Spec=rfc2315.ContentInfo())
+    contentType = contentInfo.getComponentByName('contentType')
+    contentInfoMap = {
+        (1, 2, 840, 113549, 1, 7, 1): rfc2315.Data(),
+        (1, 2, 840, 113549, 1, 7, 2): rfc2315.SignedData(),
+        (1, 2, 840, 113549, 1, 7, 3): rfc2315.EnvelopedData(),
+        (1, 2, 840, 113549, 1, 7, 4): rfc2315.SignedAndEnvelopedData(),
+        (1, 2, 840, 113549, 1, 7, 5): rfc2315.DigestedData(),
+        (1, 2, 840, 113549, 1, 7, 6): rfc2315.EncryptedData()
+    }
+    content, _ = der_decoder.decode(contentInfo.getComponentByName('content'), asn1Spec=contentInfoMap[contentType])
+    serialNumber = content['signerInfos'][0]['issuerAndSerialNumber']['serialNumber']
+    issuer = None
+    subject = None
+    for f in content['certificates']:
+        if f['certificate']['tbsCertificate']['serialNumber'] == serialNumber:
+            certificate = f['certificate']['tbsCertificate']
+            issuer = PrintComponents(certificate['issuer'])
+            subject = PrintComponents(certificate['subject'])
+    return issuer, subject
 
 class cCONSTANTS(object):
     def __init__(self):
@@ -147,7 +212,7 @@ def CreateFILETIME(strDateTime):
 
 def FILETIME2String(ft):
     EPOCH_AS_FILETIME = 116444736000000000  # January 1, 1970 as MS file time
-    return datetime.datetime(1970, 1, 1) + datetime.timedelta(microseconds = (ft - EPOCH_AS_FILETIME) // 10)
+    return (datetime.datetime(1970, 1, 1, tzinfo=datetime.timezone.utc) + datetime.timedelta(microseconds = (ft - EPOCH_AS_FILETIME) // 10)).isoformat()
 
 class cMetadata(cPluginParent):
     macroOnly = False
@@ -196,7 +261,7 @@ class cMetadata(cPluginParent):
                 extractedMessage = ''
             else:
                 extractedMessage = ' extracted strings: %s' % (b', '.join(extractedStrings)).decode()
-            return True, type, 'BLOB size %d%s' % (blobSize, extractedMessage)
+            return True, type, ['BLOB size %d%s' % (blobSize, extractedMessage), blobData]
         elif type == VT_CF:
             return True, type, 'ClipboardData size %d type 0x%04x' % oStructTypedPropertyValue.Unpack('<II')
         elif type == (VT_VECTOR | VT_LPSTR):
@@ -215,7 +280,7 @@ class cMetadata(cPluginParent):
         else:
             return False, type, oCONSTANTS.Lookup(type, '<UNKNOWN>')
 
-    def AnalyzePropertySet(self, propertySetNumner, guid, offset):
+    def AnalyzePropertySet(self, propertySetNumner, guid, offset, options):
         self.result.append('PropertySet %d' % propertySetNumner)
         self.result.append('-------------')
 
@@ -252,11 +317,24 @@ class cMetadata(cPluginParent):
                         if propertyValue < 0:
                             propertyValue += 65536
                         extra = ' ' + dCodepages.get(propertyValue, '<UNKNOWN>')
-                    self.result.append(' %s: %s%s' % (attributeName, propertyValue, extra))
+                    if attributeName == 'version':
+                        extra = ' 0x%08x' % propertyValue
+                    if attributeName == 'dig_sig' and options.signature:
+                        issuer, subject = ParseASN(propertyValue[1])
+                        if issuer != None and subject != None:
+                            self.result.append(' %s: issuer: %s subject: %s' % (attributeName, issuer, subject))
+                        else:
+                            self.result.append(' %s: %s%s' % (attributeName, propertyValue[0], extra))
+                    else:
+                        self.result.append(' %s: %s%s' % (attributeName, propertyValue, extra))
                 else:
                     self.result.append(' %s: 0x%04x %s' % (attributeName, type, propertyValue))
 
     def Analyze(self):
+        oParser = optparse.OptionParser()
+        oParser.add_option('-s', '--signature', action='store_true', default=False, help='Parse signature')
+        (options, args) = oParser.parse_args(self.options.split(' '))
+
         self.result = []
 
         oStruct = cStruct(self.stream)
@@ -271,12 +349,14 @@ class cMetadata(cPluginParent):
         if byteOrder == 0xFFFE and version in [0, 1]:
             self.ran = True
             self.result.append('PropertySetStream version: %d' % version)
-            headerPropertySetStream = oStruct.Unpack('<I16sI')
+            headerPropertySetStream = oStruct.Unpack('<BBH16sI')
+            self.result.append('PropertySetSystemIdentifier OSMajorVersion: %d OSMinorVersion: %d OSType: %d' % headerPropertySetStream[:3])
+            self.result.append('PropertySetStream GUID: %s' % GUID2String(headerPropertySetStream[3]))
             headerPropertySet1 = oStruct.Unpack('<16sI')
-            self.AnalyzePropertySet(1, GUID2String(headerPropertySet1[0]), headerPropertySet1[1])
-            if headerPropertySetStream[2] == 2:
+            self.AnalyzePropertySet(1, GUID2String(headerPropertySet1[0]), headerPropertySet1[1], options)
+            if headerPropertySetStream[4] == 2:
                 headerPropertySet2 = oStruct.Unpack('<16sI')
-                self.AnalyzePropertySet(2, GUID2String(headerPropertySet2[0]), headerPropertySet2[1])
+                self.AnalyzePropertySet(2, GUID2String(headerPropertySet2[0]), headerPropertySet2[1], options)
 
         return self.result
 

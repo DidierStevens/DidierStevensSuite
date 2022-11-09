@@ -2,7 +2,7 @@
 
 __description__ = 'pdf-parser, use it to parse a PDF document'
 __author__ = 'Didier Stevens'
-__version__ = '0.7.6'
+__version__ = '0.7.7'
 __date__ = '2022/05/24'
 __minimum_python_version__ = (2, 5, 1)
 __maximum_python_version__ = (3, 10, 4)
@@ -72,6 +72,7 @@ History:
   2021/07/03: V0.7.5 bug fixes; fixed ASCII85Decode Python 3 bug thanks to R Primus
   2021/11/23: V0.7.6 Python 3 bug fixes
   2022/05/24: bug fixes
+  2022/11/09: V0.7.7 added support for environment variable DSS_DEFAULT_HASH_ALGORITHMS
 
 Todo:
   - handle printf todo
@@ -138,6 +139,10 @@ Use this to define options you want included with each use of pdf-parser.py.
 Like option -O, to parse stream objects (/ObjStm).
 By defining PDFPARSER_OPTIONS=-O, pdf-parser will always parse stream objects (when found).
 PS: this feature is experimental.
+
+Option -H calculates the MD5 hash by default.
+This can be changed by setting environment variable DSS_DEFAULT_HASH_ALGORITHMS.
+Like this: set DSS_DEFAULT_HASH_ALGORITHMS=sha256
 
 '''
     for line in manual.split('\n'):
@@ -1331,6 +1336,59 @@ def GetArguments():
         return arguments
     return envvar.split(' ') + arguments
 
+class cHashCRC32():
+    def __init__(self):
+        self.crc32 = None
+
+    def update(self, data):
+        self.crc32 = zlib.crc32(data)
+
+    def hexdigest(self):
+        return '%08x' % (self.crc32 & 0xffffffff)
+
+class cHashChecksum8():
+    def __init__(self):
+        self.sum = 0
+
+    def update(self, data):
+        if sys.version_info[0] >= 3:
+            self.sum += sum(data)
+        else:
+            self.sum += sum(map(ord, data))
+
+    def hexdigest(self):
+        return '%08x' % (self.sum)
+
+dSpecialHashes = {'crc32': cHashCRC32, 'checksum8': cHashChecksum8}
+
+def GetHashObjects(algorithms):
+    global dSpecialHashes
+
+    dHashes = {}
+
+    if algorithms == '':
+        algorithms = os.getenv('DSS_DEFAULT_HASH_ALGORITHMS', 'md5')
+    if ',' in algorithms:
+        hashes = algorithms.split(',')
+    else:
+        hashes = algorithms.split(';')
+    for name in hashes:
+        if not name in dSpecialHashes.keys() and not name in hashlib.algorithms_available:
+            print('Error: unknown hash algorithm: %s' % name)
+            print('Available hash algorithms: ' + ' '.join([name for name in list(hashlib.algorithms_available)] + list(dSpecialHashes.keys())))
+            return [], {}
+        elif name in dSpecialHashes.keys():
+            dHashes[name] = dSpecialHashes[name]()
+        else:
+            dHashes[name] = hashlib.new(name)
+
+    return hashes, dHashes
+
+def CalculateChosenHash(data):
+    hashes, dHashes = GetHashObjects('')
+    dHashes[hashes[0]].update(data)
+    return dHashes[hashes[0]].hexdigest(), hashes[0]
+
 def Main():
     """pdf-parser, use it to parse a PDF document
     """
@@ -1393,6 +1451,7 @@ def Main():
         cntStartXref = 0
         cntIndirectObject = 0
         dicObjectTypes = {}
+        objectsWithStream = []
         keywords = ['/JS', '/JavaScript', '/AA', '/OpenAction', '/AcroForm', '/RichMedia', '/Launch', '/EmbeddedFile', '/XFA', '/URI']
         for extrakeyword in ParseINIFile():
             if not extrakeyword in keywords:
@@ -1529,6 +1588,8 @@ def Main():
                         for keyword in dKeywords.keys():
                             if object.ContainsName(keyword):
                                 dKeywords[keyword].append(object.id)
+                        if object.ContainsStream():
+                            objectsWithStream.append(object.id)
                 else:
                     if object.type == PDF_ELEMENT_COMMENT and selectComment:
                         if options.generate:
@@ -1600,7 +1661,8 @@ def Main():
                         elif options.hash:
                             print('obj %d %d' % (object.id, object.version))
                             rawContent = FormatOutput(object.content, True)
-                            print(' len: %d md5: %s' % (len(rawContent), hashlib.md5(rawContent).hexdigest()))
+                            hashHexdigest, hashAlgo = CalculateChosenHash(rawContent.encode('latin'))
+                            print(' len: %d %s: %s' % (len(rawContent), hashAlgo, hashHexdigest))
                             print('')
                         elif options.searchstream:
                             if object.StreamContains(options.searchstream, not options.unfiltered, options.casesensitive, options.regex, options.overridingfilters):
@@ -1641,6 +1703,7 @@ def Main():
             print('Trailer: %s' % cntTrailer)
             print('StartXref: %s' % cntStartXref)
             print('Indirect object: %s' % cntIndirectObject)
+            print('Indirect objects with a stream: %s' % ', '.join([str(id) for id in objectsWithStream]))
             for key in sorted(dicObjectTypes.keys()):
                 print(' %s %d: %s' % (key, len(dicObjectTypes[key]), ', '.join(map(lambda x: '%d' % x, dicObjectTypes[key]))))
             if sum(map(len, dKeywords.values())) > 0:
