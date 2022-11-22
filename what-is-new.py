@@ -2,8 +2,8 @@
 
 __description__ = 'Tool to monitor new items'
 __author__ = 'Didier Stevens'
-__version__ = '0.0.1'
-__date__ = '2017/12/30'
+__version__ = '0.0.2'
+__date__ = '2022/11/20'
 
 """
 History:
@@ -14,7 +14,12 @@ History:
   2015/11/12: added man option
   2017/11/11: fix for Python 3
   2017/12/30: added option -n
+  2018/07/15: 0.0.2 added option -a
+  2018/07/20: continued action with function ExecuteAction
+  2022/11/20: continued action
 
+Todo:
+  add subprocess.Popen as action option
 """
 
 import optparse
@@ -24,6 +29,9 @@ import glob
 import time
 import collections
 import textwrap
+import os
+import binascii
+import datetime
 
 QUOTE = '"'
 
@@ -32,7 +40,7 @@ def PrintManual():
 Manual:
 
 what-is-new is a tool to monitor new items. You give it a name of a database and one or more text files, and it will return all lines in the text files that are new: these are lines that were not seen before, i.e. which are not in the database.
-When you run what-is-new for the first time, all lines will be outputed because they are all new (not in the database). But after that initial run only new lines will be outputed.
+When you run what-is-new for the first time, all lines will be outputted because they are all new (not in the database). But after that initial run only new lines will be outputted.
 The database is a pickle file, created in the current directory. The name of the database is what-is-new-DATABASE.pkl, where DATABASE is the database argument you passed to what-is-new.
 
 Example:
@@ -71,6 +79,8 @@ A;20150821-110332;20150821-110332;1
 
 The separator for the CSV file is ; by default, but can be chosen with option -s.
 
+Option -a (action) can be used to provide a command that has to be executed (via os.system) when new items are found. Strings WHATISNEW_MESSAGE1, WHATISNEW_QUOTED_MESSAGE1 and WHATISNEW_BASE64_MESSAGE1 (case-sensitive), when present in the command, will be replaced by a small status string: the number of new items and the first new item. Remark that WHATISNEW_MESSAGE1 contains space characters and that you may want to quote/escape this. WHATISNEW_QUOTED_MESSAGE1 is exactly the same as WHATISNEW_MESSAGE1, but surrounded by double-quotes. WHATISNEW_BASE64_MESSAGE1 is exactly the same as WHATISNEW_MESSAGE1, but BASE64 encoded. Option action can be used to send an email, for example, when new items are found.
+
 This Python program was developed and tested with Python 2, and also tested with Python 3.
 '''
     for line in manual.split('\n'):
@@ -96,6 +106,9 @@ def Timestamp(epoch=None):
     else:
         localTime = time.localtime(epoch)
     return '%04d%02d%02d-%02d%02d%02d' % localTime[0:6]
+
+def NowUTCISO():
+    return datetime.datetime.now(datetime.timezone.utc).isoformat(timespec='seconds')
 
 def Basename(basename):
     return 'what-is-new-' + basename
@@ -186,6 +199,18 @@ def Print(line, f):
     else:
         f.write(line +'\n')
 
+def ExecuteAction(options, fLog, newlinesCount, firstnewline):
+    line = '%d new item(s) %s' % (newlinesCount, firstnewline)
+    action = options.action
+    action = action.replace('WHATISNEW_MESSAGE1', line)
+    action = action.replace('WHATISNEW_QUOTED_MESSAGE1', '"' + line + '"')
+    action = action.replace('WHATISNEW_BASE64_MESSAGE1', binascii.b2a_base64(line.encode('latin')).decode('latin'))
+    if fLog != None:
+        fLog.write('%s Launching action: %s\n' % (NowUTCISO(), action))
+    exitcode = os.system(action)
+    if fLog != None:
+        fLog.write('%s Action exicode: %d\n' % (NowUTCISO(), exitcode))
+
 def WhatIsNew(database, files, options):
     now = time.time()
     data = DeSerialize(database)
@@ -209,6 +234,8 @@ def WhatIsNew(database, files, options):
             fLog = open(LogFilename(database), 'a')
         else:
             fLog = None
+        newlinesCount = 0
+        firstnewline = None
         for file in files:
             if file == '':
                 fIn = sys.stdin
@@ -216,7 +243,7 @@ def WhatIsNew(database, files, options):
                 fIn = open(file, 'r')
             if fLog != None:
                 fLog.write('File: %s\n' % file)
-            for line in [x.strip('\n') for x in fIn.readlines()]:
+            for line in [x.strip('\n\r') for x in fIn.readlines()]:
                 if line in dDatabase:
                     if dDatabase[line] == 1: # handle old database format
                         dDatabase[line] = [now, now, 1]
@@ -226,6 +253,9 @@ def WhatIsNew(database, files, options):
                 else:
                     Print(line, fOut)
                     dDatabase[line] = [now, now, 1]
+                    newlinesCount += 1
+                    if firstnewline == None:
+                        firstnewline = line
                     if fLog != None:
                         fLog.write('Added: %s\n' % line)
             fIn.close()
@@ -240,11 +270,14 @@ def WhatIsNew(database, files, options):
         if fOut != None:
             fOut.close()
 
-        if fLog != None:
-            fLog.close()
-
         if not options.check:
             Serialize({'database': dDatabase}, database + IFF(options.newdb, '-new', ''))
+
+        if newlinesCount > 0 and options.action != '':
+            ExecuteAction(options, fLog, newlinesCount, firstnewline)
+
+        if fLog != None:
+            fLog.close()
 
 def Main():
     oParser = optparse.OptionParser(usage='usage: %prog [options] database [files]\n' + __description__, version='%prog ' + __version__)
@@ -256,6 +289,7 @@ def Main():
     oParser.add_option('-r', '--remove', action='store_true', default=False, help='remove all entries present in the database and not present in the file(s)')
     oParser.add_option('-l', '--log', action='store_true', default=False, help='log adding to/removing from the database')
     oParser.add_option('-o', '--output', help='output to file')
+    oParser.add_option('-a', '--action', type=str, default='', help='action (command) to take when new items were found')
     oParser.add_option('-s', '--separator', default=';', help='separator character (default ;)')
     (options, args) = oParser.parse_args()
 
