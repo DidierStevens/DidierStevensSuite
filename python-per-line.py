@@ -2,8 +2,8 @@
 
 __description__ = "Program to evaluate a Python expression for each line in the provided text file(s)"
 __author__ = 'Didier Stevens'
-__version__ = '0.0.8'
-__date__ = '2022/06/06'
+__version__ = '0.0.9'
+__date__ = '2022/12/03'
 
 """
 
@@ -30,6 +30,7 @@ History:
   2020/03/02: 0.0.7 added option --encoding
   2020/04/19: updated man page
   2022/06/06: 0.0.8 added option -l, fixed xrange for Python 3
+  2022/12/03: 0.0.9 added lineNumber
 
 Todo:
 """
@@ -68,6 +69,8 @@ Example:
  copy Line 1
  copy Line 2
  copy Line 3
+
+Variable lineNumber is set to the line number of each selected line (first line -> lineNumber = 1).
 
 This program contains a predefined Python function to help with the generation of Rubber Ducky scripts: Duckify.
 
@@ -540,7 +543,9 @@ def PythonPerLineSingle(expression, filename, oBeginGrep, oGrep, oEndGrep, oOutp
         fIn = open(filename, 'r')
     else:
         fIn = open(filename, 'r', encoding=options.encoding)
+    lineNumber = 0
     for line in ProcessFile(fIn, oBeginGrep, oGrep, oEndGrep, False):
+        lineNumber += 1
         expressionToEvaluate = expression.replace('{}', repr(line))
         try:
             result = eval(expressionToEvaluate)
