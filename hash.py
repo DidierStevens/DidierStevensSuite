@@ -2,8 +2,8 @@
 
 __description__ = 'This is essentialy a wrapper for the hashlib module'
 __author__ = 'Didier Stevens'
-__version__ = '0.0.8'
-__date__ = '2020/01/25'
+__version__ = '0.0.9'
+__date__ = '2022/12/14'
 
 """
 Source code put in public domain by Didier Stevens, no Copyright
@@ -22,6 +22,8 @@ History:
   2018/09/18: 0.0.6 added option -C
   2019/08/27: 0.0.7 added crc32
   2020/01/25: 0.0.8 added checksum8; added ParsePackExpression #p#; added #h# support for spaces; bugfix #e#chr
+  2020/10/21: 0.0.9 Python 3 fix in cBinaryFile
+  2022/12/14: added here-file for validate option; added validate summary
 
 Todo:
 """
@@ -201,7 +203,7 @@ File hash summary:
  There are 2 different sha256 hashes
 
 Option -s can take a list of hashes to skip, separated by character ; or ,. This option is useful in combination with option -c, to skip specified hash values when comparing.
-Option -v can take a list of hashes to validate, separated by character ; or ,.
+Option -v can take a list of hashes to validate, separated by character ; or ,. The list can be inside a file: prefix the filename with @, like this example: -v @hashes-to-validate.txt.
 
 Example:
 
@@ -814,7 +816,7 @@ class cBinaryFile:
             return fRead.read(size)
 
     def Data(self):
-        data = self.fIn.read()
+        data = self.read()
         self.close()
         return data
 
@@ -1056,6 +1058,8 @@ def GetHashObjects(algorithms):
     return hashes, dHashes
 
 def ParseHashList(data):
+    if data.startswith('@'):
+        return [hash.lower() for hash in File2Strings(data[1:])]
     separator = ','
     if not separator in data:
         separator = ';'
@@ -1079,7 +1083,7 @@ def Quote(value, separator, quote):
 def MakeCSVLine(row, separator, quote):
     return separator.join([Quote(value, separator, quote) for value in row])
 
-def HashSingle(filename, cutexpression, prefix, dFileHashes, options):
+def HashSingle(filename, cutexpression, prefix, dFileHashes, skipHashes, validateHashes, options):
     oBinaryFile = cBinaryFile(filename, C2BIP3(options.password), options.noextraction, options.literalfilenames)
     data = oBinaryFile.read()
     if cutexpression != '':
@@ -1087,8 +1091,6 @@ def HashSingle(filename, cutexpression, prefix, dFileHashes, options):
     hashes, dHashes = GetHashObjects(options.algorithms)
     if hashes == []:
         return
-    skipHashes = ParseHashList(options.skip)
-    validateHashes = ParseHashList(options.validate)
     if not options.quiet and not options.csv and oBinaryFile.extracted:
         print('%sExtracted!' % (prefix))
     if options.block == 0:
@@ -1150,13 +1152,17 @@ def HashSingle(filename, cutexpression, prefix, dFileHashes, options):
 
 def HashFiles(filenames, options):
     dFileHashes = {}
+    skipHashes = ParseHashList(options.skip)
+    validateHashes = ParseHashList(options.validate)
+
     for filename, cutexpression in filenames:
         if filename != '' and len(filenames) > 1 and not options.quiet and not options.csv:
             print('File: %s' % filename)
             prefix = ' '
         else:
             prefix = ''
-        HashSingle(filename, cutexpression, prefix, dFileHashes, options)
+        HashSingle(filename, cutexpression, prefix, dFileHashes, skipHashes, validateHashes, options)
+
     if options.compare:
         print('\nFile hash summary:')
         if len(dFileHashes) == 0:
@@ -1185,6 +1191,14 @@ def HashFiles(filenames, options):
                     print(' All %s hashes are identical' % name)
                 else:
                     print(' There are %d different %s hashes' % (len(dHashes), name))
+
+    if options.validate:
+        print('Validated files:')
+        for key, hashes in dFileHashes.items():
+            for hash, filenames in hashes.items():
+                if hash in validateHashes:
+                    for filename in filenames:
+                        print(filename)
 
 def Main():
     moredesc = '''

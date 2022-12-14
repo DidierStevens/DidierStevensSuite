@@ -2,8 +2,8 @@
 
 __description__ = 'Program to search VirusTotal reports with search terms (MD5, SHA1, SHA256, URL) found in the argument file'
 __author__ = 'Didier Stevens'
-__version__ = '0.1.7'
-__date__ = '2022/08/25'
+__version__ = '0.1.8'
+__date__ = '2022/12/13'
 
 """
 
@@ -41,6 +41,7 @@ History:
   2019/01/07: 0.1.5 added option -e, -t
   2020/10/18: 0.1.6 Python 3 update (Python 2 no longer supported)
   2022/08/25: 0.1.7 added option --limitrequests
+  2022/12/13: 0.1.8 added options -D and --sleep
 
 Todo:
 """
@@ -476,6 +477,9 @@ def VirusTotalSearch(filename, options):
                 else:
                     searchTermsToRequest.append(searchTermIter)
 
+    if options.databaseonly:
+        searchTermsToRequest = []
+
     requestCounter = 0
     while searchTermsToRequest != []:
         statuscode = GetReports(searchTermsToRequest[0:4], reports, options.comment, options.extra, options.type, dNotFound)
@@ -501,6 +505,35 @@ def VirusTotalSearch(filename, options):
     if not options.noupdate:
         SerializeDictionary(GetPickleFile(options.globaldb), reports)
 
+def FormatTime(epoch=None):
+    if epoch == None:
+        epoch = time.time()
+    return '%04d%02d%02d-%02d%02d%02d' % time.localtime(epoch)[0:6]
+
+def Sleep(arg):
+# valid inputs: 60, 36s, 5m, 2h, 7d, 01:00:00
+    if arg == '':
+        return
+    elif arg.endswith('s'):
+        delay = int(arg[:-1])
+    elif arg.endswith('m'):
+        delay = int(arg[:-1]) * 60
+    elif arg.endswith('h'):
+        delay = int(arg[:-1]) * 60 * 60
+    elif arg.endswith('d'):
+        delay = int(arg[:-1]) * 60 * 60 * 24
+    elif ':' in arg:
+        hours, minutes, seconds = [int(number) for number in arg.split(':')]
+        now = time.localtime()
+        delay = time.mktime((now.tm_year, now.tm_mon, now.tm_mday, hours, minutes, seconds, now.tm_wday, now.tm_yday, now.tm_isdst)) - time.time()
+        if delay < 0:
+            delay += 60 * 60 * 24
+    else:
+        delay = int(arg)
+    print('%s: Sleeping for %d seconds (%s), waking around %s' % (FormatTime(), delay, arg, FormatTime(time.time() + delay)))
+    time.sleep(delay)
+    print('%s: Sleeping done' % FormatTime())
+
 def Main():
     global VIRUSTOTAL_API2_KEY
 
@@ -523,6 +556,8 @@ def Main():
     oParser.add_option('-e', '--extra', default='', help='Extra fields to include (use , as separator)')
     oParser.add_option('-t', '--type', default='file', help='Type of resource to query (file, url)')
     oParser.add_option('-l', '--limitrequests', type=int, default=0, help='Limit number of requests')
+    oParser.add_option('-D', '--databaseonly', action='store_true', default=False, help='Perform no requests, use database only')
+    oParser.add_option('--sleep', default='', help='Sleep before starting queries')
     (options, args) = oParser.parse_args()
 
     if not (len(args) <= 1 or (options.refresh or options.refreshrandom) and len(args) == 0):
@@ -532,6 +567,9 @@ def Main():
         print('  Use at your own risk')
         print('  https://DidierStevens.com')
         return
+
+    Sleep(options.sleep)
+
     if options.extra == '':
         options.extra = []
     else:

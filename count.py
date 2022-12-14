@@ -2,8 +2,8 @@
 
 __description__ = 'count unique items'
 __author__ = 'Didier Stevens'
-__version__ = '0.3.0'
-__date__ = '2021/01/15'
+__version__ = '0.3.1'
+__date__ = '2022/12/05'
 
 """
 Source code put in public domain by Didier Stevens, no Copyright
@@ -24,6 +24,8 @@ History:
   2017/06/02: 0.2.0: added support for sqlite3 with option -c
   2017/07/27: added option where
   2021/01/15: 0.3.0 Python 3
+  2022/12/04: 0.3.1 added singles and multiples
+  2022/12/05: added options singles and multiples
 
 Todo:
 """
@@ -114,6 +116,9 @@ class cOutput():
 def PrintDictionary(dCount, options):
     oOutput = cOutput(options.output, options.bothoutputs)
 
+    singles = 0
+    multiples = 0
+
     if options.header:
         if options.nocounts:
             line = 'Element'
@@ -137,7 +142,7 @@ def PrintDictionary(dCount, options):
         index = 0
     else:
         index = 1
-        
+
     if bPython3:
         listCount = sorted(listCount, key=cmp_to_key(lambda x, y:MyCmp(x[index], y[index])), reverse=options.descending)
     else:
@@ -151,7 +156,7 @@ def PrintDictionary(dCount, options):
             line = '%d%s%s' % (ranknumber, options.outputseparator, line)
         if options.percentage:
             line = '%s%s%.2f%%' % (line, options.outputseparator, float(value) / sumValues * 100.0)
-        if options.ranktop == None and options.rankbottom == None:
+        if options.ranktop == None and options.rankbottom == None and not options.singles and not options.multiples:
             oOutput.Line(line)
         elif options.ranktop != None:
             if ranknumber <= options.ranktop:
@@ -159,18 +164,34 @@ def PrintDictionary(dCount, options):
         elif options.rankbottom != None:
             if uniques - ranknumber + 1 <= options.rankbottom:
                 oOutput.Line(line)
+        elif options.singles:
+            if value == 1:
+                oOutput.Line(line)
+        elif options.multiples:
+            if value > 1:
+                oOutput.Line(line)
         if options.descending:
             ranknumber += 1
         else:
             ranknumber -= 1
+        if options.totals:
+            if value == 1:
+                singles += 1
+            else:
+                multiples += 1
     if options.totals:
         oOutput.Line('uniques%s%d' % (options.outputseparator, uniques))
+        oOutput.Line('singles%s%d' % (options.outputseparator, singles))
+        oOutput.Line('multiples%s%d' % (options.outputseparator, multiples))
         oOutput.Line('total%s%d' % (options.outputseparator, sumValues))
 
     oOutput.Close()
 
 def PrintSqlite3(connection, options):
     oOutput = cOutput(options.output, options.bothoutputs)
+
+    singles = 0
+    multiples = 0
 
     if options.header:
         if options.nocounts:
@@ -211,7 +232,7 @@ def PrintSqlite3(connection, options):
             line = '%d%s%s' % (ranknumber, options.outputseparator, line)
         if options.percentage:
             line = '%s%s%.2f%%' % (line, options.outputseparator, float(value) / sumValues * 100.0)
-        if options.ranktop == None and options.rankbottom == None:
+        if options.ranktop == None and options.rankbottom == None and not options.singles and not options.multiples:
             oOutput.Line(line)
         elif options.ranktop != None:
             if ranknumber <= options.ranktop:
@@ -219,12 +240,25 @@ def PrintSqlite3(connection, options):
         elif options.rankbottom != None:
             if uniques - ranknumber + 1 <= options.rankbottom:
                 oOutput.Line(line)
+        elif options.singles:
+            if value == 1:
+                oOutput.Line(line)
+        elif options.multiples:
+            if value > 1:
+                oOutput.Line(line)
         if options.descending:
             ranknumber += 1
         else:
             ranknumber -= 1
+        if options.totals:
+            if value == 1:
+                singles += 1
+            else:
+                multiples += 1
     if options.totals:
         oOutput.Line('uniques%s%d' % (options.outputseparator, uniques))
+        oOutput.Line('singles%s%d' % (options.outputseparator, singles))
+        oOutput.Line('multiples%s%d' % (options.outputseparator, multiples))
         oOutput.Line('total%s%d' % (options.outputseparator, sumValues))
 
     oOutput.Close()
@@ -354,6 +388,8 @@ https://DidierStevens.com'''
     oParser.add_option('-R', '--rank', action='store_true', default=False, help='include rank')
     oParser.add_option('--ranktop', type=int, help='output only top ranked')
     oParser.add_option('--rankbottom', type=int, help='output only bottom ranked')
+    oParser.add_option('--singles', action='store_true', default=False, help='output only singles')
+    oParser.add_option('--multiples', action='store_true', default=False, help='output only multiples')
     oParser.add_option('-i', '--ignore', default='', help='element to ignore')
     oParser.add_option('-o', '--output', default='', help='output file')
     oParser.add_option('-b', '--bothoutputs', action='store_true', default=False, help='if used together with option o, output is also displayed')

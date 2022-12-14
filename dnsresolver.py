@@ -2,10 +2,10 @@
 
 from __future__ import print_function
 
-__description__ = 'DNS server for serving files, exfiltration, tracking, wildcards, rcode testing and resolving'
+__description__ = 'DNS server for serving files, exfiltration, tracking, wildcards, rcode testing, resolving and forwarding'
 __author__ = 'Didier Stevens'
-__version__ = '0.0.1'
-__date__ = '2021/07/14'
+__version__ = '0.0.2'
+__date__ = '2022/12/04'
 
 """
 
@@ -30,6 +30,9 @@ History:
   2021/01/16: added command wildcard
   2021/04/07: added command resolve
   2021/07/14: updated man page
+  2022/05/30: 0.0.2 MatchSublist
+  2022/05/31: added TYPE_FORWARDER
+  2022/12/04: finished forwarder
 
 Todo:
 add option to control TCP size
@@ -60,14 +63,14 @@ def PrintManual():
     manual = '''
 Manual:
 
-This is a DNS server for serving files, exfiltration, tracking, wildcards, rcode testing and resolving.
+This is a DNS server for serving files, exfiltration, tracking, wildcards, rcode testing, resolving and forwarding.
 
 When started, this Python program will start a DNS server (UDP only) listening on port 53 on all addresses of the host.
 To serve DNS via TCP too, use option --tcp. You can select a different port with option -p, and a different address with option -a. With option -t, you can change the TTL of the replies. -u can be used to change the maximum length of the UDP packets.
 
 You need to provide at least one command as argument. Commands are separated by space characters.
 
-There are 5 different types of commands: serving files (type=payload), exfiltration (type=exfiltration), tracking (type=track), rcode testing (type=rcode), wildcards (type=wildcard) and resolving (type=resolve).
+There are 7 different types of commands: serving files (type=payload), exfiltration (type=exfiltration), tracking (type=track), rcode testing (type=rcode), wildcards (type=wildcard), resolving (type=resolve) and forwarding (type=forwarder).
 
 Here is an example to serve file test.exe BASE64 encoded via DNS TXT and DNS NULL records:
 
@@ -251,6 +254,30 @@ A second, identical query (nslookup roundrobin.example.com) will result in an A 
 A third, identical query (nslookup roundrobin.example.com) will result in an A record reply with IPv4 address 127.0.0.1.
 And so on ...
 
+A forwarder command takes the following key-value pairs:
+  type=forwarder
+  server=
+  logging=
+
+The label is mandatory: just like the payload command, it will be used to match queries.
+The server is mandatory: this is the IPv4 address to forward requests to.
+Key-value pair logging is optional. If it is provided, DNS resolver will create a log with the value for key logging as keyword. For example, if the value is test, the logfile will be named test-TIMESTAMP.log, e.g. test-20190813-182220.log.
+
+With forwarder DNS, you can specify a DNS server to forward all requests to that are not handled by another command.
+
+For example, when setting up a command like:
+
+  ./dnsresolver.py "type=forwarder,server=8.8.8.8"
+
+all queries will be forwarded to Google's DNS server 8.8.8.8.
+
+This command is usually combined with other commands, for example:
+
+  ./dnsresolver.py "type=resolve,label=example.com,answer=. 60 IN A 127.0.0.1" "type=forwarder,server=8.8.8.8"
+
+In this example, a DNS A request for example.com is replied with 127.0.0.1, and all other requests are forwarded to 8.8.8.8
+
+
 
 Options --log and --log-prefix can be used to increase log details.
 
@@ -270,6 +297,7 @@ TYPE_TRACK = 'track'
 TYPE_RCODE = 'rcode'
 TYPE_WILDCARD = 'wildcard'
 TYPE_RESOLVE = 'resolve'
+TYPE_FORWARDER = 'forwarder'
 ENCODING_DYNAMIC = 'dynamic'
 ENCODING_NONE = ''
 ENCODING_BASE64 = 'base64'
@@ -287,6 +315,8 @@ FILEMMAP = 'filemmap'
 ANSWER = 'answer'
 LOGGING = 'logging'
 INDEX = 'index'
+SERVER = 'server'
+ENABLED = 'enabled'
 
 def File2String(filename):
     try:
@@ -397,13 +427,35 @@ def ValidateResolve(dCommand):
     dCommand[INDEX] = 0
     return dCommand
 
+def ValidateForwarder(dCommand):
+    if not SERVER in dCommand:
+        raise Exception('Error forwarder: server missing')
+    if LOGGING in dCommand:
+        dCommand[LOGGING] = '%s-%s.log' % (dCommand[LOGGING], FormatTimeUTC())
+    return dCommand
+
+#a# case sensitivity
+def MatchSublist(list1, list2):
+    try:
+        position = list1.index(list2[0])
+    except ValueError:
+        return -1
+    list1Remainder = list1[position + 1:]
+    list2Remainder = list2[1:]
+    if len(list2Remainder) == 0:
+        return position
+    if list2Remainder[-1] == '':
+        list1Remainder.append('')
+    if len(list2Remainder) > len(list1Remainder):
+        return -1
+    for index, item in enumerate(list2Remainder):
+        if item != list1Remainder[index]:
+            return -1
+    return position
+    
 def MatchLabel(dLabels, labelArg):
     for label in dLabels.keys():
-        try:
-            position = -1
-            position = labelArg.index(label)
-        except:
-            pass
+        position = MatchSublist(labelArg, label.split('.'))
         if position != -1:
             return dLabels[label], label, position
     return None, None, None
@@ -462,6 +514,7 @@ class cMyResolver(dnslib.server.BaseResolver):
         self.wildcards = {}
         self.resolves = {}
         self.labels = {}
+        self.forwarder = {ENABLED: False}
         for command in self.args.commands:
             dCommand = ParseCommand(command)
             if dCommand[TYPE] == TYPE_PAYLOAD:
@@ -497,6 +550,11 @@ class cMyResolver(dnslib.server.BaseResolver):
                 dResolve = ValidateResolve(dCommand)
                 self.resolves[dCommand[LABEL]] = dResolve
                 self.labels[dCommand[LABEL]] = TYPE_RESOLVE
+            elif dCommand[TYPE] == TYPE_FORWARDER:
+                dForward = ValidateForwarder(dCommand)
+                self.forwarder[ENABLED] = True
+                for key, value in dForward.items():
+                    self.forwarder[key] = value
             else:
                 raise Exception('Unknown type: %s' % dCommand[TYPE])
         self.maxSizeString = 250
@@ -511,12 +569,22 @@ class cMyResolver(dnslib.server.BaseResolver):
             labelsNormalized = [item.decode(errors='replace').lower().strip() for item in request.q.qname.label]
         else:
             labelsNormalized = [item.decode().lower().strip() for item in request.q.qname.label]
-        type, label, position = MatchLabel(self.labels, labelsNormalized)
+        typeCommand, label, position = MatchLabel(self.labels, labelsNormalized)
         replyNXDOMAIN = False
         rcode = None
-        if type == None:
+        if typeCommand == None:
+            if self.forwarder[ENABLED] and request.q.qtype == dnslib.QTYPE.A:
+                oDNSRecord = dnslib.DNSRecord.parse(request.send(self.forwarder[SERVER]))
+                print(oDNSRecord.rr)
+                if LOGGING in self.forwarder:
+                    with open(self.forwarder[LOGGING], 'a') as f:
+                        print('%s %s:%d forwarder reply\n%s' % (FormatTimeUTC(), handler.client_address[0], handler.client_address[1], oDNSRecord), file=f)
+                return oDNSRecord
             replyNXDOMAIN = True
-        elif type == TYPE_PAYLOAD:
+            if self.forwarder[ENABLED] and LOGGING in self.forwarder:
+                with open(self.forwarder[LOGGING], 'a') as f:
+                    print('%s %s:%d NXDOMAIN\n%s' % (FormatTimeUTC(), handler.client_address[0], handler.client_address[1], request), file=f)
+        elif typeCommand == TYPE_PAYLOAD:
             if request.q.qtype != dnslib.QTYPE.TXT and request.q.qtype != dnslib.QTYPE.NULL:
                 replyNXDOMAIN = True
             elif not (len(labelsNormalized) >= 3 and labelsNormalized[0] in self.payloads.keys()):
@@ -556,7 +624,7 @@ class cMyResolver(dnslib.server.BaseResolver):
                             raise Exception('DNS payload: type unknown')
                     else:
                         reply.header.tc = True
-        elif type == TYPE_EXFILTRATION:
+        elif typeCommand == TYPE_EXFILTRATION:
             if request.q.qtype != dnslib.QTYPE.A:
                 replyNXDOMAIN = True
             elif not (len(labelsNormalized) >= 4 and label in self.exfiltrations.keys()):
@@ -610,7 +678,7 @@ class cMyResolver(dnslib.server.BaseResolver):
                         a = copy.copy(rr)
                         a.rname = qname
                         reply.add_answer(a)
-        elif type == TYPE_TRACK:
+        elif typeCommand == TYPE_TRACK:
             if LOGGING in self.tracks[label]:
                 with open(self.tracks[label][LOGGING], 'a') as f:
                     print('%s %s:%d %d %s' % (FormatTimeUTC(), handler.client_address[0], handler.client_address[1], position, '.'.join(labelsNormalized).encode('utf8').decode()), file=f)
@@ -629,7 +697,7 @@ class cMyResolver(dnslib.server.BaseResolver):
                         a = copy.copy(rr)
                         a.rname = qname
                         reply.add_answer(a)
-        elif type == TYPE_RCODE:
+        elif typeCommand == TYPE_RCODE:
             if position != 1:
                 replyNXDOMAIN = True
             elif not label in self.rcodes.keys():
@@ -639,7 +707,7 @@ class cMyResolver(dnslib.server.BaseResolver):
                     rcode = abs(ParseInteger(labelsNormalized[0])) % 0x100
                 except:
                     replyNXDOMAIN = True
-        elif type == TYPE_WILDCARD:
+        elif typeCommand == TYPE_WILDCARD:
             if LOGGING in self.wildcards[label]:
                 with open(self.wildcards[label][LOGGING], 'a') as f:
                     print('%s %s:%d %d %s' % (FormatTimeUTC(), handler.client_address[0], handler.client_address[1], position, '.'.join(labelsNormalized).encode('utf8').decode()), file=f)
@@ -659,7 +727,7 @@ class cMyResolver(dnslib.server.BaseResolver):
                         a = copy.copy(rr)
                         a.rname = qname
                         reply.add_answer(a)
-        elif type == TYPE_RESOLVE:
+        elif typeCommand == TYPE_RESOLVE:
             if position != 0:
                 replyNXDOMAIN = True
             else:
@@ -730,17 +798,6 @@ https://DidierStevens.com'''
 
     while oUDPDNSServer.isAlive():
         time.sleep(1)
-
-def Mainxx():
-    moredesc = '''
-
-Arguments:
-@file: process each file listed in the text file specified
-wildcards are supported
-
-Source code put in the public domain by Didier Stevens, no Copyright
-Use at your own risk
-https://DidierStevens.com'''
 
 if __name__ == '__main__':
     Main()

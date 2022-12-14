@@ -3,7 +3,7 @@
 __description__ = 'ZIP dump utility'
 __author__ = 'Didier Stevens'
 __version__ = '0.0.23'
-__date__ = '2022/05/12'
+__date__ = '2022/12/14'
 
 """
 
@@ -56,6 +56,9 @@ History:
   2020/11/21: Python 3 fix extra info
   2021/10/31: 0.0.22 added -y #x#
   2022/05/12: Python 3 fix
+  2022/05/16: 0.0.23 parsing continued
+  2022/05/17: parsing continued
+  2022/12/14: added option write
 
 Todo:
 """
@@ -119,7 +122,7 @@ And the last column (Timestamp) is the timestamp of the file inside the archive.
 
 Option -s takes the index number or the filename to select a file.
 
-By default, the separator used to delimit columns is the space character. When the default separator is used, padding is added to lign up the columns. Another separator character can be selected with option -S. No padding is used when the separator is provided (even if it is the space character).
+By default, the separator used to delimit columns is the space character. When the default separator is used, padding is added to lign up the columns. Another separator character can be selected with option -S. No padding is used when the separator is provided (even if it is the space character). Use special separator * to produce a list of fielnames & values.
 C:\Demo>zipdump.py -S ; example.zip
 Index;Filename;Encrypted;Timestamp;
 1;Dialog42.exe;0;2012-02-25 12:08:26;
@@ -264,6 +267,9 @@ C:\Demo>zipdump.py -E "#%HEADASCII%;%HEADHEX%" Book1.xlsm
 
 To include extra data with each use of zipdump, define environment variable ZIPDUMP_EXTRA with the parameter that should be passed to -E. When environment variable ZIPDUMP_EXTRA is defined, option -E can be ommited. When option -E is used together with environment variable ZIPDUMP_EXTRA, the parameter of option -E is used and the environment variable is ignored.
 
+To write all contained files to disk, use option -W vir.
+All contained files are written to the current directory, under their name (without directory information) and with extension .vir appended to the filename (leaving the original extension).
+
 zipdump supports YARA rules. Installation of the YARA Python module is not mandatory if you don't use YARA rules.
 You provide the YARA rules with option -y. You can provide one file with YARA rules, an at-file (@file containing the filenames of the YARA files) or a directory. In case of a directory, all files inside the directory are read as YARA files.
 Or you can provide the YARA rule with the option value if it starts with # (literal), #s# (string), #q# (quote), #h# (hexadecimal) or #b# (base64). Example: -y "#rule demo {strings: $a=\"demo\" condition: $a}"
@@ -402,6 +408,92 @@ C:\Demo>zipdump.py -f list double-suffix.zip
 
 When p or s is selected with option -f, the selected data is dumped according to the dump flags (-d, -a, -x, -t).
 
+Records can be parsed by this tool (e.g., not by Python's ZIP library).
+This is a work in progress.
+
+Select record 0x0000032f from the example above:
+
+C:\Demo>zipdump.py -f 0x32f prefix-double.zip
+PK0304 fil b'Dialog42.exe'
+signature1:4b50
+signature2:0403
+version:20
+flags:0
+compressiontype:8 (DEFLATED)
+filetime:0000610d
+filedate:00004059
+crc:f6542f49
+compressedsize:30102
+uncompressedsize:58120
+filenamelength:12
+extrafieldlength:0
+
+Select the data of this record and do ASCII dump:
+
+C:\Demo>zipdump.py -f 0x32f -s data -a prefix-double.zip
+00000000: EC 5C 0D 7C 14 C5 15 DF  BB DD 4B 8E E4 C2 1D 90  .\.|......K.....
+00000010: 40 C0 88 01 83 A2 01 4D  1B 68 A9 47 CA 41 38 40  @......M.h.G.A8@
+00000020: 20 70 49 48 00 21 68 5B  3D D3 B4 B6 0A BB D4 56   pIH.!h[=......V
+...
+00007570: C0 76 CF F8 6C 06 C1 C7  F3 C5 DC 16 79 A5 67 CF  .v..l.......y.g.
+00007580: A7 A1 6C 03 1D 72 50 A2  5D 9B 78 E3 75 28 34 F3  ..l..rP.].x.u(4.
+00007590: 98 E1 F1 15 DF 00                                 ......
+PK0304 fil b'Dialog42.exe'
+signature1:4b50
+signature2:0403
+version:20
+flags:0
+compressiontype:8 (DEFLATED)
+filetime:0000610d
+filedate:00004059
+crc:f6542f49
+compressedsize:30102
+uncompressedsize:58120
+filenamelength:12
+extrafieldlength:0
+
+It's also possible to select data from the extra field: extra.
+Or decompress the data: decompress
+Or decompress the data: data,decompress
+Or decompress the extra data: extra,decompress
+
+Fields can be selected when listing records, by using option E. All fields (all):
+C:\Demo>zipdump.py -f l -E all double-suffix
+     0x00000000 PK0304 fil b'file.txt' signature1:4b50 signature2:0403 version:20 flags:0 compressiontype:8 (DEFLATED) filetime:0000b6f7 filedate:00004f83 crc:1f660a77 compressedsize:665 uncompressedsize:1438 filenamelength:8 extrafieldlength:0
+     0x000002bf PK0102 dir b'file.txt' signature1:4b50 signature2:0201 versionmadeby:63 versiontoextract:20 flags:0 compressiontype:8 (DEFLATED) filetime:0000b6f7 filedate:00004f83 crc:1f660a77 compressedsize:665 uncompressedsize:1438 filenamelength:8 extrafieldlength:36 filecommentlength:0 disknumberstart:0 internalattributes:0 headeroffset:32
+   1 0x00000319 PK0506 end
+     0x0000032f PK0304 fil b'Dialog42.exe' signature1:4b50 signature2:0403 version:20 flags:0 compressiontype:8 (DEFLATED) filetime:0000610d filedate:00004059 crc:f6542f49 compressedsize:30102 uncompressedsize:58120 filenamelength:12 extrafieldlength:0
+     0x000078ef PK0102 dir b'Dialog42.exe' signature1:4b50 signature2:0201 versionmadeby:63 versiontoextract:20 flags:0 compressiontype:8 (DEFLATED) filetime:0000610d filedate:00004059 crc:f6542f49 compressedsize:30102 uncompressedsize:58120 filenamelength:12 extrafieldlength:36 filecommentlength:0 disknumberstart:0 internalattributes:0 headeroffset:32
+   2 0x0000794d PK0506 end
+   s 0x00007963 data 31075:58120l
+
+Or individual fields:
+C:\Demo>zipdump.py -f l -E version,crc double-suffix
+     0x00000000 PK0304 fil b'file.txt' version:20 crc:1f660a77
+     0x000002bf PK0102 dir b'file.txt' crc:1f660a77
+   1 0x00000319 PK0506 end
+     0x0000032f PK0304 fil b'Dialog42.exe' version:20 crc:f6542f49
+     0x000078ef PK0102 dir b'Dialog42.exe' crc:f6542f49
+   2 0x0000794d PK0506 end
+   s 0x00007963 data 31075:58120l
+
+Use prefix ! to print each field on its own line:
+C:\Demo>zipdump.py -f l -E !version,crc double-suffix
+     0x00000000 PK0304 fil b'file.txt'
+                         version:20
+                         crc:1f660a77
+     0x000002bf PK0102 dir b'file.txt'
+                         crc:1f660a77
+   1 0x00000319 PK0506 end
+     0x0000032f PK0304 fil b'Dialog42.exe'
+                         version:20
+                         crc:f6542f49
+     0x000078ef PK0102 dir b'Dialog42.exe'
+                         crc:f6542f49
+   2 0x0000794d PK0506 end
+   s 0x00007963 data 31075:58120l
+
+
 Option -c (--cut) allows for the partial selection of a file. Use this option to "cut out" part of the file.
 The --cut option takes an argument to specify which section of bytes to select from the file. This argument is composed of 2 terms separated by a colon (:), like this:
 termA:termB
@@ -430,6 +522,8 @@ When this option is not used, the complete file is selected.
 '''
     for line in manual.split('\n'):
         print(textwrap.fill(line, 78))
+
+validWriteValues = ['vir']
 
 #Convert 2 Bytes If Python 3
 def C2BIP3(string):
@@ -5082,6 +5176,16 @@ def ZIPDump(zipfilename, options, data=None):
             fOut.close()
         return
 
+    if options.write != '':
+        for oZipInfo in oZipfile.infolist():
+            with oZipfile.open(oZipInfo, 'r', C2BIP3(zippassword)) as file:
+                if not oZipInfo.is_dir():
+                    memberFilename = os.path.basename(oZipInfo.filename) + '.vir'
+                    print('Writing: %s' % memberFilename)
+                    with open(memberFilename, 'wb') as fWrite:
+                        fWrite.write(file.read())
+        return
+
     if options.yara != None:
         if not 'yara' in sys.modules:
             print('Error: option yara requires the YARA Python module.')
@@ -5188,16 +5292,90 @@ def FindAll(data, sub):
         result.append(position)
         start = position + 1
 
+class cPKRecord(object):
+    def GenerateExtraInfo(self, extra):
+        if extra == '' or self.fields == None:
+            return ''
+
+        if extra.startswith('!'):
+            multiplelines = True
+            extra = extra[1:]
+        else:
+            multiplelines = False
+
+        line = []
+        if extra == 'all':
+            toselect = self.formatDescription
+        else:
+            toselect = extra.split(',')
+        for iter in range(len(self.formatDescription)):
+            if self.formatDescription[iter] in toselect:
+                line.append(self.FieldPrintable(iter))
+        if multiplelines:
+            return line
+        else:
+            return ' '.join(line)
+
+    def FieldPrintable(self, index):
+        dDictionaries = {
+            'compressiontype': {
+                0: 'STORED',
+                8: 'DEFLATED',
+            }
+        }
+
+        try:
+            self.formatFormat[index]
+        except IndexError:
+            return None
+        if self.formatFormat[index] == '':
+            value = self.fields[index]
+        elif self.formatFormat[index] == 'dictionary':
+            value = self.fields[index]
+            value = '%d (%s)' % (value, dDictionaries[self.formatDescription[index]].get(value, '<UNKNOWN>'))
+        else:
+            value = self.formatFormat[index] % self.fields[index]
+        return '%s:%s' % (self.formatDescription[index], value)
+
+class cPKFILE(cPKRecord):
+    def __init__(self, data):
+        self.fields = None
+        self.data = None
+        self.extra = None
+        format = '<HHHHHHHIIIHH'
+        self.formatDescription = ['signature1', 'signature2', 'version', 'flags', 'compressiontype', 'filetime', 'filedate', 'crc', 'compressedsize', 'uncompressedsize', 'filenamelength', 'extrafieldlength']
+        self.formatFormat = ['%04x', '%04x', '', '', 'dictionary', '%08x', '%08x', '%08x', '', '', '', '']
+        formatLength = struct.calcsize(format)
+        dataFields = data[:formatLength]
+        if len(dataFields) == formatLength:
+            self.fields = struct.unpack(format, dataFields)
+            self.data = data[formatLength + self.fields[-2] + self.fields[-1]:formatLength + self.fields[-2] + self.fields[-1] + self.fields[8]]
+            self.extra = data[formatLength + self.fields[-2]:formatLength + self.fields[-2] + self.fields[-1]]
+
+class cPKDIR(cPKRecord):
+    def __init__(self, data):
+        self.fields = None
+        self.data = None
+        format = '<HHHHHHHHIIIHHHHHII'
+        self.formatDescription = ['signature1', 'signature2', 'versionmadeby', 'versiontoextract', 'flags', 'compressiontype', 'filetime', 'filedate', 'crc', 'compressedsize', 'uncompressedsize', 'filenamelength', 'extrafieldlength', 'filecommentlength', 'disknumberstart', 'internalattributes', 'headeroffset']
+        self.formatFormat = ['%04x', '%04x', '', '', '', 'dictionary', '%08x', '%08x', '%08x', '', '', '', '', '', '', '', '']
+        formatLength = struct.calcsize(format)
+        dataFields = data[:formatLength]
+        if len(dataFields) == formatLength:
+            self.fields = struct.unpack(format, dataFields)
+
 #a# todo: add more record types - https://pkware.cachefly.net/webdocs/casestudies/APPNOTE.TXT
 def ParseZIPRecord(data):
     if data[0:2] != b'PK':
         return None
     magic = 'PK'
     extra = None
+    oPKRecord = None
     if len(data) >= 4:
         magic += '%02x%02x' % (P23Ord(data[2]), P23Ord(data[3]))
         if data[2:4] == b'\x03\x04':
             magic += ' fil'
+            oPKRecord = cPKFILE(data)
             if len(data[26:28]) == 2:
                 length = struct.unpack('<H', data[26:28])[0]
                 filename = data[30:30 + length]
@@ -5205,6 +5383,7 @@ def ParseZIPRecord(data):
                     magic += ' ' + repr(filename)
         elif data[2:4] == b'\x01\x02':
             magic += ' dir'
+            oPKRecord = cPKDIR(data)
             if len(data[28:30]) == 2:
                 length = struct.unpack('<H', data[28:30])[0]
                 filename = data[46:46 + length]
@@ -5221,7 +5400,7 @@ def ParseZIPRecord(data):
             magic += ' dsc'
         else:
             return None
-    return magic, extra
+    return magic, extra, oPKRecord
 
 def AnalyzeZIPRecord(data, options):
     DumpFunction = SelectDumpFunction(options)
@@ -5314,36 +5493,69 @@ def AnalyzeZIPRecord(data, options):
     else:
         print(' Comment field: %s' % repr(data[:commentLength]))
 
+PARSE_SELECT_SOURCE = 'source'
+PARSE_SELECT_DATA = 'data'
+PARSE_SELECT_EXTRA = 'extra'
+PARSE_SELECT_DECOMPRESS = 'decompress'
+
+def ParsePKRecordSelect(select):
+    dSelect = {
+        PARSE_SELECT_SOURCE: PARSE_SELECT_DATA,
+        PARSE_SELECT_DECOMPRESS: False
+    }
+    
+    for item in select.split(','):
+        if item == PARSE_SELECT_DATA:
+            dSelect[PARSE_SELECT_SOURCE] = PARSE_SELECT_DATA
+        elif item == PARSE_SELECT_EXTRA:
+            dSelect[PARSE_SELECT_SOURCE] = PARSE_SELECT_EXTRA
+        elif item == PARSE_SELECT_DECOMPRESS:
+            dSelect[PARSE_SELECT_DECOMPRESS] = True
+        else:
+            raise Exception('Unknown select option: %s' % item)
+
+    return dSelect
+
 def ZIPFind(zipfilename, options):
     data = cBinaryFile(zipfilename, C2BIP3(options.password), True, True).read()
     locations = [entry for entry in [[location, ParseZIPRecord(data[location:])] for location in FindAll(data, b'PK')] if entry[1] != None]
     records = []
     index = 1
     if len(locations) > 0 and locations[0][0] != 0:
-        records.append(['p', 0, 'data', locations[0][0]])
+        records.append(['p', 0, 'data', locations[0][0], None])
     for location, info in locations:
         if info[0] == 'PK0506 end':
-            records.append([index, location, info[0], info[1]])
+            records.append([index, location, info[0], info[1], info[2]])
             index += 1
         else:
-            records.append([-1, location, info[0], info[1]])
+            records.append([-1, location, info[0], info[1], info[2]])
     if len(locations) > 0 and locations[-1][1][1] != None and locations[-1][0] + locations[-1][1][1] < len(data):
-        records.append(['s', locations[-1][0] + locations[-1][1][1], 'data', len(data) - locations[-1][0] - locations[-1][1][1]])
+        records.append(['s', locations[-1][0] + locations[-1][1][1], 'data', len(data) - locations[-1][0] - locations[-1][1][1], None])
     if options.find == 'list':
         index = 1
         overview = []
-        for index, location, record, info in records:
+        for index, location, record, info, oPKRecord in records:
             if index in ['p', 's']:
                 print(' %3s 0x%08x %s %d:%dl' % (index, location, record, location, info))
             else:
                 if record == 'PK0506 end' and info < 22:
-                    print(' %3s 0x%08x %s %d byte(s) missing' % ('' if index < 0 else str(index), location, record, 22 - info))
+                    line = ' %3s 0x%08x %s %d byte(s) missing' % ('' if index < 0 else str(index), location, record, 22 - info)
                 else:
-                    print(' %3s 0x%08x %s' % ('' if index < 0 else str(index), location, record))
+                    line = ' %3s 0x%08x %s' % ('' if index < 0 else str(index), location, record)
+                if oPKRecord != None:
+                    extrainfo = oPKRecord.GenerateExtraInfo(options.extra)
+                    if isinstance(extrainfo, str):
+                        print(line + ' ' + extrainfo)
+                    else:
+                        print(line)
+                        for item in extrainfo:
+                            print('                         %s' % item)
+                else:
+                    print(line)
     elif options.find in ['p', 's']:
         DumpFunction = SelectDumpFunction(options)
         partial = None
-        for index, location, record, info in records:
+        for index, location, record, info, oPKRecord in records:
             if options.find == index:
                 partial = data[location:location + info]
         if partial == None:
@@ -5353,6 +5565,35 @@ def ZIPFind(zipfilename, options):
                 fOut.write(DumpFunction(CutData(partial, options.cut)))
         else:
             StdoutWriteChunked(DumpFunction(CutData(partial, options.cut)))
+    elif options.find.startswith('0x'):
+        position = int(options.find[2:], 16)
+        found = False
+        for index, location, record, info, oPKRecord in records:
+            if position == location:
+                found = True
+                if not options.dump:
+                    print(record)
+                counter = 0
+                if not options.dump:
+                    while True:
+                        temp = oPKRecord.FieldPrintable(counter)
+                        if temp == None:
+                            break
+                        print(temp)
+                        counter += 1
+                if oPKRecord.data != None and options.select != '':
+                    if options.dump or options.hexdump or options.asciidump or options.translate != '':
+                        DumpFunction = SelectDumpFunction(options)
+                        dSelect = ParsePKRecordSelect(options.select)
+                        if dSelect[PARSE_SELECT_SOURCE] == PARSE_SELECT_DATA:
+                            recordData = oPKRecord.data
+                        elif dSelect[PARSE_SELECT_SOURCE] == PARSE_SELECT_EXTRA:
+                            recordData = oPKRecord.extra
+                        if dSelect[PARSE_SELECT_DECOMPRESS] and oPKRecord.fields[4] == 8:
+                            recordData = zlib.decompress(recordData, -zlib.MAX_WBITS)
+                        StdoutWriteChunked(DumpFunction(CutData(recordData, options.cut)))
+        if not found:
+            print('No record found at position %s' % options.find)
     else:
         index = int(options.find)
         eocd = None
@@ -5376,6 +5617,12 @@ def ValidateOptions(options):
             options.find = 'list'
         elif options.find.lower() in ['p', 's']:
             options.find = options.find.lower()
+        elif options.find.startswith('0x'):
+            try:
+                number = int(options.find[2:], 16)
+            except:
+                print('Error: the value of the find option (-f) is invalid: %s' % options.find)
+                return True
         else:
             try:
                 number = int(options.find)
@@ -5385,6 +5632,14 @@ def ValidateOptions(options):
             except:
                 print('Error: the value of the find option (-f) is invalid: %s' % options.find)
                 return True
+
+    if options.write != '':
+        if not options.write in validWriteValues:
+            print('Invalid write option: %s' % options.write)
+            print('Valid write options are:')
+            for value in validWriteValues:
+                print('  %s' % value)
+            return True
 
     return False
 
@@ -5423,6 +5678,7 @@ def Main():
     oParser.add_option('--decoderdir', type=str, default='', help='directory for the decoder')
     oParser.add_option('-f', '--find', type=str, default='', help='Find PK MAGIC sequence (use l or list for listing, number for selecting)')
     oParser.add_option('-i', '--info', action='store_true', default=False, help='display extra info')
+    oParser.add_option('-W', '--write', type=str, default='', help='Write all files to disk')
     (options, args) = oParser.parse_args()
 
     if options.man:
