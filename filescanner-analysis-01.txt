@@ -27,3 +27,4 @@ $VBAPROJECT:content:str=vbaProject.bin
 PK-VBA:and:PK $VBAPROJECT
 $MSGATTACHMENT:content:uni=__attach_version1.0_
 OLE-MSG-ATTACHMENT:and:OLE $MSGATTACHMENT
+DMP:start:str=MDMP
