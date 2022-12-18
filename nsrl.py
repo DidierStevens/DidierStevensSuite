@@ -2,8 +2,8 @@
 
 __description__ = 'NSRL tool'
 __author__ = 'Didier Stevens'
-__version__ = '0.0.3'
-__date__ = '2021/03/04'
+__version__ = '0.0.4'
+__date__ = '2022/08/23'
 
 """
 
@@ -19,6 +19,7 @@ History:
   2015/09/02: 0.0.2 added ApplicationType
   2015/09/03: added FindNSRLFile
   2021/03/04: 0.0.3 Python 3 and ZIP file layout change
+  2022/08/23: 0.0.4 encoding fix
 
 Todo:
 """
@@ -72,7 +73,7 @@ class cCSVLogger():
         line = self.separator.join(parameters)
         if not self.quiet:
             print(line)
-        f = open(self.filename, 'a')
+        f = open(self.filename, 'a', encoding='utf8')
         f.write(line + '\n')
         f.close()
 

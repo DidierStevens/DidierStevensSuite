@@ -4,7 +4,7 @@ from __future__ import print_function
 
 __description__ = 'myjson-filter'
 __author__ = 'Didier Stevens'
-__version__ = '0.0.2'
+__version__ = '0.0.3'
 __date__ = '2022/04/09'
 
 """
@@ -16,6 +16,7 @@ History:
   2022/03/28: start
   2022/04/04: continue
   2022/04/09: added option -l
+  2022/04/09: 0.0.3 refactoring; added option -t
 
 Todo:
 """
@@ -33,9 +34,11 @@ Manual:
 
 This tool takes JSON output from tools like oledump, zipdump, ... via stdin, filters the items, and outputs JSON to stdout.
 
-Option -n (--namefilter) can be used to file items based on their names. The value for option -n is a regular expression to select matching names.
+Option -n (--namefilter) can be used to filter items based on their names. The value for option -n is a regular expression to select matching names.
 
-Option -c (--contentfilter) can be used to file items based on their content. The value for option -c is a regular expression to select matching content.
+Option -c (--contentfilter) can be used to filter items based on their content. The value for option -c is a regular expression to select matching content.
+
+Option -t (--typefilter) can be used to filter items based on their type determined with file-magic.py. The value for option -t is a regular expression to select matching types.
 
 Flags can be added to regular expressions as follows: #flags#regex.
 Flags can be i (ignore case) and v (reverse selection).
@@ -108,6 +111,12 @@ def ParseHashOption(value):
         return '', value
     return remainder[:position], remainder[position + 1:]
 
+def ProduceJSON(items):
+    for item in items:
+        item['content'] = binascii.b2a_base64(item['content']).decode().strip('\n')
+
+    return json.dumps({'version': 2, 'id': 'didierstevens.com', 'type': 'content', 'fields': ['id', 'name', 'content'], 'items': items})
+
 def ParseHashFilter(value):
     flagsRE = 0
     flagReverse = False
@@ -121,6 +130,12 @@ def ParseHashFilter(value):
             raise Exception('Unknown flag: %s for option %s' % (flag, value))       
     return filterExpression, flagsRE, flagReverse
 
+def PrefixIfNeeded(string, prefix=' '):
+    if string == '':
+        return string
+    else:
+        return prefix + string
+
 def MyJSONFilter(options):
     items = CheckJSON(sys.stdin.read())
 
@@ -132,7 +147,10 @@ def MyJSONFilter(options):
         oRE = re.compile(filterExpression, flagsRE)
         selectedItems = []
         for item in items:
-            if oRE.search(item['name']):
+            itemName = item['name']
+            if not isinstance(itemName, str):
+                itemName = str(itemName)
+            if oRE.search(itemName):
                 if not flagReverse:
                     selectedItems.append(item)
             elif flagReverse:
@@ -151,14 +169,25 @@ def MyJSONFilter(options):
                 selectedItems.append(item)
         items = selectedItems
 
-    for item in items:
-        item['content'] = binascii.b2a_base64(item['content']).decode().strip('\n')
+    if options.typefilter != '':
+        filterExpression, flagsRE, flagReverse = ParseHashFilter(options.typefilter)
+        oRE = re.compile(filterExpression, flagsRE)
+        selectedItems = []
+        for item in items:
+            if oRE.search(item['magic']):
+                if not flagReverse:
+                    selectedItems.append(item)
+            elif flagReverse:
+                selectedItems.append(item)
+        items = selectedItems
 
     if options.list:
         for item in items:
-            print('%3d: %s' % (item['id'], item['name']))
+            print('%3d: %s%s' % (item['id'], item['name'], PrefixIfNeeded(item.get('magic', ''))))
+            if options.content:
+                print(item['content'])
     else:
-        print(json.dumps({'version': 2, 'id': 'didierstevens.com', 'type': 'content', 'fields': ['id', 'name', 'content'], 'items': items}))
+        print(ProduceJSON(items))
 
 def Main():
     moredesc = '''
@@ -171,7 +200,9 @@ https://DidierStevens.com'''
     oParser.add_option('-m', '--man', action='store_true', default=False, help='Print manual')
     oParser.add_option('-n', '--namefilter', type=str, default='', help='Regular expression to filter for the item name')
     oParser.add_option('-c', '--contentfilter', type=str, default='', help='Regular expression to filter for the content')
+    oParser.add_option('-t', '--typefilter', type=str, default='', help='Regular expression to filter for the type')
     oParser.add_option('-l', '--list', action='store_true', default=False, help='List selected items')
+    oParser.add_option('-C', '--content', action='store_true', default=False, help='List also content when option -l is used')
     (options, args) = oParser.parse_args()
 
     if options.man:

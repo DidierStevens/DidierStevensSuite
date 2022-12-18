@@ -4,8 +4,8 @@ from __future__ import print_function
 
 __description__ = 'Essentialy a wrapper for file (libmagic)'
 __author__ = 'Didier Stevens'
-__version__ = '0.0.4'
-__date__ = '2018/10/27'
+__version__ = '0.0.5'
+__date__ = '2022/12/18'
 
 """
 Source code put in public domain by Didier Stevens, no Copyright
@@ -27,6 +27,9 @@ History:
   2018/07/10: updated man
   2018/10/26: 0.0.3 updated cOutput
   2018/10/27: 0.0.4 added option -C
+  2020/10/21: 0.0.5 Python 3 fix in cBinaryFile
+  2022/04/09: added option --jsonoutput
+  2022/12/18: updated man page
 
 Todo:
 """
@@ -292,6 +295,8 @@ xl/ctrlProps/ctrlProp1.xml  XML 1.0 document, ASCII text, with CRLF line termina
 docProps/core.xml XML 1.0 document, ASCII text, with very long lines, with CRLF line terminators
 
 In this example, zipdump is used to produce JSON data with the content of each file contained inside file Book1.xlsm (a ZIP container), which is then consumed by file-magic.py to identify (libmagic) the type of each file.
+
+When option --jsoninput is used, option --jsonoutput can be used to produce JSON data augmented with a 'magic' field.
 
 Option --checkfilenames directs the tool to check the provided files prior to processing. This involves checking if the files exist and are regular files (e.g. not folders).
 
@@ -711,7 +716,7 @@ class cBinaryFile:
             return fRead.read(size)
 
     def Data(self):
-        data = self.fIn.read()
+        data = self.read()
         self.close()
         return data
 
@@ -1417,6 +1422,12 @@ def FileMagicSingle(filename, content, cutexpression, oOutput, oLogfile, outputf
         if not options.ignoreprocessingerrors:
             raise
 
+def ProduceJSON(items):
+    for item in items:
+        item['content'] = binascii.b2a_base64(item['content']).decode().strip('\n')
+
+    return json.dumps({'version': 2, 'id': 'didierstevens.com', 'type': 'content', 'fields': ['id', 'name', 'content'], 'items': items})
+
 def FileMagic(filenames, oLogfile, options):
     oOutput = InstantiateCOutput(options)
     if options.csv:
@@ -1426,10 +1437,16 @@ def FileMagic(filenames, oLogfile, options):
         items = CheckJSON(sys.stdin.read())
         if items == None:
             return
-        for item in items:
-            oOutput.Filename(item['name'], index, len(items))
-            index += 1
-            FileMagicSingle(item['name'], item['content'], '', oOutput, oLogfile, len(items) > 1, options)
+        if options.jsonoutput:
+            oMyMagic = cMyMagic()
+            for item in items:
+                item['magic'] = oMyMagic.Identify(item['content'], options.custom)
+            oOutput.Line(ProduceJSON(items))
+        else:
+            for item in items:
+                oOutput.Filename(item['name'], index, len(items))
+                index += 1
+                FileMagicSingle(item['name'], item['content'], '', oOutput, oLogfile, len(items) > 1, options)
     else:
         for filename, cutexpression in filenames:
             oOutput.Filename(filename, index, len(filenames))
@@ -1461,6 +1478,7 @@ https://DidierStevens.com'''
     oParser.add_option('--recursedir', action='store_true', default=False, help='Recurse directories (wildcards allowed, here files (@...) not)')
     oParser.add_option('--checkfilenames', action='store_true', default=False, help='Perform check if files exist prior to file processing')
     oParser.add_option('--jsoninput', action='store_true', default=False, help='Consume JSON from stdin')
+    oParser.add_option('--jsonoutput', action='store_true', default=False, help='Produce JSON output')
     oParser.add_option('--logfile', type=str, default='', help='Create logfile with given keyword')
     oParser.add_option('--logcomment', type=str, default='', help='A string with comments to be included in the log file')
     oParser.add_option('--ignoreprocessingerrors', action='store_true', default=False, help='Ignore errors during file processing')
@@ -1472,7 +1490,11 @@ https://DidierStevens.com'''
         return
 
     if len(args) != 0 and options.jsoninput:
-        print('Error: option -j can not be used with files')
+        print('Error: option --jsoninput can not be used with files')
+        return
+
+    if options.jsonoutput and not options.jsoninput:
+        print('Error: option --jsonoutput must be used together with --jsoninput ')
         return
 
     oLogfile = cLogfile(options.logfile, options.logcomment)
