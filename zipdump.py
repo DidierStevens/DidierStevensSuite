@@ -2,8 +2,8 @@
 
 __description__ = 'ZIP dump utility'
 __author__ = 'Didier Stevens'
-__version__ = '0.0.23'
-__date__ = '2022/12/14'
+__version__ = '0.0.24'
+__date__ = '2022/12/19'
 
 """
 
@@ -59,6 +59,7 @@ History:
   2022/05/16: 0.0.23 parsing continued
   2022/05/17: parsing continued
   2022/12/14: added option write
+  2022/12/19: 0.0.24 added values hash and hashvir for option write
 
 Todo:
 """
@@ -523,7 +524,7 @@ When this option is not used, the complete file is selected.
     for line in manual.split('\n'):
         print(textwrap.fill(line, 78))
 
-validWriteValues = ['vir']
+validWriteValues = ['vir', 'hash', 'hashvir']
 
 #Convert 2 Bytes If Python 3
 def C2BIP3(string):
@@ -5180,10 +5181,16 @@ def ZIPDump(zipfilename, options, data=None):
         for oZipInfo in oZipfile.infolist():
             with oZipfile.open(oZipInfo, 'r', C2BIP3(zippassword)) as file:
                 if not oZipInfo.is_dir():
-                    memberFilename = os.path.basename(oZipInfo.filename) + '.vir'
+                    data = file.read()
+                    if options.write == 'vir':
+                        memberFilename = os.path.basename(oZipInfo.filename) + '.vir'
+                    else:
+                        memberFilename = hashlib.sha256(data).hexdigest()
+                        if options.write == 'hashvir':
+                            memberFilename += '.vir'
                     print('Writing: %s' % memberFilename)
                     with open(memberFilename, 'wb') as fWrite:
-                        fWrite.write(file.read())
+                        fWrite.write(data)
         return
 
     if options.yara != None:
