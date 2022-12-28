@@ -3,7 +3,7 @@
 __description__ = 'ZIP dump utility'
 __author__ = 'Didier Stevens'
 __version__ = '0.0.24'
-__date__ = '2022/12/19'
+__date__ = '2022/12/28'
 
 """
 
@@ -60,6 +60,7 @@ History:
   2022/05/17: parsing continued
   2022/12/14: added option write
   2022/12/19: 0.0.24 added values hash and hashvir for option write
+  2022/12/28: updated man
 
 Todo:
 """
@@ -268,8 +269,12 @@ C:\Demo>zipdump.py -E "#%HEADASCII%;%HEADHEX%" Book1.xlsm
 
 To include extra data with each use of zipdump, define environment variable ZIPDUMP_EXTRA with the parameter that should be passed to -E. When environment variable ZIPDUMP_EXTRA is defined, option -E can be ommited. When option -E is used together with environment variable ZIPDUMP_EXTRA, the parameter of option -E is used and the environment variable is ignored.
 
-To write all contained files to disk, use option -W vir.
-All contained files are written to the current directory, under their name (without directory information) and with extension .vir appended to the filename (leaving the original extension).
+To write all contained files to disk, use option -W value, where value can be vir, hash or hashvir.
+All contained files are written to the current directory when you use this option.
+The filename depends on the value given for the -W option.
+vir: files are written under their name (without directory information) and with extension .vir appended to the filename (leaving the original extension).
+hash: files are written with a filename equal to the SHA256 hash of their content.
+hashvir: files are written with a filename equal to the SHA256 hash of their content and with extension .vir.
 
 zipdump supports YARA rules. Installation of the YARA Python module is not mandatory if you don't use YARA rules.
 You provide the YARA rules with option -y. You can provide one file with YARA rules, an at-file (@file containing the filenames of the YARA files) or a directory. In case of a directory, all files inside the directory are read as YARA files.
@@ -5510,7 +5515,7 @@ def ParsePKRecordSelect(select):
         PARSE_SELECT_SOURCE: PARSE_SELECT_DATA,
         PARSE_SELECT_DECOMPRESS: False
     }
-    
+
     for item in select.split(','):
         if item == PARSE_SELECT_DATA:
             dSelect[PARSE_SELECT_SOURCE] = PARSE_SELECT_DATA
