@@ -4,8 +4,8 @@ from __future__ import print_function
 
 __description__ = 'Template binary file argument'
 __author__ = 'Didier Stevens'
-__version__ = '0.0.7'
-__date__ = '2022/06/27'
+__version__ = '0.0.8'
+__date__ = '2023/01/21'
 
 """
 Source code put in the public domain by Didier Stevens, no Copyright
@@ -49,6 +49,8 @@ History:
   2021/05/23: 0.0.5 changed binary output logic
   2021/11/11: 0.0.6 added dReplacements to cOutput
   2022/06/27: 0.0.7 Python 3 fix
+  2022/10/13: 0.0.8 updated CalculateByteStatistics
+  2023/01/21: added pyzipper, updated cDump, added cStruct, FindAll, cEnumeration, cMagicValue, CalculateChosenHash
 
 Todo:
   Document flag arguments in man page
@@ -57,7 +59,6 @@ Todo:
 import optparse
 import sys
 import os
-import zipfile
 import binascii
 import random
 import gzip
@@ -72,6 +73,11 @@ import fnmatch
 import json
 import time
 import csv
+try:
+    import pyzipper as zipfile
+except ImportError:
+    import zipfile
+import hashlib
 if sys.version_info[0] >= 3:
     from io import BytesIO as DataIO
 else:
@@ -659,6 +665,12 @@ def AnalyzeFileError(filename):
     except:
         pass
 
+def CreateZipFileObject(arg1, arg2):
+    if 'AESZipFile' in dir(zipfile):
+        return zipfile.AESZipFile(arg1, arg2)
+    else:
+        return zipfile.ZipFile(arg1, arg2)
+
 class cBinaryFile:
     def __init__(self, filename, zippassword='infected', noextraction=False, literalfilename=False):
         self.filename = filename
@@ -683,7 +695,7 @@ class cBinaryFile:
             elif fch == FCH_DATA:
                 self.fIn = DataIO(data)
             elif not self.noextraction and self.filename.lower().endswith('.zip'):
-                self.oZipfile = zipfile.ZipFile(self.filename, 'r')
+                self.oZipfile = CreateZipFileObject(self.filename, 'r')
                 if len(self.oZipfile.infolist()) == 1:
                     self.fIn = self.oZipfile.open(self.oZipfile.infolist()[0], 'r', self.zippassword)
                     self.extracted = True
@@ -1122,6 +1134,25 @@ class cDump():
             oDumpStream.Addline(encoded[0+i:length+i])
         return oDumpStream.Content()
 
+    def HexDumpNoWS(self):
+        return self.data.hex()
+
+    def DumpOption(self, option):
+        if option == 'a':
+            return self.HexAsciiDump()
+        elif option == 'A':
+            return self.HexAsciiDump(rle=True)
+        elif option == 'x':
+            return self.HexDump()
+        elif option == 'X':
+            return self.HexDumpNoWS()
+        elif option == 'b':
+            return self.Base64Dump()
+        elif option == 'B':
+            return self.Base64Dump(nowhitespace=True)
+        else:
+            raise Exception('DumpOption: unknown option %' % option)
+
     class cDumpStream():
         def __init__(self, prefix=''):
             self.oStringIO = StringIO()
@@ -1413,19 +1444,50 @@ class cLogfile():
             self.oOutput.Close()
 
 def CalculateByteStatistics(dPrevalence=None, data=None):
+    longestString = 0
+    longestBASE64String = 0
+    longestHEXString = 0
+    base64digits = b'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789+/'
+    hexdigits = b'abcdefABCDEF0123456789'
     averageConsecutiveByteDifference = None
     if dPrevalence == None:
         dPrevalence = {iter: 0 for iter in range(0x100)}
         sumDifferences = 0.0
         previous = None
         if len(data) > 1:
+            lengthString = 0
+            lengthBASE64String = 0
+            lengthHEXString = 0
             for byte in data:
                 byte = C2IIP2(byte)
                 dPrevalence[byte] += 1
                 if previous != None:
                     sumDifferences += abs(byte - previous)
+                    if byte >= 0x20 and byte < 0x7F:
+                        lengthString += 1
+                    else:
+                        longestString = max(longestString, lengthString)
+                        lengthString = 0
+                    if byte in base64digits:
+                        lengthBASE64String += 1
+                    else:
+                        longestBASE64String = max(longestBASE64String, lengthBASE64String)
+                        lengthBASE64String = 0
+                    if byte in hexdigits:
+                        lengthHEXString += 1
+                    else:
+                        longestHEXString = max(longestHEXString, lengthHEXString)
+                        lengthHEXString = 0
+                else:
+                    if byte >= 0x20 and byte < 0x7F:
+                        lengthString = 1
+                    if byte in hexdigits:
+                        lengthHEXString = 1
                 previous = byte
             averageConsecutiveByteDifference = sumDifferences /float(len(data)-1)
+            longestString = max(longestString, lengthString)
+            longestBASE64String = max(longestBASE64String, lengthBASE64String)
+            longestHEXString = max(longestHEXString, lengthHEXString)
     sumValues = sum(dPrevalence.values())
     countNullByte = dPrevalence[0]
     countControlBytes = 0
@@ -1463,7 +1525,7 @@ def CalculateByteStatistics(dPrevalence=None, data=None):
             prevalence = float(dPrevalence[iter]) / float(sumValues)
             entropy += - prevalence * math.log(prevalence, 2)
             countUniqueBytes += 1
-    return sumValues, entropy, countUniqueBytes, countNullByte, countControlBytes, countWhitespaceBytes, countPrintableBytes, countHighBytes, countHexadecimalBytes, countBASE64Bytes, averageConsecutiveByteDifference
+    return sumValues, entropy, countUniqueBytes, countNullByte, countControlBytes, countWhitespaceBytes, countPrintableBytes, countHighBytes, countHexadecimalBytes, countBASE64Bytes, averageConsecutiveByteDifference, longestString, longestHEXString, longestBASE64String
 
 def Unpack(format, data):
     size = struct.calcsize(format)
@@ -1475,7 +1537,177 @@ def InstantiateCOutput(options):
     filenameOption = None
     if options.output != '':
         filenameOption = options.output
-    return cOutput(filenameOption)
+    binary = False
+    if hasattr(options, 'dump'):
+        binary = options.dump
+    return cOutput(filenameOption, binary)
+
+class cStruct(object):
+    def __init__(self, data):
+        self.data = data
+        self.originaldata = data
+
+    def Unpack(self, format):
+        formatsize = struct.calcsize(format)
+        if len(self.data) < formatsize:
+            raise Exception('Not enough data')
+        tounpack = self.data[:formatsize]
+        self.data = self.data[formatsize:]
+        result = struct.unpack(format, tounpack)
+        if len(result) == 1:
+            return result[0]
+        else:
+            return result
+
+    def UnpackNamedtuple(self, format, typename, field_names):
+        namedTuple = collections.namedtuple(typename, field_names)
+        formatsize = struct.calcsize(format)
+        if len(self.data) < formatsize:
+            raise Exception('Not enough data')
+        tounpack = self.data[:formatsize]
+        self.data = self.data[formatsize:]
+        result = struct.unpack(format, tounpack)
+        return namedTuple(*result)
+
+    def Truncate(self, length):
+        self.data = self.data[:length]
+
+    def GetBytes(self, length=None):
+        if length == None:
+            length = len(self.data)
+        result = self.data[:length]
+        if len(result) < length:
+            raise Exception('Not enough data')
+        self.data = self.data[length:]
+        return result
+
+    def GetString(self, format):
+        stringLength = self.Unpack(format)
+        return self.GetBytes(stringLength)
+
+    def Length(self):
+        return len(self.data)
+
+def FindAll(data, sub):
+    result = []
+    start = 0
+    while True:
+        position = data.find(sub, start)
+        if position == -1:
+            return result
+        result.append(position)
+        start = position + 1
+
+class cEnumeration(object):
+    def __init__(self, iterable, function=lambda x: x):
+        self.iterable = iterable
+        self.function = function
+        self.namedTuple = collections.namedtuple('enum', 'item item_t index counter total first last left left_t right right_t')
+
+    def __iter__(self):
+        self.index = -1
+        self.total = len(self.iterable)
+        return self
+
+    def __next__(self):
+        if self.index < self.total - 1:
+            self.index += 1
+            first = self.index == 0
+            last = self.index == self.total - 1
+            if first:
+                left = None
+                left_t = None
+                self.item = self.iterable[self.index]
+                self.item_t = self.function(self.item)
+            else:
+                left = self.item
+                left_t = self.item_t
+                self.item = self.right
+                self.item_t = self.right_t
+            if last:
+                self.right = None
+                self.right_t = None
+            else:
+                self.right = self.iterable[self.index + 1]
+                self.right_t = self.function(self.right)
+            return self.namedTuple(self.item, self.item_t, self.index, self.index + 1, self.total, first, last, left, left_t, self.right, self.right_t)
+        raise StopIteration
+
+class cMagicValue(object):
+    def __init__(self, data):
+        self.data = data[:4]
+        self.hexadecimal = binascii.b2a_hex(self.data).decode()
+        self.printable = ''.join([chr(byte) if byte >= 32 and byte < 127 else '.' for byte in self.data])
+        self.both = self.printable + ' ' + self.hexadecimal
+
+class cHashCRC32():
+    def __init__(self):
+        self.crc32 = None
+
+    def update(self, data):
+        self.crc32 = zlib.crc32(data)
+
+    def hexdigest(self):
+        return '%08x' % (self.crc32 & 0xffffffff)
+
+class cHashChecksum8():
+    def __init__(self):
+        self.sum = 0
+
+    def update(self, data):
+        if sys.version_info[0] >= 3:
+            self.sum += sum(data)
+        else:
+            self.sum += sum(map(ord, data))
+
+    def hexdigest(self):
+        return '%08x' % (self.sum)
+
+dSpecialHashes = {'crc32': cHashCRC32, 'checksum8': cHashChecksum8}
+
+def GetHashObjects(algorithms):
+    global dSpecialHashes
+
+    dHashes = {}
+
+    if algorithms == '':
+        algorithms = os.getenv('DSS_DEFAULT_HASH_ALGORITHMS', 'md5')
+    if ',' in algorithms:
+        hashes = algorithms.split(',')
+    else:
+        hashes = algorithms.split(';')
+    for name in hashes:
+        if not name in dSpecialHashes.keys() and not name in hashlib.algorithms_available:
+            print('Error: unknown hash algorithm: %s' % name)
+            print('Available hash algorithms: ' + ' '.join([name for name in list(hashlib.algorithms_available)] + list(dSpecialHashes.keys())))
+            return [], {}
+        elif name in dSpecialHashes.keys():
+            dHashes[name] = dSpecialHashes[name]()
+        else:
+            dHashes[name] = hashlib.new(name)
+
+    return hashes, dHashes
+
+def CalculateChosenHash(data):
+    hashes, dHashes = GetHashObjects('')
+    dHashes[hashes[0]].update(data)
+    return dHashes[hashes[0]].hexdigest(), hashes[0]
+
+def GetDumpOption(options, default=None):
+    dPossibleOptions = {
+        'asciidump': 'a',
+        'hexdump': 'x',
+        'dump': 'd',
+        'asciidumprle': 'A',
+        'hexdumpnows': 'X',
+        'base64': 'b',
+        'base64nows': 'B',
+    }
+
+    for attribute, option in dPossibleOptions.items():
+        if hasattr(options, attribute) and getattr(options, attribute):
+            return option
+    return default
 
 def ProcessBinaryFile(filename, content, cutexpression, flag, oOutput, oLogfile, options, oParserFlag):
     if content == None:
@@ -1499,11 +1731,12 @@ def ProcessBinaryFile(filename, content, cutexpression, flag, oOutput, oLogfile,
 
     try:
         # ----- Put your data processing code here -----
-        oOutput.Line('File: %s%s' % (filename, IFF(oBinaryFile.extracted, ' (extracted)', '')))
+        if not oOutput.binary:
+            oOutput.Line('File: %s%s' % (filename, IFF(oBinaryFile.extracted, ' (extracted)', '')))
         if flagoptions.length:
             oOutput.Line('%s len(data) = %d' % (filename, len(data)))
         oOutput.Line(cDump(data[0:0x100]).HexAsciiDump())
-        oOutput.CSVWriteRow([filename, len(data)])
+        oOutput.CSVWriteRow([filename, CalculateByteStatistics(data=data)])
         # ----------------------------------------------
     except:
         oLogfile.LineError('Processing file %s %s' % (filename, repr(sys.exc_info()[1])))
@@ -1551,7 +1784,17 @@ https://DidierStevens.com'''
     oParser.add_option('--logfile', type=str, default='', help='Create logfile with given keyword')
     oParser.add_option('--logcomment', type=str, default='', help='A string with comments to be included in the log file')
     oParser.add_option('--ignoreprocessingerrors', action='store_true', default=False, help='Ignore errors during file processing')
-    (options, args) = oParser.parse_args()
+
+#    oParser.add_option('-s', '--select', default='', help='select item nr for dumping')
+#    oParser.add_option('-d', '--dump', action='store_true', default=False, help='perform dump')
+#    oParser.add_option('-x', '--hexdump', action='store_true', default=False, help='perform hex dump')
+#    oParser.add_option('-X', '--hexdumpnows', action='store_true', default=False, help='perform hex dump without whitespace')
+#    oParser.add_option('-a', '--asciidump', action='store_true', default=False, help='perform ascii dump')
+#    oParser.add_option('-A', '--asciidumprle', action='store_true', default=False, help='perform ascii dump with RLE')
+#    oParser.add_option('-b', '--base64', action='store_true', default=False, help='perform BASE64 dump')
+#    oParser.add_option('-B', '--base64nows', action='store_true', default=False, help='perform BASE64 dump without whitespace')
+
+   (options, args) = oParser.parse_args()
 
     if options.man:
         oParser.print_help()
