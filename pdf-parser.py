@@ -2,10 +2,10 @@
 
 __description__ = 'pdf-parser, use it to parse a PDF document'
 __author__ = 'Didier Stevens'
-__version__ = '0.7.7'
-__date__ = '2022/05/24'
+__version__ = '0.7.8'
+__date__ = '2023/01/03'
 __minimum_python_version__ = (2, 5, 1)
-__maximum_python_version__ = (3, 10, 4)
+__maximum_python_version__ = (3, 11, 1)
 
 """
 Source code put in public domain by Didier Stevens, no Copyright
@@ -73,6 +73,7 @@ History:
   2021/11/23: V0.7.6 Python 3 bug fixes
   2022/05/24: bug fixes
   2022/11/09: V0.7.7 added support for environment variable DSS_DEFAULT_HASH_ALGORITHMS
+  2023/01/03: V0.7.8 added unreferenced objects to statistics
 
 Todo:
   - handle printf todo
@@ -1451,6 +1452,8 @@ def Main():
         cntStartXref = 0
         cntIndirectObject = 0
         dicObjectTypes = {}
+        objectsAll = set()
+        objectsReferenced = set()
         objectsWithStream = []
         keywords = ['/JS', '/JavaScript', '/AA', '/OpenAction', '/AcroForm', '/RichMedia', '/Launch', '/EmbeddedFile', '/XFA', '/URI']
         for extrakeyword in ParseINIFile():
@@ -1576,6 +1579,10 @@ def Main():
                         cntXref += 1
                     elif object.type == PDF_ELEMENT_TRAILER:
                         cntTrailer += 1
+                        oPDFParseDictionary = cPDFParseDictionary(object.content[1:], options.nocanonicalizedoutput)
+                        for keyTrailer, valueTrailer in oPDFParseDictionary.parsed:
+                            if len(valueTrailer) == 3 and valueTrailer[2] == 'R' and IsNumeric(valueTrailer[0]) and IsNumeric(valueTrailer[1]):
+                                objectsReferenced.add(tuple(valueTrailer))
                     elif object.type == PDF_ELEMENT_STARTXREF:
                         cntStartXref += 1
                     elif object.type == PDF_ELEMENT_INDIRECT_OBJECT:
@@ -1590,6 +1597,9 @@ def Main():
                                 dKeywords[keyword].append(object.id)
                         if object.ContainsStream():
                             objectsWithStream.append(object.id)
+                        for reference in object.GetReferences():
+                            objectsReferenced.add(reference)
+                        objectsAll.add((str(object.id), str(object.version), 'R'))
                 else:
                     if object.type == PDF_ELEMENT_COMMENT and selectComment:
                         if options.generate:
@@ -1704,8 +1714,11 @@ def Main():
             print('StartXref: %s' % cntStartXref)
             print('Indirect object: %s' % cntIndirectObject)
             print('Indirect objects with a stream: %s' % ', '.join([str(id) for id in objectsWithStream]))
+            objectsUnreferenced = objectsAll - objectsReferenced
             for key in sorted(dicObjectTypes.keys()):
                 print(' %s %d: %s' % (key, len(dicObjectTypes[key]), ', '.join(map(lambda x: '%d' % x, dicObjectTypes[key]))))
+            if len(objectsUnreferenced) > 0:
+                print('Unreferenced indirect objects: %s' % ', '.join([' '.join(reference) for reference in objectsUnreferenced]))
             if sum(map(len, dKeywords.values())) > 0:
                 print('Search keywords:')
                 for keyword in keywords:
