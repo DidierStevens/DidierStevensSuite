@@ -1718,7 +1718,13 @@ def Main():
             for key in sorted(dicObjectTypes.keys()):
                 print(' %s %d: %s' % (key, len(dicObjectTypes[key]), ', '.join(map(lambda x: '%d' % x, dicObjectTypes[key]))))
             if len(objectsUnreferenced) > 0:
-                print('Unreferenced indirect objects: %s' % ', '.join([' '.join(reference) for reference in objectsUnreferenced]))
+                print('Unreferenced indirect objects: %s' % ', '.join([' '.join(reference) for reference in sorted(objectsUnreferenced, key=lambda a: int(a[0]))]))
+                if '/ObjStm' in dicObjectTypes:
+                    objectsUnreferencedMinusObjStm = set()
+                    for unreferencedObject in objectsUnreferenced:
+                        if not int(unreferencedObject[0]) in dicObjectTypes['/ObjStm']:
+                            objectsUnreferencedMinusObjStm.add(unreferencedObject)
+                    print('Unreferenced indirect objects without /ObjStm objects: %s' % ', '.join([' '.join(reference) for reference in sorted(objectsUnreferencedMinusObjStm, key=lambda a: int(a[0]))]))
             if sum(map(len, dKeywords.values())) > 0:
                 print('Search keywords:')
                 for keyword in keywords:
