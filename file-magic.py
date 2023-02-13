@@ -4,8 +4,8 @@ from __future__ import print_function
 
 __description__ = 'Essentialy a wrapper for file (libmagic)'
 __author__ = 'Didier Stevens'
-__version__ = '0.0.5'
-__date__ = '2022/12/18'
+__version__ = '0.0.6'
+__date__ = '2023/02/13'
 
 """
 Source code put in public domain by Didier Stevens, no Copyright
@@ -30,6 +30,7 @@ History:
   2020/10/21: 0.0.5 Python 3 fix in cBinaryFile
   2022/04/09: added option --jsonoutput
   2022/12/18: updated man page
+  2023/02/13: 0.0.6 added pyzipper
 
 Todo:
 """
@@ -37,7 +38,6 @@ Todo:
 import optparse
 import sys
 import os
-import zipfile
 import binascii
 import random
 import gzip
@@ -60,6 +60,10 @@ if sys.version_info[0] >= 3:
     from io import StringIO
 else:
     from cStringIO import StringIO
+try:
+    import pyzipper as zipfile
+except ImportError:
+    import zipfile
 
 try:
     import magic
@@ -658,6 +662,12 @@ def AnalyzeFileError(filename):
     except:
         pass
 
+def CreateZipFileObject(arg1, arg2):
+    if 'AESZipFile' in dir(zipfile):
+        return zipfile.AESZipFile(arg1, arg2)
+    else:
+        return zipfile.ZipFile(arg1, arg2)
+
 class cBinaryFile:
     def __init__(self, filename, zippassword='infected', noextraction=False, literalfilename=False):
         self.filename = filename
@@ -682,7 +692,7 @@ class cBinaryFile:
             elif fch == FCH_DATA:
                 self.fIn = DataIO(data)
             elif not self.noextraction and self.filename.lower().endswith('.zip'):
-                self.oZipfile = zipfile.ZipFile(self.filename, 'r')
+                self.oZipfile = CreateZipFileObject(self.filename, 'r')
                 if len(self.oZipfile.infolist()) == 1:
                     self.fIn = self.oZipfile.open(self.oZipfile.infolist()[0], 'r', self.zippassword)
                     self.extracted = True

@@ -22,3 +22,11 @@
 # Compressed RTF:  file(1) magic Compressed RTF
 #
 8	string	LZFu	Compressed RTF
+
+# 2023/02/13
+
+#------------------------------------------------------------------------------
+# one:  file(1) magic .one OneNote file
+#
+0	bequad	0xE4525C7B8CD8A74D
+>8	bequad	0xAEB15378D02996D3	.one OneNote file

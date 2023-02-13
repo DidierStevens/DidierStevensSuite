@@ -2,8 +2,8 @@
 
 __description__ = 'XOR known-plaintext attack'
 __author__ = 'Didier Stevens'
-__version__ = '0.0.6'
-__date__ = '2022/09/04'
+__version__ = '0.0.7'
+__date__ = '2023/02/12'
 
 """
 
@@ -25,6 +25,7 @@ History:
   2017/06/04: continued #e# support
   2017/06/16: 0.0.6 continued #e# support
   2022/09/04: Python 3 upgrade, added plaintexts
+  2023/02/12: 0.0.7 added plaintexts cs-key-mod
 
 Todo:
   updated man starting changes 2017/06/03
@@ -44,12 +45,19 @@ except ImportError:
     import zipfile
 
 MALWARE_PASSWORD = 'infected'
+
+def XORData(data, key):
+    return bytes([data[i] ^ key[i % len(key)] for i in range(len(data))])
+
 dPlaintext = {
     'dos': b'This program cannot be run in DOS mode',
     'cs-key':     b'\x00\x07\x00\x03\x01\x00\x30\x81\x9F\x30\x0D\x06\x09\x2A\x86\x48\x86\xF7\x0D\x01\x01\x01\x05\x00\x03\x81\x8D\x00\x30\x81\x89\x02\x81',
     'cs-key-dot': b'\x2E\x29\x2E\x2D\x2F\x2E\x1E\xAF\xB1\x1E\x23\x28\x27\x04\xA8\x66\xA8\xD9\x23\x2F\x2F\x2F\x2B\x2E\x2D\xAF\xA3\x2E\x1E\xAF\xA7\x2C\xAF',
     'cs-key-i':   b'\x69\x6E\x69\x6A\x68\x69\x59\xE8\xF6\x59\x64\x6F\x60\x43\xEF\x21\xEF\x9E\x64\x68\x68\x68\x6C\x69\x6A\xE8\xE4\x69\x59\xE8\xE0\x6B\xE8',
+    'cs-key-mod': b'\x02\x03\x01\x00\x01\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00',
 }
+dPlaintext['cs-key-mod-dot'] = XORData(dPlaintext['cs-key-mod'], b'.')
+dPlaintext['cs-key-mod-i'] = XORData(dPlaintext['cs-key-mod'], b'i')
 
 def PrintManual():
     manual = '''
@@ -472,9 +480,6 @@ class cPrintSeparatingLine():
             self.first = False
         else:
             print(line)
-
-def XORData(data, key):
-    return bytes([data[i] ^ key[i % len(key)] for i in range(len(data))])
 
 def SplitKey(extractedKeyStream):
     result = []

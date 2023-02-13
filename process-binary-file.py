@@ -4,8 +4,8 @@ from __future__ import print_function
 
 __description__ = 'Template binary file argument'
 __author__ = 'Didier Stevens'
-__version__ = '0.0.8'
-__date__ = '2023/01/21'
+__version__ = '0.0.9'
+__date__ = '2023/02/13'
 
 """
 Source code put in the public domain by Didier Stevens, no Copyright
@@ -51,6 +51,7 @@ History:
   2022/06/27: 0.0.7 Python 3 fix
   2022/10/13: 0.0.8 updated CalculateByteStatistics
   2023/01/21: added pyzipper, updated cDump, added cStruct, FindAll, cEnumeration, cMagicValue, CalculateChosenHash
+  2023/02/13: 0.0.9 bugfix cutdata
 
 Todo:
   Document flag arguments in man page
@@ -971,9 +972,9 @@ def ParseCutTerm(argument):
     else:
         if argument.startswith("[u'"):
             # convert ascii to unicode 16 byte sequence
-            searchtext = oMatch.group(1).decode('unicode_escape').encode('utf16')[2:]
+            searchtext = oMatch.group(1).encode('utf16')[2:]
         else:
-            searchtext = oMatch.group(1)
+            searchtext = oMatch.group(1).encode('latin')
         return CUTTERM_FIND, (searchtext, int(Replace(oMatch.group(2), {None: '1'})), ParseInteger(Replace(oMatch.group(3), {None: '0'}))), argument[len(oMatch.group(0)):]
 
 def ParseCutArgument(argument):
@@ -1794,7 +1795,7 @@ https://DidierStevens.com'''
 #    oParser.add_option('-b', '--base64', action='store_true', default=False, help='perform BASE64 dump')
 #    oParser.add_option('-B', '--base64nows', action='store_true', default=False, help='perform BASE64 dump without whitespace')
 
-   (options, args) = oParser.parse_args()
+    (options, args) = oParser.parse_args()
 
     if options.man:
         oParser.print_help()

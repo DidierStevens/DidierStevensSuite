@@ -2,8 +2,8 @@
 
 __description__ = 'Cut a section of bytes out of a file'
 __author__ = 'Didier Stevens'
-__version__ = '0.0.15'
-__date__ = '2022/06/27'
+__version__ = '0.0.16'
+__date__ = '2023/02/13'
 
 """
 
@@ -35,6 +35,7 @@ History:
   2020/12/08: base64dump fix
   2022/04/11: 0.0.14 added data for prefix and suffix
   2022/06/27: 0.0.15 Python 3 fix
+  2023/02/13: 0.0.16 added options -P and -S; added pyzipper
 
 Todo:
 """
@@ -44,7 +45,6 @@ import textwrap
 import re
 import sys
 import os
-import zipfile
 import binascii
 import random
 import gzip
@@ -63,6 +63,10 @@ if sys.version_info[0] >= 3:
     import urllib.request as urllib23
 else:
     import urllib2 as urllib23
+try:
+    import pyzipper as zipfile
+except ImportError:
+    import zipfile
 
 MALWARE_PASSWORD = 'infected'
 dumplinelength = 16
@@ -102,6 +106,15 @@ This cut-expression can be used to dump the first 256 bytes of a PE file located
 This cut-expression can be used to dump the OLE file located inside the stream: [d0cf11e0]:
 
 Data can be added to the selected data using option -p --prefix or/and -s --suffix. The value for option -p and -s is a here document (#..., see later).
+
+Data can be processed with a Python function using option -P (don't use untrusted input for this option, as it is processed by Python's eval function).
+
+Example:
+ cut-bytes.py -P "lambda a: a.upper()" : #Hello
+Output:
+ HELLO
+
+An extra Python script (for example with custom definitions) can be loaded using option -s.
 
 By default the output uses the same representation as the input, but this can be changed to hex, ascii dump or base64 with options -x, -X, -a, -A, -b and -B.
 
@@ -358,9 +371,9 @@ def ParseCutTerm(argument):
     else:
         if argument.startswith("[u'"):
             # convert ascii to unicode 16 byte sequence
-            searchtext = oMatch.group(1).decode('unicode_escape').encode('utf16')[2:]
+            searchtext = oMatch.group(1).encode('utf16')[2:]
         else:
-            searchtext = oMatch.group(1)
+            searchtext = oMatch.group(1).encode('latin')
         return CUTTERM_FIND, (searchtext, int(Replace(oMatch.group(2), {None: '1'})), ParseInteger(Replace(oMatch.group(3), {None: '0'}))), argument[len(oMatch.group(0)):]
 
 def ParseCutArgument(argument):
@@ -811,6 +824,12 @@ def FilenameCheckHash(filename, literalfilename, data=b''):
     else:
         return FCH_FILENAME, filename
 
+def CreateZipFileObject(arg1, arg2):
+    if 'AESZipFile' in dir(zipfile):
+        return zipfile.AESZipFile(arg1, arg2)
+    else:
+        return zipfile.ZipFile(arg1, arg2)
+
 class cBinaryFile:
     def __init__(self, filename, zippassword='infected', noextraction=False, literalfilename=False):
         self.filename = filename
@@ -834,7 +853,7 @@ class cBinaryFile:
         elif fch == FCH_DATA:
             self.fIn = DataIO(data)
         elif not self.noextraction and self.filename.lower().endswith('.zip'):
-            self.oZipfile = zipfile.ZipFile(self.filename, 'r')
+            self.oZipfile = CreateZipFileObject(self.filename, 'r')
             if len(self.oZipfile.infolist()) == 1:
                 self.fIn = self.oZipfile.open(self.oZipfile.infolist()[0], 'r', self.zippassword)
             else:
@@ -866,6 +885,10 @@ class cBinaryFile:
         data = self.read()
         self.close()
         return data
+
+def LoadScriptIfExists(filename):
+    if os.path.exists(filename):
+        exec(open(filename, 'r').read(), globals(), globals())
 
 def CutBytes(expression, filename, options):
     data = cBinaryFile(filename, C2BIP3(options.password), options.noextraction, options.literalfilenames).Data()
@@ -939,6 +962,11 @@ def CutBytes(expression, filename, options):
             else:
                 data = data + suffix
 
+        if options.script != '':
+            LoadScriptIfExists(options.script)
+        if options.python != '':
+            data = eval(options.python)(data)
+
         StdoutWriteChunked(DumpFunction(data))
 
 def Main():
@@ -949,6 +977,8 @@ def Main():
     oParser.add_option('--jsonoutput', action='store_true', default=False, help='produce json output')
     oParser.add_option('-p', '--prefix', default='', help='Prefix expression')
     oParser.add_option('-s', '--suffix', default='', help='Suffix expression')
+    oParser.add_option('-P', '--python', default='', help='Python expression')
+    oParser.add_option('-S', '--script', type=str, default='', help='Script with definitions to include')
     oParser.add_option('-d', '--dump', action='store_true', default=False, help='perform dump')
     oParser.add_option('-x', '--hexdump', action='store_true', default=False, help='perform hex dump')
     oParser.add_option('-X', '--hexdumpnows', action='store_true', default=False, help='perform hex dump without whitespace')
