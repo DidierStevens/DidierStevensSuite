@@ -2,8 +2,8 @@
 
 __description__ = 'Analyze OLE files (Compound Binary Files)'
 __author__ = 'Didier Stevens'
-__version__ = '0.0.71'
-__date__ = '2022/11/09'
+__version__ = '0.0.72'
+__date__ = '2023/02/25'
 
 """
 
@@ -120,6 +120,7 @@ History:
   2022/07/22: 0.0.69 minor documentation change
   2022/09/04: 0.0.70 bumping version for update to plugin(s), no changes to oledump.py
   2022/11/09: 0.0.71 bumping version for update to plugin(s), no changes to oledump.py
+  2023/02/25: 0.0.72 added cStruct
 
 Todo:
 
@@ -1369,6 +1370,52 @@ def FindAll(data, sub):
             return result
         result.append(position)
         start = position + 1
+
+class cStruct(object):
+    def __init__(self, data):
+        self.data = data
+        self.originaldata = data
+
+    def Unpack(self, format):
+        formatsize = struct.calcsize(format)
+        if len(self.data) < formatsize:
+            raise Exception('Not enough data')
+        tounpack = self.data[:formatsize]
+        self.data = self.data[formatsize:]
+        result = struct.unpack(format, tounpack)
+        if len(result) == 1:
+            return result[0]
+        else:
+            return result
+
+    def UnpackNamedtuple(self, format, typename, field_names):
+        namedTuple = collections.namedtuple(typename, field_names)
+        formatsize = struct.calcsize(format)
+        if len(self.data) < formatsize:
+            raise Exception('Not enough data')
+        tounpack = self.data[:formatsize]
+        self.data = self.data[formatsize:]
+        result = struct.unpack(format, tounpack)
+        return namedTuple(*result)
+
+    def Truncate(self, length):
+        self.data = self.data[:length]
+
+    def GetBytes(self, length=None):
+        if length == None:
+            length = len(self.data)
+        result = self.data[:length]
+        if len(result) < length:
+            raise Exception('Not enough data')
+        self.data = self.data[length:]
+        return result
+
+    def GetString(self, format):
+        stringLength = self.Unpack(format)
+        return self.GetBytes(stringLength)
+
+    def Length(self):
+        return len(self.data)
 
 def HeuristicZlibDecompress(data):
     for position in FindAll(data, b'\x78'):
