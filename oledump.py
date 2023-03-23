@@ -2,8 +2,8 @@
 
 __description__ = 'Analyze OLE files (Compound Binary Files)'
 __author__ = 'Didier Stevens'
-__version__ = '0.0.72'
-__date__ = '2023/02/25'
+__version__ = '0.0.73'
+__date__ = '2023/03/23'
 
 """
 
@@ -121,6 +121,7 @@ History:
   2022/09/04: 0.0.70 bumping version for update to plugin(s), no changes to oledump.py
   2022/11/09: 0.0.71 bumping version for update to plugin(s), no changes to oledump.py
   2023/02/25: 0.0.72 added cStruct
+  2023/03/23: 0.0.73 updated cStruct
 
 Todo:
 
@@ -141,6 +142,7 @@ import codecs
 import json
 import struct
 import datetime
+import collections
 if sys.version_info[0] >= 3:
     from io import StringIO
 else:
@@ -1376,13 +1378,24 @@ class cStruct(object):
         self.data = data
         self.originaldata = data
 
-    def Unpack(self, format):
+    def UnpackSub(self, format):
+        if format.endswith('z'):
+            format = format[:-1]
+            sz = True
+        else:
+            sz = False
         formatsize = struct.calcsize(format)
         if len(self.data) < formatsize:
             raise Exception('Not enough data')
         tounpack = self.data[:formatsize]
         self.data = self.data[formatsize:]
         result = struct.unpack(format, tounpack)
+        if sz:
+            result = result + (self.GetString0(), )
+        return result
+
+    def Unpack(self, format):
+        result = self.UnpackSub(format)
         if len(result) == 1:
             return result[0]
         else:
@@ -1390,12 +1403,7 @@ class cStruct(object):
 
     def UnpackNamedtuple(self, format, typename, field_names):
         namedTuple = collections.namedtuple(typename, field_names)
-        formatsize = struct.calcsize(format)
-        if len(self.data) < formatsize:
-            raise Exception('Not enough data')
-        tounpack = self.data[:formatsize]
-        self.data = self.data[formatsize:]
-        result = struct.unpack(format, tounpack)
+        result = self.UnpackSub(format)
         return namedTuple(*result)
 
     def Truncate(self, length):
@@ -1416,6 +1424,14 @@ class cStruct(object):
 
     def Length(self):
         return len(self.data)
+
+    def GetString0(self):
+        position = self.data.find(b'\x00')
+        if position == -1:
+            raise Exception('Missing NUL byte')
+        result = self.data[:position]
+        self.data = self.data[position + 1:]
+        return result
 
 def HeuristicZlibDecompress(data):
     for position in FindAll(data, b'\x78'):

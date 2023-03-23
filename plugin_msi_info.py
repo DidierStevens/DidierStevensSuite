@@ -2,8 +2,8 @@
 
 __description__ = 'MSI summary plugin for oledump.py'
 __author__ = 'Didier Stevens'
-__version__ = '0.0.1'
-__date__ = '2023/02/26'
+__version__ = '0.0.2'
+__date__ = '2023/03/23'
 
 """
 
@@ -14,11 +14,29 @@ Use at your own risk
 History:
   2023/02/25: start
   2023/02/26: continue
+  2023/02/26: 0.0.2 continue
+  2023/02/28: continue
+  2023/03/23 0.0.2: added indicator and cCab
 
 Todo:
 """
 
 import optparse
+
+# https://download.microsoft.com/download/4/d/a/4da14f27-b4ef-4170-a6e6-5b1ef85b1baa/[ms-cab].pdf
+class cCab(object):
+
+    def __init__(self, data):
+        self.data = data
+        oStruct = cStruct(data)
+        oCFHeader = oStruct.UnpackNamedtuple('<IIIIIIBBHH', 'cfheader', 'signature reserved1 cbCabinet reserved2 coffFiles reserved3 versionMinor versionMajor cFolders cFiles')
+        oStruct = cStruct(data[oCFHeader.coffFiles:])
+        self.files = []
+        typename = 'cffile'
+        field_names = 'cbFile uoffFolderStart iFolder date time attribs szName'
+        for i in range(oCFHeader.cFiles):
+            oCFFile = oStruct.UnpackNamedtuple('<IIHHHHz', typename, field_names)
+            self.files.append(oCFFile)
 
 def Convert(character):
     code = '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz._!'
@@ -49,11 +67,11 @@ def StreamToRows(data, columns):
         table.append(row)
     return table
 
-def Magic(data):
+def MagicSub(data):
     if data[:2] == b'MZ':
         result = 'PE File'
     elif data[:4] == b'MSCF':
-        result = 'CAB File MD5'
+        result = 'CAB File'
     elif data[:4] == b'\xff\xd8\xff\xe0':
         result = 'JPEG'
     elif data[:4] == b'\x00\x00\x01\x00':
@@ -64,7 +82,10 @@ def Magic(data):
         result = 'BMP'
     else:
         result = repr(data[:8])
-    return '%s MD5: %s' % (result, hashlib.md5(data).hexdigest())
+    return result
+
+def Magic(data):
+    return '%s MD5: %s' % (MagicSub(data), hashlib.md5(data).hexdigest())
 
 class cStrings(object):
     def __init__(self, dStreams):
@@ -89,6 +110,7 @@ class cStrings(object):
         self.dReferenceCounter[index] = self.dReferenceCounter.get(index, 0) + 1
         return self.dStrings[index]
 
+# https://doxygen.reactos.org/db/de4/msipriv_8h.html
 def ParseColumnAttributes(number):
     if number < 0x8000:
         return '<ERROR>'
@@ -105,15 +127,19 @@ def ParseColumnAttributes(number):
     dTypes = {
         0x104: 'DoubleInteger',
         0x502: 'Integer',
-        0xD48: 'Identifier',
-        0xDFF: 'Condition',
-        0xFFF: 'Text',
+#        0xD48: 'Identifier',
+#        0xDFF: 'Condition',
+#        0xFFF: 'Text',
+        0xD: 'String',
+        0xF: 'StringLocalized',
+        0x9: 'Binary',
     }
     if rest in dTypes:
         result.append('Type:%s' % dTypes[rest])
     else:
-        result.append('Rest1:%03x' % (number & 0x0F00))
-        result.append('Rest2:%02x' % (number & 0x00FF))
+        type = (number & 0x0F00) >> 8
+        result.append('Type:%s' % dTypes.get(type, '%x' % type))
+        result.append('Length:%02x' % (number & 0x00FF))
     return ' '.join(result)
 
 def ColumnFormats(dTable):
@@ -153,6 +179,12 @@ class cMSI(cPluginParentOle):
 
         print('Beta version: the format of the output will change with upcoming releases!')
         streamsProcessed = []
+
+        print('Streams:')
+        for key, [data, index] in self.dStreams.items():
+            if key not in streamsProcessed:
+                print('%3d %10d %s' % (index, len(data), key))
+        print()
 
         oStrings = cStrings(self.dStreams)
         if options.verbose:
@@ -265,6 +297,22 @@ class cMSI(cPluginParentOle):
         print('Remaining streams:')
         for key, [data, index] in self.dStreams.items():
             if key not in streamsProcessed:
-                print('%2d %s %d %s' % (index, key, len(data), Magic(data)))
+                filetype = MagicSub(data)
+                if filetype in ['BMP', 'JPEG', 'ICO', 'CUR']:
+                    indicator = ' '
+                elif filetype in ['PE File', 'CAB File']:
+                    indicator = '!'
+                elif key in ['\x05SummaryInformation', '\x05DocumentSummaryInformation']:
+                    indicator = ' '
+                else:
+                    indicator = '?'
+                print('%2d %s %8d %s %s' % (index, indicator, len(data), key, Magic(data)))
+                if filetype == 'CAB File':
+                    try:
+                        oCab = cCab(data)
+                        for item in oCab.files:
+                            print('               %8d %s' % (item.cbFile, item.szName))
+                    except:
+                        print('               error parsing CAB file')
 
 AddPlugin(cMSI)
