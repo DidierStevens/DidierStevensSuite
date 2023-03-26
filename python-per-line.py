@@ -2,8 +2,8 @@
 
 __description__ = "Program to evaluate a Python expression for each line in the provided text file(s)"
 __author__ = 'Didier Stevens'
-__version__ = '0.0.9'
-__date__ = '2022/12/03'
+__version__ = '0.0.10'
+__date__ = '2023/03/25'
 
 """
 
@@ -31,6 +31,7 @@ History:
   2020/04/19: updated man page
   2022/06/06: 0.0.8 added option -l, fixed xrange for Python 3
   2022/12/03: 0.0.9 added lineNumber
+  2023/03/25: 0.0.10 added options --regex --split --join and Reverse* functions
 
 Todo:
 """
@@ -113,6 +114,39 @@ The result:
 If a line contains more separators than specified by the columns argument, then everything past the last expected separator is considered the last value (this includes the extra separator(s)). We can see this with line "username3:pass:word". The password is pass:word (not pass). SBC returns pass:word.
 If a line contains less separators than specified by the columns argument, then the failvalue is returned. [] makes python-per-line skip an output line, that is why no output is produced for user2.
 
+Reverse is a function to reverse strings. It takes parameters string, group and shift.
+Optional parameter group (with default value 1) specifies how many characters should be grouped before reversal. By default (value 1), each character is reversed individually (same as [::1]).
+Example grouping by 2:
+
+ Content test.txt:
+ om.cnsveterSieid/D:/tpht
+
+ Command:
+ python-per-line.py "Reverse(line, 2)" test.txt
+
+ Output:
+ http://DidierStevens.com
+
+Optional parameter shift (with default value 0) is used when the length of the string is not a multiple of the group value.
+
+ReverseFind is a function to brute-force reverse strings to find substrings. Substrings are specified via optional argument search (default value ['http://', 'https://', 'ftp://']).
+Example:
+
+ Content test.txt:
+ om.cnsveterSieid/D:/tpht
+
+ Command:
+ python-per-line.py "ReverseFind(line)" test.txt
+
+ Output:
+ http://DidierStevens.com
+
+Use option -j to join all lines together, with or without a separator.
+Without a separator: -j ""
+With separator ;: -j ";"
+
+Use option -R for regular expression matching. Only lines that match the regular expression will be processed, and the result of the regex match is available in variable oMatch.
+
 Option -n is used when you just want to invoke a single Python function taking one argument (i.e. the line of text). Then you just have to provide the name of the Python function, and not a Python expression where this Python function is called with line as argument.
 
 Option -r is used to generated a list of numbers and use that as input, in stead of a file.
@@ -179,6 +213,8 @@ Use option --endgrepoptions v to invert the selection.
 Use option --endgrepoptions F to match a fixed string in stead of a regular expression.
 
 When combining --begingrep and --endgrep, make sure that --endgrep does not match a line before --begingrep does.
+
+Option --split can be used to split lines according to a given separator (one or more characters).
 
 The lines are written to standard output, except when option -o is used. When option -o is used, the lines are written to the filename specified by option -o.
 Filenames used with option -o starting with # have special meaning.
@@ -359,10 +395,10 @@ class cOutput():
             epoch = time.time()
         return '%04d%02d%02d-%02d%02d%02d' % time.localtime(epoch)[0:6]
 
-    def Line(self, line):
+    def Line(self, line, eol='\n'):
         if not self.f or self.console:
             try:
-                print(line)
+                print(line, end=eol)
             except UnicodeEncodeError:
                 encoding = sys.stdout.encoding
                 print(line.encode(encoding, errors='backslashreplace').decode(encoding))
@@ -431,8 +467,8 @@ class cOutputResult():
             self.oOutput = cOutput()
         self.options = options
 
-    def Line(self, line):
-        self.oOutput.Line(line)
+    def Line(self, line, eol='\n'):
+        self.oOutput.Line(line, eol)
 
     def LineTimestamped(self, line):
         self.oOutput.LineTimestamped(line)
@@ -486,7 +522,7 @@ class cGrep():
                 line = oMatch.groups()[0]
             return oMatch != None, line
 
-def ProcessFile(fIn, oBeginGrep, oGrep, oEndGrep, fullread):
+def ProcessFile(fIn, oBeginGrep, oGrep, oEndGrep, split, fullread):
     if fIn == None:
         return
 
@@ -503,26 +539,31 @@ def ProcessFile(fIn, oBeginGrep, oGrep, oEndGrep, fullread):
     elif fullread:
         yield fIn.read()
     else:
-        for line in fIn:
-            line = line.rstrip('\n\r')
-            if not begin:
-                begin, line = oBeginGrep.Grep(line)
-            if not begin:
-                continue
-            if not end and oEndGrep != None and oEndGrep.dogrep:
-                end, line = oEndGrep.Grep(line)
-                if end:
-                    returnendline = True
-            if end and not returnendline:
-                continue
-            selected = True
-            if oGrep != None and oGrep.dogrep:
-                selected, line = oGrep.Grep(line)
-            if not selected:
-                continue
-            if end and returnendline:
-                returnendline = False
-            yield line
+        for rawline in fIn:
+            rawline = rawline.rstrip('\n\r')
+            if split == '':
+                lines = [rawline]
+            else:
+                lines = rawline.split(split)
+            for line in lines:
+                if not begin:
+                    begin, line = oBeginGrep.Grep(line)
+                if not begin:
+                    continue
+                if not end and oEndGrep != None and oEndGrep.dogrep:
+                    end, line = oEndGrep.Grep(line)
+                    if end:
+                        returnendline = True
+                if end and not returnendline:
+                    continue
+                selected = True
+                if oGrep != None and oGrep.dogrep:
+                    selected, line = oGrep.Grep(line)
+                if not selected:
+                    continue
+                if end and returnendline:
+                    returnendline = False
+                yield line
 
 def Duckify(line):
     result = ['ENTER']
@@ -544,9 +585,17 @@ def PythonPerLineSingle(expression, filename, oBeginGrep, oGrep, oEndGrep, oOutp
     else:
         fIn = open(filename, 'r', encoding=options.encoding)
     lineNumber = 0
-    for line in ProcessFile(fIn, oBeginGrep, oGrep, oEndGrep, False):
+    if options.regex != '':
+        oRE = re.compile(options.regex, re.I)
+    else:
+        oRE = None
+    for line in ProcessFile(fIn, oBeginGrep, oGrep, oEndGrep, options.split, False):
         lineNumber += 1
         expressionToEvaluate = expression.replace('{}', repr(line))
+        if oRE != None:
+            oMatch = oRE.search(line)
+            if oMatch == None:
+                continue
         try:
             result = eval(expressionToEvaluate)
         except:
@@ -556,7 +605,10 @@ def PythonPerLineSingle(expression, filename, oBeginGrep, oGrep, oEndGrep, oOutp
         if not isinstance(result, list):
             result = [result]
         for item in result:
-            oOutput.Line(item)
+            if options.join == None:
+                oOutput.Line(item)
+            else:
+                oOutput.Line(item, options.join)
     if fIn != sys.stdin and type(fIn) != list:
         fIn.close()
 
@@ -636,12 +688,15 @@ https://DidierStevens.com'''
     oParser.add_option('-r', '--range', type=str, default='', help='Parameters to generate input with range')
     oParser.add_option('-l', '--list', type=str, default='', help='List with lines to process (comma separated)')
     oParser.add_option('-i', '--ignore', action='store_true', default=False, help='Ignore errors when evaluating the expression')
+    oParser.add_option('-R', '--regex', type=str, default='', help='Regular expression to apply to each line')
+    oParser.add_option('-j', '--join', type=str, default=None, help='Join lines together')
     oParser.add_option('--grep', type=str, default='', help='Grep expression')
     oParser.add_option('--grepoptions', type=str, default='', help='Grep options (ivF)')
     oParser.add_option('--begingrep', type=str, default='', help='Grep expression for begin line')
     oParser.add_option('--begingrepoptions', type=str, default='', help='begingrep options (ivF)')
     oParser.add_option('--endgrep', type=str, default='', help='Grep expression for end line')
     oParser.add_option('--endgrepoptions', type=str, default='', help='endgrep options (ivF)')
+    oParser.add_option('--split', type=str, default='', help='Split per string')
     oParser.add_option('--encoding', type=str, default='', help='Encoding for file open')
     (options, args) = oParser.parse_args()
 

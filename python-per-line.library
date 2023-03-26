@@ -1,7 +1,41 @@
 # 20190320 start
+# 20200205 added Chunkify
+# 20230212 added Rotations
+# 20230326 added Reverse*
 
 def DefangURLSub(oMatch):
     return oMatch.groups()[0].replace('t', 'x').replace('T', 'X') + '://' + oMatch.groups()[1][::-1].replace('.', '].[', 1)[::-1]
 
 def Defang(str):
     return re.sub(r'([a-zA-Z]+)://([-a-zA-Z0-9.]+)', DefangURLSub, str)
+
+def Chunkify(str, chunkSize):
+    return [str[i:i + chunkSize] for i in range(0, len(str), chunkSize)]
+
+def Rotations(str, cntCars):
+    return [str[i:] + str[:i] for i in range(0, len(str), cntCars)]
+
+def ReverseSub(string, group, shift):
+    if shift == 0:
+        result = []
+    else:
+        result = [string[:shift]]
+    for i in range(shift, len(string), group):
+        result.append(string[i:i + group])
+    return ''.join(result[::-1])
+
+def Reverse(string, group=1, shift=0):
+    if group == 1:
+        return string[::-1]
+    else:
+        return ReverseSub(string, group, shift)
+
+def ReverseFind(string, search=['http://', 'https://', 'ftp://']):
+    search = [item.lower() for item in search]
+    for group in range(1, int(len(string) / 2) + 1):
+        for shift in range(group):
+            result = ReverseSub(string, group, shift)
+            for item in search:
+                if item in result.lower():
+                    return result
+    return []
