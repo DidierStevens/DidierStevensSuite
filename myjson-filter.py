@@ -4,8 +4,8 @@ from __future__ import print_function
 
 __description__ = 'myjson-filter'
 __author__ = 'Didier Stevens'
-__version__ = '0.0.3'
-__date__ = '2022/04/09'
+__version__ = '0.0.4'
+__date__ = '2023/03/29'
 
 """
 Source code put in the public domain by Didier Stevens, no Copyright
@@ -17,6 +17,7 @@ History:
   2022/04/04: continue
   2022/04/09: added option -l
   2022/04/09: 0.0.3 refactoring; added option -t
+  2023/03/29: 0.0.4 added option -W
 
 Todo:
 """
@@ -27,6 +28,20 @@ import binascii
 import json
 import re
 import textwrap
+import hashlib
+import string
+
+WRITE_VIR = 'vir'
+WRITE_HASH = 'hash'
+WRITE_HASHVIR = 'hashvir'
+WRITE_IDVIR = 'idvir'
+
+dValidWriteValues = {
+  WRITE_VIR: 'filename is item name + extension vir',
+  WRITE_HASH: 'filename is sha256 hash',
+  WRITE_HASHVIR: 'filename is sha256 hash + extension vir',
+  WRITE_IDVIR: 'filename is item id + extension vir'
+}
 
 def PrintManual():
     manual = r'''
@@ -45,12 +60,15 @@ Flags can be i (ignore case) and v (reverse selection).
 
 Use option -l to list the selected items, in stead of outputing JSON data.
 
+Use option -W to write the selected items to files, in stead of outputing JSON data.
+Valid options for -W are:
 '''
+
+    for item in dValidWriteValues.items():
+        manual += ' %s: %s\n' % item
+
     for line in manual.split('\n'):
         print(textwrap.fill(line, 79))
-
-def PrintError(*args, **kwargs):
-    print(*args, file=sys.stderr, **kwargs)
 
 def CheckJSON(stringJSON):
     try:
@@ -127,7 +145,7 @@ def ParseHashFilter(value):
         elif flag == 'v':
             flagReverse = True
         else:
-            raise Exception('Unknown flag: %s for option %s' % (flag, value))       
+            raise Exception('Unknown flag: %s for option %s' % (flag, value))
     return filterExpression, flagsRE, flagReverse
 
 def PrefixIfNeeded(string, prefix=' '):
@@ -135,6 +153,23 @@ def PrefixIfNeeded(string, prefix=' '):
         return string
     else:
         return prefix + string
+
+def CleanName(name):
+    return ''.join([char if char.lower() in string.digits + string.ascii_letters + '.-_' else '_' for char in name])
+
+def WriteFiles(items, options):
+    for item in items:
+        if options.write == WRITE_VIR:
+            memberFilename = CleanName(item['name']) + '.vir'
+        elif options.write == WRITE_IDVIR:
+            memberFilename = str(item['id']) + '.vir'
+        else:
+            memberFilename = hashlib.sha256(item['content']).hexdigest()
+            if options.write == WRITE_HASHVIR:
+                memberFilename += '.vir'
+        print('Writing: %s' % memberFilename)
+        with open(memberFilename, 'wb') as fWrite:
+            fWrite.write(item['content'])
 
 def MyJSONFilter(options):
     items = CheckJSON(sys.stdin.read())
@@ -186,6 +221,8 @@ def MyJSONFilter(options):
             print('%3d: %s%s' % (item['id'], item['name'], PrefixIfNeeded(item.get('magic', ''))))
             if options.content:
                 print(item['content'])
+    elif options.write != '':
+        WriteFiles(items, options)
     else:
         print(ProduceJSON(items))
 
@@ -203,6 +240,7 @@ https://DidierStevens.com'''
     oParser.add_option('-t', '--typefilter', type=str, default='', help='Regular expression to filter for the type')
     oParser.add_option('-l', '--list', action='store_true', default=False, help='List selected items')
     oParser.add_option('-C', '--content', action='store_true', default=False, help='List also content when option -l is used')
+    oParser.add_option('-W', '--write', type=str, default='', help='Write all files to disk')
     (options, args) = oParser.parse_args()
 
     if options.man:
@@ -213,6 +251,14 @@ https://DidierStevens.com'''
     if len(args) != 0:
         print('Error: this tool expects input from stdin')
         return
+
+    if options.write != '':
+        if not options.write in dValidWriteValues:
+            print('Invalid write option: %s' % options.write)
+            print('Valid write options are:')
+            for item in dValidWriteValues.items():
+                print('  %s: %s' % item)
+            return
 
     MyJSONFilter(options)
 
