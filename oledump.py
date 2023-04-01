@@ -2,8 +2,8 @@
 
 __description__ = 'Analyze OLE files (Compound Binary Files)'
 __author__ = 'Didier Stevens'
-__version__ = '0.0.73'
-__date__ = '2023/03/23'
+__version__ = '0.0.74'
+__date__ = '2023/04/01'
 
 """
 
@@ -122,6 +122,7 @@ History:
   2022/11/09: 0.0.71 bumping version for update to plugin(s), no changes to oledump.py
   2023/02/25: 0.0.72 added cStruct
   2023/03/23: 0.0.73 updated cStruct
+  2023/04/01: 0.0.74 added CalculateChosenHash
 
 Todo:
 
@@ -2172,6 +2173,59 @@ def CreateZipFileObject(arg1, arg2):
         return zipfile.AESZipFile(arg1, arg2)
     else:
         return zipfile.ZipFile(arg1, arg2)
+
+class cHashCRC32():
+    def __init__(self):
+        self.crc32 = None
+
+    def update(self, data):
+        self.crc32 = zlib.crc32(data)
+
+    def hexdigest(self):
+        return '%08x' % (self.crc32 & 0xffffffff)
+
+class cHashChecksum8():
+    def __init__(self):
+        self.sum = 0
+
+    def update(self, data):
+        if sys.version_info[0] >= 3:
+            self.sum += sum(data)
+        else:
+            self.sum += sum(map(ord, data))
+
+    def hexdigest(self):
+        return '%08x' % (self.sum)
+
+dSpecialHashes = {'crc32': cHashCRC32, 'checksum8': cHashChecksum8}
+
+def GetHashObjects(algorithms):
+    global dSpecialHashes
+    
+    dHashes = {}
+
+    if algorithms == '':
+        algorithms = os.getenv('DSS_DEFAULT_HASH_ALGORITHMS', 'md5')
+    if ',' in algorithms:
+        hashes = algorithms.split(',')
+    else:
+        hashes = algorithms.split(';')
+    for name in hashes:
+        if not name in dSpecialHashes.keys() and not name in hashlib.algorithms_available:
+            print('Error: unknown hash algorithm: %s' % name)
+            print('Available hash algorithms: ' + ' '.join([name for name in list(hashlib.algorithms_available)] + list(dSpecialHashes.keys())))
+            return [], {}
+        elif name in dSpecialHashes.keys():
+            dHashes[name] = dSpecialHashes[name]()
+        else:
+            dHashes[name] = hashlib.new(name)
+
+    return hashes, dHashes
+
+def CalculateChosenHash(data):
+    hashes, dHashes = GetHashObjects('')
+    dHashes[hashes[0]].update(data)
+    return dHashes[hashes[0]].hexdigest(), hashes[0]
 
 def OLEDump(filename, options):
     returnCode = 0

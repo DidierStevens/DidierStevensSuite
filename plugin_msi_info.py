@@ -2,8 +2,8 @@
 
 __description__ = 'MSI summary plugin for oledump.py'
 __author__ = 'Didier Stevens'
-__version__ = '0.0.2'
-__date__ = '2023/03/23'
+__version__ = '0.0.3'
+__date__ = '2023/04/01'
 
 """
 
@@ -16,7 +16,8 @@ History:
   2023/02/26: continue
   2023/02/26: 0.0.2 continue
   2023/02/28: continue
-  2023/03/23 0.0.2: added indicator and cCab
+  2023/03/23: 0.0.2 added indicator and cCab
+  2023/04/01: 0.0.3 detect signature streams, repr streamname, chosenhash
 
 Todo:
 """
@@ -85,7 +86,8 @@ def MagicSub(data):
     return result
 
 def Magic(data):
-    return '%s MD5: %s' % (MagicSub(data), hashlib.md5(data).hexdigest())
+    hashvalue, hashname = CalculateChosenHash(data)
+    return '%s %s: %s' % (MagicSub(data), hashname, hashvalue)
 
 class cStrings(object):
     def __init__(self, dStreams):
@@ -302,16 +304,16 @@ class cMSI(cPluginParentOle):
                     indicator = ' '
                 elif filetype in ['PE File', 'CAB File']:
                     indicator = '!'
-                elif key in ['\x05SummaryInformation', '\x05DocumentSummaryInformation']:
+                elif key in ['\x05SummaryInformation', '\x05DocumentSummaryInformation', '\x05DigitalSignature', '\x05MsiDigitalSignatureEx']:
                     indicator = ' '
                 else:
                     indicator = '?'
-                print('%2d %s %8d %s %s' % (index, indicator, len(data), key, Magic(data)))
+                print('%2d %s %8d %s %s' % (index, indicator, len(data), repr(key), Magic(data)))
                 if filetype == 'CAB File':
                     try:
                         oCab = cCab(data)
                         for item in oCab.files:
-                            print('               %8d %s' % (item.cbFile, item.szName))
+                            print('               %8d %s' % (item.cbFile, repr(item.szName)))
                     except:
                         print('               error parsing CAB file')
 
