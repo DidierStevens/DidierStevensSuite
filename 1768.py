@@ -4,8 +4,8 @@ from __future__ import print_function
 
 __description__ = 'Analyze Cobalt Strike beacons'
 __author__ = 'Didier Stevens'
-__version__ = '0.0.17'
-__date__ = '2023/04/02'
+__version__ = '0.0.18'
+__date__ = '2023/04/03'
 
 """
 Source code put in the public domain by Didier Stevens, no Copyright
@@ -58,6 +58,7 @@ History:
   2022/08/20: 0.0.16 added output instructions to JSON output
   2022/08/30: 0.0.17 added option -x
   2023/04/02: updated man page
+  2023/04/03: 0.0.18 cleanup debugging
 
 Todo:
 
@@ -2299,7 +2300,6 @@ def ProcessBinaryFileSub(sectiondata, data, oOutput, options):
             elif positionMZ >= 0 and positionMZ < 0x20:
                 oOutput.Line('MZ header found position %d' % positionMZ)
                 AnalyzeEmbeddedPEFile(payload[positionMZ:], oOutput, options)
-                oOutput.Line(cDump(payload[:0x1000]).HexAsciiDump(rle=True))
             elif len(payload) == 0:
                 return False
             else:
