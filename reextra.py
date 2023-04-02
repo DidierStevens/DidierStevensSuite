@@ -2,8 +2,8 @@
 
 __description__ = 're extra'
 __author__ = 'Didier Stevens'
-__version__ = '0.0.7'
-__date__ = '2022/07/19'
+__version__ = '0.0.8'
+__date__ = '2023/02/17'
 
 """
 
@@ -16,6 +16,7 @@ History:
   2020/12/28: Python 3
   2021/02/06: 0.0.6 Fix execfile for Python 3; changed "extra" logic with groups
   2022/07/19: 0.0.7 Python 3 fix
+  2023/02/17: 0.0.8 added HashValidate
 
 Todo:
 """
@@ -140,6 +141,19 @@ def BTCValidate(bc):
     if bcbytes == None:
         return False
     return bcbytes[-4:] == hashlib.sha256(hashlib.sha256(bcbytes[:-4]).digest()).digest()[:4]
+
+def HashValidate(hash):
+    if hash.lower() != hash and hash.upper() != hash:
+        return False
+    sChars = set()
+    sDifferences = set()
+    for index, char in enumerate(hash.lower()):
+        sChars.add(char)
+        number = int(char, 16)
+        if index > 0:
+            sDifferences.add(number - previous)
+        previous = number
+    return len(sChars) > 5 and len(sDifferences) > 10 
 
 tlds = [
     '.aaa',

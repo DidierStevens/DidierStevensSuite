@@ -2,8 +2,8 @@
 
 __description__ = "Program to use Python's re.findall on files"
 __author__ = 'Didier Stevens'
-__version__ = '0.0.21'
-__date__ = '2022/07/24'
+__version__ = '0.0.22'
+__date__ = '2023/04/01'
 
 """
 
@@ -53,6 +53,8 @@ History:
   2022/04/18: 0.0.19 Python3 fix stdin binary
   2022/05/06: 0.0.20 added input & output encoding
   2022/07/24: 0.0.21 added UNC regex
+  2023/02/17: 0.0.22 added hash regexes
+  2023/04/01: added str-s regexes
 
 Todo:
   add hostname to header
@@ -89,20 +91,35 @@ dLibrary = {
             'str-e': r'"[^"]*"',
             'str-u': r'"([^"]+)"',
             'str-eu': r'"([^"]*)"',
+            'str-s': r"'[^']+'",
+            'str-se': r"'[^']*'",
+            'str-su': r"'([^']+)'",
+            'str-seu': r"'([^']*)'",
             'btc': r'(?#extra=P:BTCValidate)\b[13][a-km-zA-HJ-NP-Z1-9]{25,34}\b',
             'onion': r'[a-zA-Z2-7]{16}\.onion',
             'domaintld': r'(?#extra=P:DomainTLDValidate)\b[a-zA-Z0-9.-]+\.[a-zA-Z-]+\b',
             'unc': r'\\\\[a-z0-9 %._-]+\\[a-z0-9 $%._-]+(?:\\[a-z0-9 $%._\\-]+)?',
+            'md5': r'(?#extra=P:HashValidate)\b[0-9a-f]{32}\b',
+            'sha1': r'(?#extra=P:HashValidate)\b[0-9a-f]{40}\b',
+            'sha256': r'(?#extra=P:HashValidate)\b[0-9a-f]{64}\b',
+            'sha512': r'(?#extra=P:HashValidate)\b[0-9a-f]{128}\b',
            }
 
-excludeRegexesForAll = ['str', 'str-e', 'str-u', 'str-eu', 'url-domain', 'email-domain']
+dLibraryGroups = {
+                   'hashes': ['md5', 'sha1', 'sha256', 'sha512']
+                 }
+
+excludeRegexesForAll = ['str', 'str-e', 'str-u', 'str-eu', 'str-s', 'str-se', 'str-su', 'str-seu', 'url-domain', 'email-domain', 'md5', 'sha1', 'sha256', 'sha512']
 
 def ListLibraryNames():
     result = ''
     MergeUserLibrary()
     for key in sorted(dLibrary.keys()):
         result += ' %s%s: %s\n' % (key, IFF(key in excludeRegexesForAll, '', '*'), dLibrary[key])
-    return result + ' all: all names marked with *\n'
+    result += ' all: all names marked with *\n'
+    for key in sorted(dLibraryGroups.keys()):
+        result += ' %s: %s\n' % (key, ', '.join(dLibraryGroups[key]))
+    return result
 
 def PrintManual():
     manual = '''
@@ -358,10 +375,15 @@ def ExpandFilenameArguments(filenames):
 
 def PrintLibrary():
     global dLibrary
+    global dLibraryGroups
 
     print('Valid regex library names:')
     for key in sorted(dLibrary.keys()):
         print(' %s: %s' % (key, dLibrary[key]))
+    print('')
+    print('Valid regex library group names:')
+    for key in sorted(dLibraryGroups.keys()):
+        print(' %s: %s' % (key, ', '.join(dLibraryGroups[key])))
 
 def MergeUserLibrarySub(filename):
     global dLibrary
@@ -504,6 +526,8 @@ def RESearchSingle(regex, filenames, oOutput, options):
         regexes = [CompileRegex(name, options) for name in LibraryAllNames() if not name in excludeRegexesForAll]
     elif options.name and regex.startswith('all-'):
         regexes = [CompileRegex(name, options) for name in LibraryAllNames() if not name in excludeRegexesForAll and not name in regex[4:].split(',')]
+    elif options.name and regex in dLibraryGroups:
+        regexes = [CompileRegex(name, options) for name in LibraryAllNames() if name in dLibraryGroups[regex]]
     else:
         regexes = [CompileRegex(regex, options)]
     for filename in filenames:

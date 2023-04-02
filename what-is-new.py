@@ -2,8 +2,8 @@
 
 __description__ = 'Tool to monitor new items'
 __author__ = 'Didier Stevens'
-__version__ = '0.0.2'
-__date__ = '2022/11/20'
+__version__ = '0.0.3'
+__date__ = '2022/12/19'
 
 """
 History:
@@ -17,6 +17,8 @@ History:
   2018/07/15: 0.0.2 added option -a
   2018/07/20: continued action with function ExecuteAction
   2022/11/20: continued action
+  2022/12/17: 0.0.3 MESSAGE2; option exportvanished
+  2022/12/19: added --logsame
 
 Todo:
   add subprocess.Popen as action option
@@ -32,6 +34,7 @@ import textwrap
 import os
 import binascii
 import datetime
+import re
 
 QUOTE = '"'
 
@@ -70,7 +73,9 @@ By default output is send to standard output, but can be send to a file with opt
 To check a file without updating the existing database, use option -c.
 To create a new database without updating the existing database, use option -n. This will read database what-is-new-DATABASE.pkl and write database what-is-new-DATABASE-new.pkl.
 By default, only new lines are added to the database, no lines are removed. If you want to remove lines from the database that are not present in the files passed to what-is-new, use option -r.
-Changes to the database can be written to a log file by using option -l. The log file is written in the current directory and the name is what-is-new-DATABASE-DATE-TIME.log.
+Changes to the database can be written to a log file by using option -l or -L.
+With -l, the log file is written in the current directory and the name is what-is-new-DATABASE-DATE-TIME.log. So it's a different log file for each execution.
+With -L, the log file is written in the current directory and the name is what-is-new-DATABASE.log. So it's always the same log file for each execution.
 All the lines in a database can be dumped with option -d.
 The database can also be exported as a CSV file including timestamps (local time) using option -e.
 Example:
@@ -79,9 +84,12 @@ A;20150821-110332;20150821-110332;1
 
 The separator for the CSV file is ; by default, but can be chosen with option -s.
 
-Option -a (action) can be used to provide a command that has to be executed (via os.system) when new items are found. Strings WHATISNEW_MESSAGE1, WHATISNEW_QUOTED_MESSAGE1 and WHATISNEW_BASE64_MESSAGE1 (case-sensitive), when present in the command, will be replaced by a small status string: the number of new items and the first new item. Remark that WHATISNEW_MESSAGE1 contains space characters and that you may want to quote/escape this. WHATISNEW_QUOTED_MESSAGE1 is exactly the same as WHATISNEW_MESSAGE1, but surrounded by double-quotes. WHATISNEW_BASE64_MESSAGE1 is exactly the same as WHATISNEW_MESSAGE1, but BASE64 encoded. Option action can be used to send an email, for example, when new items are found.
+Option -E (--exportvanished) is like option -e, but you have to provide a duration. All lines that have not been seen for a period longer than the duration, are exported (same format as -e).
+Lines that have been seen within the duration, are not exported.
+The duration can be expressed in seconds (with or without suffix s, like 10 or 10s), minutes (with suffix m, 10m), hours (with suffix h, 10h) or days (with suffix d, 10d).
 
-This Python program was developed and tested with Python 2, and also tested with Python 3.
+Option -a (action) can be used to provide a command that has to be executed (via os.system) when new items are found. Strings WHATISNEW_MESSAGE1, WHATISNEW_QUOTED_MESSAGE1 and WHATISNEW_BASE64_MESSAGE1 (case-sensitive), when present in the command, will be replaced by a small status string: the number of new items and the first new item. Remark that WHATISNEW_MESSAGE1 contains space characters and that you may want to quote/escape this. WHATISNEW_QUOTED_MESSAGE1 is exactly the same as WHATISNEW_MESSAGE1, but surrounded by double-quotes. WHATISNEW_BASE64_MESSAGE1 is exactly the same as WHATISNEW_MESSAGE1, but BASE64 encoded. Option action can be used to send an email, for example, when new items are found.
+String WHATISNEW_BASE64_MESSAGE2 will be replaced by the BASE64 encoding of a string with newlines. The first line is the number of items, followed by all the items. To limit the number of items, append a number to the end of WHATISNEW_BASE64_MESSAGE2_, like this: WHATISNEW_BASE64_MESSAGE2_5. This will limit the list of items to 5 items.
 '''
     for line in manual.split('\n'):
         print(textwrap.fill(line))
@@ -116,8 +124,11 @@ def Basename(basename):
 def PickleFilename(basename):
     return Basename(basename) + '.pkl'
 
+def LogFilenameTimestamped(basename):
+    return Basename(basename) + '-' + Timestamp() + '.log'
+
 def LogFilename(basename):
-    return Basename(basename) + '-' + Timestamp() +'.log'
+    return Basename(basename) + '.log'
 
 def Serialize(object, basename):
     pickleFile = PickleFilename(basename)
@@ -199,12 +210,50 @@ def Print(line, f):
     else:
         f.write(line +'\n')
 
-def ExecuteAction(options, fLog, newlinesCount, firstnewline):
-    line = '%d new item(s) %s' % (newlinesCount, firstnewline)
+def ParseMessage2(action):
+    oMatch = re.search(r'WHATISNEW_BASE64_MESSAGE2(_?[0-9]*)', action)
+    if oMatch != None:
+        if len(oMatch.groups()) >= 1:
+            if oMatch.groups()[0] == '':
+                return True, oMatch.group(), False, None
+            if len(oMatch.groups()[0]) > 1 and oMatch.groups()[0].startswith('_'):
+                return True, oMatch.group(), True, int(oMatch.groups()[0][1:])
+    return False, None, None, None
+
+def ParseDuration(arg):
+# valid inputs: 60, 36s, 5m, 2h, 7d
+    if arg == '':
+        return
+    elif arg.endswith('s'):
+        delay = int(arg[:-1])
+    elif arg.endswith('m'):
+        delay = int(arg[:-1]) * 60
+    elif arg.endswith('h'):
+        delay = int(arg[:-1]) * 60 * 60
+    elif arg.endswith('d'):
+        delay = int(arg[:-1]) * 60 * 60 * 24
+    else:
+        delay = int(arg)
+    return delay
+
+
+def ExecuteAction(options, fLog, newLines):
     action = options.action
-    action = action.replace('WHATISNEW_MESSAGE1', line)
-    action = action.replace('WHATISNEW_QUOTED_MESSAGE1', '"' + line + '"')
-    action = action.replace('WHATISNEW_BASE64_MESSAGE1', binascii.b2a_base64(line.encode('latin')).decode('latin'))
+    message2Found, message2String, message2IntegerFound, message2Intener = ParseMessage2(action)
+    if message2Found:
+        messageList = ['%d new item(s)' % len(newLines)]
+        if message2IntegerFound:
+            messageList.extend(newLines[:message2Intener])
+        else:
+            messageList.extend(newLines)
+        messageList.append('')
+        message = '\n'.join(messageList)
+        action = action.replace(message2String, binascii.b2a_base64(message.encode('latin')).decode('latin'))
+    else:
+        line = '%d new item(s) %s' % (len(newLines), newLines[0])
+        action = action.replace('WHATISNEW_MESSAGE1', line)
+        action = action.replace('WHATISNEW_QUOTED_MESSAGE1', '"' + line + '"')
+        action = action.replace('WHATISNEW_BASE64_MESSAGE1', binascii.b2a_base64(line.encode('latin')).decode('latin'))
     if fLog != None:
         fLog.write('%s Launching action: %s\n' % (NowUTCISO(), action))
     exitcode = os.system(action)
@@ -229,20 +278,28 @@ def WhatIsNew(database, files, options):
         Print(MakeCSVLine(('Key', 'First', 'Last', 'Count'), options.separator, QUOTE), fOut)
         for key, values in dDatabase.items():
             Print(MakeCSVLine((key, Timestamp(values[0]), Timestamp(values[1]), values[2]), options.separator, QUOTE), fOut)
+    elif options.exportvanished:
+        now = time.time()
+        duration = ParseDuration(options.exportvanished)
+        Print(MakeCSVLine(('Key', 'First', 'Last', 'Count'), options.separator, QUOTE), fOut)
+        for key, values in dDatabase.items():
+            if now - values[1] >= duration:
+                Print(MakeCSVLine((key, Timestamp(values[0]), Timestamp(values[1]), values[2]), options.separator, QUOTE), fOut)
     else:
         if options.log:
+            fLog = open(LogFilenameTimestamped(database), 'a')
+        elif options.logsame:
             fLog = open(LogFilename(database), 'a')
         else:
             fLog = None
-        newlinesCount = 0
-        firstnewline = None
+        newLines = []
         for file in files:
             if file == '':
                 fIn = sys.stdin
             else:
                 fIn = open(file, 'r')
             if fLog != None:
-                fLog.write('File: %s\n' % file)
+                fLog.write('File: %s (%s)\n' % (file, NowUTCISO()))
             for line in [x.strip('\n\r') for x in fIn.readlines()]:
                 if line in dDatabase:
                     if dDatabase[line] == 1: # handle old database format
@@ -253,9 +310,7 @@ def WhatIsNew(database, files, options):
                 else:
                     Print(line, fOut)
                     dDatabase[line] = [now, now, 1]
-                    newlinesCount += 1
-                    if firstnewline == None:
-                        firstnewline = line
+                    newLines.append(line)
                     if fLog != None:
                         fLog.write('Added: %s\n' % line)
             fIn.close()
@@ -273,8 +328,8 @@ def WhatIsNew(database, files, options):
         if not options.check:
             Serialize({'database': dDatabase}, database + IFF(options.newdb, '-new', ''))
 
-        if newlinesCount > 0 and options.action != '':
-            ExecuteAction(options, fLog, newlinesCount, firstnewline)
+        if len(newLines) > 0 and options.action != '':
+            ExecuteAction(options, fLog, newLines)
 
         if fLog != None:
             fLog.close()
@@ -286,8 +341,10 @@ def Main():
     oParser.add_option('-n', '--newdb', action='store_true', default=False, help='create a new database, do not update existing')
     oParser.add_option('-d', '--dump', action='store_true', default=False, help='dump all stored items')
     oParser.add_option('-e', '--export', action='store_true', default=False, help='export all stored items with timestamps')
+    oParser.add_option('-E', '--exportvanished', type=str, default='', help='like option -e, but only for entries that have not been seen at least as long as the given duration')
     oParser.add_option('-r', '--remove', action='store_true', default=False, help='remove all entries present in the database and not present in the file(s)')
-    oParser.add_option('-l', '--log', action='store_true', default=False, help='log adding to/removing from the database')
+    oParser.add_option('-l', '--log', action='store_true', default=False, help='log adding to/removing from the database (timestamped file)')
+    oParser.add_option('-L', '--logsame', action='store_true', default=False, help='log adding to/removing from the database')
     oParser.add_option('-o', '--output', help='output to file')
     oParser.add_option('-a', '--action', type=str, default='', help='action (command) to take when new items were found')
     oParser.add_option('-s', '--separator', default=';', help='separator character (default ;)')
@@ -299,7 +356,7 @@ def Main():
         return
 
     if len(args) == 1:
-        if options.dump or options.export:
+        if options.dump or options.export or options.exportvanished:
             files = []
         else:
             files = ['']

@@ -2,8 +2,8 @@
 
 __description__ = 'TCP and UDP listener'
 __author__ = 'Didier Stevens'
-__version__ = '0.1.2'
-__date__ = '2022/07/07'
+__version__ = '0.1.3'
+__date__ = '2023/03/16'
 
 """
 Source code put in public domain by Didier Stevens, no Copyright
@@ -42,6 +42,9 @@ History:
   2022/04/28: added loglevel
   2022/04/29: added validate
   2022/07/07: added option --utcdatetime
+  2022/09/02: 0.1.3 changed THP_READALL logic
+  2023/01/19: added print lock; THP_ECHO_THIS; THP_ALLOW_LIST
+  2023/03/16: man update for THP_ECHO_THIS
 
 Todo:
   Add support for PyDivert
@@ -80,6 +83,18 @@ THP_DESCRIPTION = 'description'
 THP_MINIMUM_DATA_LENGTH = 'minimum_data_length'
 THP_READALL = 'readall'
 THP_DELAY = 'delay'
+THP_ECHO_THIS = 'echo_this'
+THP_ECHO_THIS_DELIMITER = 'echo_this_delimiter'
+THP_ECHO_THIS_VARIABLE = 'echo_this_variable'
+THP_ECHO_THIS_VARIABLE_DEFAULT = '%ECHOTHIS%'
+THP_ECHO_THIS_FORMAT = 'echo_this_format'
+THP_ECHO_THIS_FORMAT_RAW = 'echo_this_format_raw'
+THP_ECHO_THIS_FORMAT_ESCAPED = 'echo_this_format_escaped'
+THP_ECHO_THIS_FORMAT_BASE64 = 'echo_this_format_base64'
+THP_ECHO_THIS_FORMAT_HEX = 'echo_this_format_hex'
+THP_ECHO_THIS_FORMAT_DYNAMIC = 'echo_this_format_dynamic'
+THP_ECHO_THIS_PERSIST = 'echo_this_persist'
+THP_ALLOW_LIST = 'allow_list'
 
 dumplinelength = 16
 
@@ -349,7 +364,7 @@ dListeners = {
             }
 }
 
-THP_ECHO also takes a class
+THP_ECHO also takes a class.
 
 If persistence is required across function calls, a custom class can also be provided. This class has to implement a method with name Process (input: incoming data, output: transformed data).
 
@@ -374,7 +389,91 @@ dListeners = {
 
 This can be used to make more complex listeners.
 
-Configuration item THP_DELAY introduces a delay (expressed in seconds, use floating number for milliseconds) before each reply. This can be used to simualte timeouts, for example.
+THP_ECHO_THIS can be used to configure a listener that will send a reply depending on the content of the query. In a nutshell: with THP_ECHO_THIS, is is possible to encode the reply somewhere inside the request, and then the listener will extract the reply and send it to the client.
+THP_ECHO_THIS is used together with THP_REPLY and/or THP_MATCH.
+
+THP_ECHO_THIS requires one mandatory configuration item: THP_ECHO_THIS_DELIMITER. Let's illustrate with an example:
+
+dListeners = {
+    4444:   {THP_TCP: {
+                       THP_ECHO_THIS: {THP_ECHO_THIS_DELIMITER: 'ECHOTHIS'},
+                       THP_REPLY: TW_CRLF([b'HTTP/1.1 200 OK', b'Date: %TIME_GMT_RFC2822%', b'Content-Length: %CONTENT_LENGTH%', b'']) + b'<html>Hello %ECHOTHIS%!</html>'
+                      }
+            }
+}
+
+If we run this listener and issue the following curl command:
+
+curl -H "X-Something: ECHOTHISDidierECHOTHIS" http://127.0.0.1:4444
+
+Then we will get this HTML page:
+<html>Hello Didier!</html>
+
+It works as follows: our HTTP GET request done with curl, includes a custom header: X-Something: ECHOTHISDidierECHOTHIS.
+Our listener looks at the raw input (not only the headers), and searches for delimiter ECHOTHIS (specified via THP_ECHO_THIS_DELIMITER). If it finds two instances of this delimiter, it will take all the bytes between these delimiters (Didier) and store this into variable %ECHOTHIS%.
+Then this variable can be used in the reply.
+
+By default, the name of the variable is %ECHOTHIS%, but this can be changed with configuration item THP_ECHO_THIS_VARIABLE.
+The data that is stored inside this variable, is taken from the raw request: its the bytes delimited by the first and second instance of the delimiter (ECHOTHIS by default).
+By default, these bytes are not interpreted, they are taken as is. This behavior can be changed with configuration item THP_ECHO_THIS_FORMAT. This configuration item can be set to the following values:
+
+THP_ECHO_THIS_FORMAT_RAW (default)
+THP_ECHO_THIS_FORMAT_BASE64
+THP_ECHO_THIS_FORMAT_HEX
+THP_ECHO_THIS_FORMAT_ESCAPED
+THP_ECHO_THIS_FORMAT_DYNAMIC
+
+THP_ECHO_THIS_FORMAT_BASE64 means that the bytes are base64-decoded before being stored in the variable.
+THP_ECHO_THIS_FORMAT_HEX means that the bytes are hex-decoded before being stored in the variable.
+THP_ECHO_THIS_FORMAT_ESCAPED means that the bytes are interpreted as a Python string with escape characters (like \\n).
+THP_ECHO_THIS_FORMAT_DYNAMIC means that it is the client that decides on the format, not the listener. In dynamic mode, the content must be preceded by a letter that specifies which encoding is used:
+
+R: THP_ECHO_THIS_FORMAT_RAW
+B: THP_ECHO_THIS_FORMAT_BASE64
+H: THP_ECHO_THIS_FORMAT_HEX
+E: THP_ECHO_THIS_FORMAT_ESCAPED
+
+Here is an example:
+
+dListeners = {
+    4444:   {THP_TCP: {
+                       THP_ECHO_THIS: {THP_ECHO_THIS_DELIMITER: 'ECHOTHIS', THP_ECHO_THIS_FORMAT: THP_ECHO_THIS_FORMAT_DYNAMIC},
+                       THP_REPLY: TW_CRLF([b'HTTP/1.1 200 OK', b'Date: %TIME_GMT_RFC2822%', b'Content-Length: %CONTENT_LENGTH%', b'']) + b'ECHOTHIS%'
+                      }
+            }
+}
+
+If we run this listener and issue the following curl command:
+
+curl -H "X-Something: ECHOTHISH414141410D0AECHOTHIS" http://127.0.0.1:4444
+
+Then we will get this:
+AAAA
+
+The message encode in the header of the query is H414141410D0A. Since we configured a dynamic format (THP_ECHO_THIS_FORMAT_DYNAMIC), the listener takes the first letter of the message (H) and then interprets the rest of the messages as hexadecimal, yielding AAAA\r\n.
+
+Finally, it is possible to prefix this message with one more letter (P for persist) to persist the message between requests.
+
+If we run the same listener and issue the following curl command:
+
+curl -H "X-Something: ECHOTHISPH414141410D0AECHOTHIS" http://127.0.0.1:4444
+
+Then we will get this:
+AAAA
+
+Exactly the same result as in the previous example.
+But this time, the listener also remembers the message (persist) because of the P prefix: PH414141410D0A. If we issue a request without message, then we will still get our message:
+
+curl http://127.0.0.1:4444
+
+Gives this:
+AAAA
+
+
+This will remain the reply to any query, until a new query with a message is performed, or until the listener is stopped.
+
+
+Configuration item THP_DELAY introduces a delay (expressed in seconds, use floating number for milliseconds) before each reply. This can be used to simulate timeouts, for example.
 
 dListeners = {
     4444:   {THP_TCP: {THP_DELAY: 3.5, THP_BANNER: b'Welcome'}}
@@ -399,10 +498,11 @@ In this example, the comma (b',') is a separator. Input like 'hello,lala,bye' is
 
 Sometimes, input data needs a minimum length for processing to start. This can be configured with THP_MINIMUM_DATA_LENGTH.
 
-And a listener can also be configure to read all data until there is no more data ready, before processing starts. This is done with THP_READALL:
+And a listener can also be configure to read all data until there is no more data ready, before processing starts (experimental feature). This is done with THP_READALL.
+Value True enables this, but one can also provide an integer or floating point number. That number is used as a delay (seconds) between each read (recv).
 
 dListeners = {
-    4444:   {THP_TCP: {THP_READALL: True,
+    4444:   {THP_TCP: {THP_READALL: 0.1,
                        THP_MATCH: {
                                    'HELLO':    {THP_STARTSWITH: b'hello', THP_REPLY: b'hi there!'},
                                    'BYE':      {THP_STARTSWITH: b'bye', THP_REPLY: b'see you later!'},
@@ -453,7 +553,7 @@ This is done by creating a key THP_DATA with a value that is a dictionary. This 
 Then each file can be embedded with their filename and content (THP_CONTENT), like this:
 
     THP_DATA: {THP_FILES: {
-                            'cert-20180317-161753.crt': {THP_CONTENT: 
+                            'cert-20180317-161753.crt': {THP_CONTENT:
 """-----BEGIN CERTIFICATE-----
 MIIE3jCCAsYCAQEwDQYJKoZIhvcNAQELBQAwNTELMAkGA1UEBhMCVVMxEDAOBgNV
 ...
@@ -461,7 +561,7 @@ iDM=
 -----END CERTIFICATE-----
 """
                                                         },
-                            'key-20180317-161753.pem': {THP_CONTENT: 
+                            'key-20180317-161753.pem': {THP_CONTENT:
 """-----BEGIN PRIVATE KEY-----
 MIIJQwIBADANBgkqhkiG9w0BAQEFAASCCS0wggkpAgEAAoICAQDEdKSlZSQuXhsY
 ...
@@ -469,7 +569,7 @@ CtDpEOHKFyN/by2NAzByMyixR/A4Zhw=
 -----END PRIVATE KEY-----
 """
                                                         },
-                            'test_rsa.key': {THP_CONTENT: 
+                            'test_rsa.key': {THP_CONTENT:
 """-----BEGIN RSA PRIVATE KEY-----
 MIICWgIBAAKBgQDTj1bqB4WmayWNPB+8jVSYpZYk80Ujvj680pOTh2bORBjbIAyz
 ...nvuQES5C9BMHjF39LZiGH1iLQy7FgdHyoP+eodI7
@@ -479,6 +579,14 @@ MIICWgIBAAKBgQDTj1bqB4WmayWNPB+8jVSYpZYk80Ujvj680pOTh2bORBjbIAyz
                           }},
 
 With this configuration item, the files are embedded inside the configuration dictionary dListeners. When one of these files is referenced in a listener configuration (SSL/TLS/SSH), and the file does not exist on disk, then it is written to disk with name and content found in this THP_DATA configuration item.
+
+A listener can be configured to restrict replies to a list of allowed clients (source IPs). This is done with configuration item THP_ALLOW_LIST.
+
+Example:
+
+dListeners = {
+    4444:   {THP_TCP: {THP_ALLOW_LIST: ['192.168.0.10'], THP_REPLY: b'Hello'}}
+}
 
 When several ports need to behave the same, the dictionary can just contain a reference (THP_REFERENCE) to the port which contains the detailed description.
 
@@ -731,12 +839,14 @@ class cOutput():
     def __init__(self, filename=None, bothoutputs=False):
         self.filename = filename
         self.bothoutputs = bothoutputs
+        self.oLock = threading.Lock()
         if self.filename and self.filename != '':
             self.f = open(self.filename, 'w')
         else:
             self.f = None
 
     def Line(self, line):
+        self.oLock.acquire()
         if not self.f or self.bothoutputs:
             print(line)
         if self.f:
@@ -745,6 +855,7 @@ class cOutput():
                 self.f.flush()
             except:
                 pass
+        self.oLock.release()
 
     def LineTimestamped(self, line):
         self.Line('%s: %s' % (FormatTime(), line))
@@ -773,15 +884,18 @@ def GetContent(data):
     else:
         return data[position + len(MARKER):]
 
-def ReplaceAliases(data):
+def ReplaceAliases(data, dVariables={}):
     global epochOffset
 
     now = time.time()
     now = now + epochOffset
 
-    CONTENT_LENGTH = b'%CONTENT_LENGTH%'
+    for key, value in dVariables.items():
+        data = data.replace(key, value)
     data = data.replace(b'%TIME_GMT_RFC2822%', time.strftime("%a, %d %b %Y %H:%M:%S +0000", time.gmtime(now)).encode())
     data = data.replace(b'%TIME_GMT_EPOCH%', str(int(now)).encode())
+
+    CONTENT_LENGTH = b'%CONTENT_LENGTH%'
     if CONTENT_LENGTH in data:
         data = data.replace(CONTENT_LENGTH, str(len(GetContent(data))).encode())
     return data
@@ -924,19 +1038,78 @@ class cConnectionThread(threading.Thread):
         self.options = options
         self.connection = None
         self.connectionID = None
+        self.protocol = None
 
     def run(self):
-        if self.oSocket.type == 1: #socket.SocketKind.SOCK_STREAM
+        if self.oSocket.type == socket.SocketKind.SOCK_STREAM:
             self.RunTCP()
-        else:
+        elif self.oSocket.type == socket.SocketKind.SOCK_DGRAM:
             self.RunUDP()
 
+    def CheckAllowList(self, address=None):
+        if address == None:
+            return THP_ALLOW_LIST in self.dListener
+        return address in self.dListener[THP_ALLOW_LIST]
+
+    def EchoThis(self, data):
+        dVariables = {}
+        message = None
+        if THP_ECHO_THIS in self.dListener:
+            delimiter = self.dListener[THP_ECHO_THIS][THP_ECHO_THIS_DELIMITER].encode('latin')
+            variable = self.dListener[THP_ECHO_THIS].get(THP_ECHO_THIS_VARIABLE, THP_ECHO_THIS_VARIABLE_DEFAULT).encode('latin')
+            position1 = data.find(delimiter)
+            if position1 != -1:
+                position2 = data.find(delimiter, position1 + 1)
+            else:
+                position2 = -1
+            if position2 != -1:
+                message = data[position1 + len(delimiter):position2]
+        if message != None:
+            persist = False
+            format = self.dListener[THP_ECHO_THIS].get(THP_ECHO_THIS_FORMAT, THP_ECHO_THIS_FORMAT_RAW)
+            if format == THP_ECHO_THIS_FORMAT_DYNAMIC:
+                if message[0:1] == b'P':
+                    persist = True
+                    message = message[1:]
+                format = {
+                    b'B': THP_ECHO_THIS_FORMAT_BASE64,
+                    b'E': THP_ECHO_THIS_FORMAT_ESCAPED,
+                    b'R': THP_ECHO_THIS_FORMAT_RAW,
+                    b'H': THP_ECHO_THIS_FORMAT_HEX,
+                }[message[0:1]]
+                message = message[1:]
+            if format == THP_ECHO_THIS_FORMAT_RAW:
+                pass
+            elif format == THP_ECHO_THIS_FORMAT_BASE64:
+                message = binascii.a2b_base64(message)
+            elif format == THP_ECHO_THIS_FORMAT_HEX:
+                message = binascii.a2b_hex(message)
+            elif format == THP_ECHO_THIS_FORMAT_ESCAPED:
+                message = ast.literal_eval('"""' + message.decode() + '"""').encode('latin')
+            dVariables[variable] = message
+            if persist:
+                self.dListener[THP_ECHO_THIS_PERSIST] = message
+        elif THP_ECHO_THIS_PERSIST in self.dListener:
+            dVariables[variable] = self.dListener[THP_ECHO_THIS_PERSIST]
+
+        return dVariables
+
     def RunTCP(self):
+        self.protocol = THP_TCP
         oSocketConnection, address = self.oSocket.accept()
         self.connectionID = '%s:%d-%s:%d' % (address + self.oSocket.getsockname())
         oSocketConnection.settimeout(self.options.timeout)
         self.oOutput.LineTimestamped('%s TCP connection' % self.connectionID)
         self.dListener, dummy = GetListener(self.oSocket.getsockname()[1])
+        if self.CheckAllowList():
+            if self.CheckAllowList(address[0]):
+                self.oOutput.LineTimestamped('%s %s %s on allowlist' % (self.connectionID, self.protocol, address[0]))
+            else:
+                self.oOutput.LineTimestamped('%s %s %s not on allowlist' % (self.connectionID, self.protocol, address[0]))
+                oSocketConnection.shutdown(socket.SHUT_RDWR)
+                oSocketConnection.close()
+                self.oOutput.LineTimestamped('%s %s closed' % (self.connectionID, self.protocol))
+                return
         previous = b''
         try:
             oSSLConnection = None
@@ -1008,6 +1181,20 @@ class cConnectionThread(threading.Thread):
             for i in range(0, self.dListener.get(THP_LOOP, 1)):
                 if oSSHFile == None:
                     data = self.connection.recv(self.options.readbuffer)
+                    if THP_READALL in self.dListener:
+                        self.connection.setblocking(0)
+                        if self.dListener[THP_READALL] == True:
+                            sleepextra = 0
+                        else:
+                            sleepextra = self.dListener[THP_READALL]
+                        while True:
+                            try:
+                                time.sleep(sleepextra)
+                                dataextra = self.connection.recv(self.options.readbuffer)
+                            except BlockingIOError:
+                                self.connection.setblocking(1)
+                                break
+                            data += dataextra
                 else:
                     data = oSSHFile.readline()
                 self.LogData('TCP', 'data', data)
@@ -1033,7 +1220,7 @@ class cConnectionThread(threading.Thread):
                             self.SendTCP(echodata)
                             self.LogData('TCP', 'send echo', echodata)
                     if THP_REPLY in self.dListener:
-                        self.SendTCP(ReplaceAliases(self.dListener[THP_REPLY]))
+                        self.SendTCP(ReplaceAliases(self.dListener[THP_REPLY], self.EchoThis(splitdata)))
                         self.oOutput.LineTimestamped('%s TCP send reply' % self.connectionID)
                     if THP_MATCH in self.dListener:
                         dKeys = {}
@@ -1049,7 +1236,7 @@ class cConnectionThread(threading.Thread):
                                     oMatch = re.search(dMatch[THP_REGEX], splitdata, re.DOTALL)
                                     if oMatch != None:
                                         matches.append([len(oMatch.group()), dMatch, matchname])
-                            dataToSend, messagesToLog, stopConnection = self.ProcessMatches(matches, self.dListener, THP_TCP)
+                            dataToSend, messagesToLog, stopConnection = self.ProcessMatches(matches, splitdata)
                             if dataToSend != None:
                                 self.SendTCP(dataToSend)
                             for message in messagesToLog:
@@ -1061,7 +1248,7 @@ class cConnectionThread(threading.Thread):
                             for matchname, dMatch in self.dListener[THP_MATCH].items():
                                 if THP_STARTSWITH in dMatch and splitdata.startswith(dMatch[THP_STARTSWITH]):
                                     matches.append([len(dMatch[THP_STARTSWITH]), dMatch, matchname])
-                            dataToSend, messagesToLog, stopConnection = self.ProcessMatches(matches, self.dListener, THP_TCP)
+                            dataToSend, messagesToLog, stopConnection = self.ProcessMatches(matches, splitdata)
                             if dataToSend != None:
                                 self.SendTCP(dataToSend)
                             for message in messagesToLog:
@@ -1070,12 +1257,6 @@ class cConnectionThread(threading.Thread):
                                 break
                 if stopConnection:
                     break
-            if THP_READALL in self.dListener and oSSHFile == None:
-                while True:
-                    data = self.connection.recv(self.options.readbuffer)
-                    if len(data) < 1:
-                        break
-                    self.LogData('TCP', 'readall data', data)
             #a# is it necessary to close both oSSLConnection and oSocketConnection?
             if oSSLConnection != None:
                 oSSLConnection.shutdown(socket.SHUT_RDWR)
@@ -1100,12 +1281,12 @@ class cConnectionThread(threading.Thread):
         if self.options.dumpdata:
             self.LogData('TCP', 'sent', data)
 
-    def ProcessMatches(self, matches, dListener, protocol):
+    def ProcessMatches(self, matches, datain):
         result = False
         data = None
         logs = []
         if matches == []:
-            for matchname, dMatch in dListener[THP_MATCH].items():
+            for matchname, dMatch in self.dListener[THP_MATCH].items():
                 if THP_ELSE in dMatch:
                     matches.append([0, dMatch, THP_ELSE])
         if matches != []:
@@ -1114,19 +1295,27 @@ class cConnectionThread(threading.Thread):
             longestmatch = random.choice(longestmatches)
             dMatchLongest = longestmatch[1]
             if THP_REPLY in dMatchLongest:
-                data = ReplaceAliases(dMatchLongest[THP_REPLY])
-                logs.append('%s %s send %s reply' % (self.connectionID, protocol, longestmatch[2]))
+                data = ReplaceAliases(dMatchLongest[THP_REPLY], self.EchoThis(datain))
+                logs.append('%s %s send %s reply' % (self.connectionID, self.protocol, longestmatch[2]))
             if dMatchLongest.get(THP_ACTION, b'') == THP_DISCONNECT:
-                logs.append('%s %s disconnecting' % (self.connectionID, protocol))
+                logs.append('%s %s disconnecting' % (self.connectionID, self.protocol))
                 result = True
         return data, logs, result
 
     def RunUDP(self):
+        self.protocol = THP_UDP
         data, address = self.oSocket.recvfrom(self.options.readbuffer)
         self.connectionID = '%s:%d-%s:%d' % (address + self.oSocket.getsockname())
         self.oOutput.LineTimestamped('%s UDP connection' % self.connectionID)
         self.LogData('UDP', 'data', data)
-        self.dListener, dummy = GetListener(self.oSocket.getsockname()[1], THP_UDP)
+        self.dListener, dummy = GetListener(self.oSocket.getsockname()[1], self.protocol)
+        if self.CheckAllowList():
+            if self.CheckAllowList(address[0]):
+                self.oOutput.LineTimestamped('%s %s %s on allowlist' % (self.connectionID, self.protocol, address[0]))
+            else:
+                self.oOutput.LineTimestamped('%s %s %s not on allowlist' % (self.connectionID, self.protocol, address[0]))
+                return
+
         if THP_ECHO in self.dListener and inspect.isclass(self.dListener[THP_ECHO]):
             echoObject = self.dListener[THP_ECHO](self.oOutput)
         else:
@@ -1145,7 +1334,7 @@ class cConnectionThread(threading.Thread):
                     self.SendUDP(echodata, address)
                     self.LogData('UDP', 'send echo', echodata)
             if THP_REPLY in self.dListener:
-                self.SendUDP(ReplaceAliases(self.dListener[THP_REPLY]), address)
+                self.SendUDP(ReplaceAliases(self.dListener[THP_REPLY], self.EchoThis(splitdata)), address)
                 self.oOutput.LineTimestamped('%s UDP send reply' % self.connectionID)
             if THP_MATCH in self.dListener:
                 dKeys = {}
@@ -1161,7 +1350,7 @@ class cConnectionThread(threading.Thread):
                             oMatch = re.search(dMatch[THP_REGEX], splitdata, re.DOTALL)
                             if oMatch != None:
                                 matches.append([len(oMatch.group()), dMatch, matchname])
-                    dataToSend, messagesToLog, stopConnection = self.ProcessMatches(matches, self.dListener, THP_UDP)
+                    dataToSend, messagesToLog, stopConnection = self.ProcessMatches(matches, splitdata)
                     if dataToSend != None:
                         self.SendUDP(dataToSend, address)
                     for message in messagesToLog:
@@ -1173,7 +1362,7 @@ class cConnectionThread(threading.Thread):
                     for matchname, dMatch in self.dListener[THP_MATCH].items():
                         if THP_STARTSWITH in dMatch and splitdata.startswith(dMatch[THP_STARTSWITH]):
                             matches.append([len(dMatch[THP_STARTSWITH]), dMatch, matchname])
-                    dataToSend, messagesToLog, stopConnection = self.ProcessMatches(matches, self.dListener, THP_UDP)
+                    dataToSend, messagesToLog, stopConnection = self.ProcessMatches(matches, splitdata)
                     if dataToSend != None:
                         self.SendUDP(dataToSend, address)
                     for message in messagesToLog:

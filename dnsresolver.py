@@ -4,8 +4,8 @@ from __future__ import print_function
 
 __description__ = 'DNS server for serving files, exfiltration, tracking, wildcards, rcode testing, resolving and forwarding'
 __author__ = 'Didier Stevens'
-__version__ = '0.0.2'
-__date__ = '2022/12/04'
+__version__ = '0.0.3'
+__date__ = '2023/04/01'
 
 """
 
@@ -33,6 +33,8 @@ History:
   2022/05/30: 0.0.2 MatchSublist
   2022/05/31: added TYPE_FORWARDER
   2022/12/04: finished forwarder
+  2023/03/16: 0.0.3 label *
+  2023/04/01: updated man; added ParseAnswerValue
 
 Todo:
 add option to control TCP size
@@ -51,6 +53,7 @@ import struct
 import mmap
 import copy
 import os.path
+import re
 
 try:
     import dnslib
@@ -78,7 +81,9 @@ $> dnsresolver.py type=payload,label=executable,file=test.exe,encoding=base64
 
 Commands consist of key-value pairs (key=value) separated by commas (,). If you need to use whitespace inside a command (for example for file names with space characters), you need to escape said whitespace with according to the rules of your shell.
 
-Each command requires at least a key-value pair with key 'type'. This defines the type of command. Possible values are payload, exfiltration, track, wildcard, rcode and resolve.
+Each command requires at least a key-value pair with key 'type'. This defines the type of command. Possible values are payload, exfiltration, track, wildcard, rcode, resolve and forward.
+
+Key label specifies the DNS label to match (more details provided with the individual commands). Labels have to be unique: you can not have more than one command with the same label. A label can have value '*'. This label will match all queries that do not match other labels.
 
 A payload command takes the following key-value pairs:
   type=payload
@@ -142,6 +147,7 @@ Example of answer usage:
   ./dnsresolver.py "type=exfiltration,label=dataleak,answer=. 60 IN A 127.0.0.1"
 
 This defines the answer to be an Internet A record with IPv4 address 127.0.0.1.
+You can also directly provide an IPv4 address, that will be converted to ". 60 IN A ..." format (this applies for all commands that take an answer key-value pair).
 
 Exfiltration can be used to exfiltrate data via DNS A queries using the following protocol:
 
@@ -354,6 +360,11 @@ def DefineLabelFromFilename(filename):
             return label
     return label
 
+def ParseAnswerValue(answer):
+    if re.match('^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$', answer):
+        return '. 60 IN A ' + answer
+    return answer
+        
 def ValidatePayload(dCommand):
     for name, value in dCommand.items():
         if name != FILE and name != DATA:
@@ -379,8 +390,7 @@ def ValidateExfiltration(dCommand):
             dCommand[name] = value.lower().strip()
     if not LABEL in dCommand:
         raise Exception('Error exfiltration: label missing')
-    if not ANSWER in dCommand:
-        dCommand[ANSWER] = ''
+    dCommand[ANSWER] = ParseAnswerValue(dCommand.get(ANSWER, ''))
     return dCommand
 
 def ValidateTrack(dCommand):
@@ -389,8 +399,7 @@ def ValidateTrack(dCommand):
             dCommand[name] = value.lower().strip()
     if not LABEL in dCommand:
         raise Exception('Error track: label missing')
-    if not ANSWER in dCommand:
-        dCommand[ANSWER] = ''
+    dCommand[ANSWER] = ParseAnswerValue(dCommand.get(ANSWER, ''))
     if LOGGING in dCommand:
         dCommand[LOGGING] = '%s-%s.log' % (dCommand[LOGGING], FormatTimeUTC())
     return dCommand
@@ -409,8 +418,6 @@ def ValidateWildcard(dCommand):
             dCommand[name] = value.lower().strip()
     if not LABEL in dCommand:
         raise Exception('Error wildcard: label missing')
-    if not ANSWER in dCommand:
-        dCommand[ANSWER] = ''
     if LOGGING in dCommand:
         dCommand[LOGGING] = '%s-%s.log' % (dCommand[LOGGING], FormatTimeUTC())
     return dCommand
@@ -423,7 +430,7 @@ def ValidateResolve(dCommand):
         raise Exception('Error resolve: label missing')
     if not ANSWER in dCommand:
         dCommand[ANSWER] = ''
-    dCommand[ANSWER] = dCommand[ANSWER].split(';')
+    dCommand[ANSWER] = [ParseAnswerValue(answer) for answer in dCommand[ANSWER].split(';')]
     dCommand[INDEX] = 0
     return dCommand
 
@@ -434,8 +441,9 @@ def ValidateForwarder(dCommand):
         dCommand[LOGGING] = '%s-%s.log' % (dCommand[LOGGING], FormatTimeUTC())
     return dCommand
 
-#a# case sensitivity
 def MatchSublist(list1, list2):
+    list1 = [item.lower() for item in list1]
+    list2 = [item.lower() for item in list2]
     try:
         position = list1.index(list2[0])
     except ValueError:
@@ -458,6 +466,11 @@ def MatchLabel(dLabels, labelArg):
         position = MatchSublist(labelArg, label.split('.'))
         if position != -1:
             return dLabels[label], label, position
+
+    label = '*'
+    if label in dLabels.keys():
+        return dLabels[label], label, 0
+
     return None, None, None
 
 def GetChunk(position, data):
