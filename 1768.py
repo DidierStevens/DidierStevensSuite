@@ -4,8 +4,8 @@ from __future__ import print_function
 
 __description__ = 'Analyze Cobalt Strike beacons'
 __author__ = 'Didier Stevens'
-__version__ = '0.0.16'
-__date__ = '2022/08/20'
+__version__ = '0.0.17'
+__date__ = '2023/04/02'
 
 """
 Source code put in the public domain by Didier Stevens, no Copyright
@@ -56,6 +56,8 @@ History:
   2022/07/31: 0.0.15 update class cAPIOptions
   2022/08/17: added option --sanitycheck; refactored FinalTests
   2022/08/20: 0.0.16 added output instructions to JSON output
+  2022/08/30: 0.0.17 added option -x
+  2023/04/02: updated man page
 
 Todo:
 
@@ -104,6 +106,8 @@ Manual:
 1768 Kelvin is the melting point of the metal cobalt.
 
 This tool decrypts and dumps the configuration of Cobalt Strike Windows beacons (PE files), shellcode and memory dumps.
+
+Use option -x to try all 256 xor keys for the configuration (not only 0x2e and 0x69).
 
 Option -s (--select) can be used to select a particular configuration item (by decimal of hexadecimal number) for more information. For the moment, this option displays the complete item's data (hexadecimal in cleartext, encoded with 'i' (0x69) and encoded with '.' (0x2e). These hexadecimal values  can be used to create detection rules, like YARA rules.
 
@@ -335,6 +339,7 @@ Most options can be combined, like #ps# for example.
 DEFAULT_SEPARATOR = ','
 QUOTE = '"'
 
+START_CONFIG = b'\x00\x01\x00\x01\x00\x02'
 START_CONFIG_I = b'ihihik'
 START_CONFIG_DOT = b'././.,'
 
@@ -1481,8 +1486,14 @@ def InstantiateCOutput(options):
         filenameOption = options.output
     return cOutput(filenameOption)
 
+class UnpackErrorNotEnoughData(Exception):
+
+    pass
+
 def Unpack(format, data):
     size = struct.calcsize(format)
+    if len(data) < size:
+        raise UnpackErrorNotEnoughData()
     result = list(struct.unpack(format, data[:size]))
     result.append(data[size:])
     return result
@@ -1641,8 +1652,10 @@ def LookupConfigValue(id, value):
             0: 'windows-beacon_http-reverse_http',
             1: 'windows-beacon_dns-reverse_http',
             2: 'windows-beacon_smb-bind_pipz',
+            4: 'windows-beacon_tcp-reverse_tcp',
             8: 'windows-beacon_https-reverse_https',
             16: 'windows-beacon_tcp-bind_tcp',
+            32: 'to be determined',
         },
         0x0023: {
             1: 'no proxy',
@@ -1666,7 +1679,10 @@ def ConvertIntToIPv4(value):
     return ' %d.%d.%d.%d' % (C2IIP2(value[0]), C2IIP2(value[1]), C2IIP2(value[2]), C2IIP2(value[3]))
 
 def ToHexadecimal(value):
-    return binascii.b2a_hex(value).decode()
+    if isinstance(value, int):
+        return '%x' % value
+    else:
+        return binascii.b2a_hex(value).decode()
 
 def LookupValue(number, value, dInfo, verbose=False):
     lookup = ''
@@ -1709,9 +1725,11 @@ def DetermineCSVersionFromConfig(dJSON):
 def SanityCheckExtractedConfig(dJSON):
     if not 1 in dJSON:
         return False
-    if not 8 in dJSON:
+    if not 7 in dJSON:
         return False
     if LookupConfigValue(1, dJSON[1]['rawvalue']) == '':
+        return False
+    if not isinstance(dJSON[7]['rawvalue'], str):
         return False
     if not dJSON[7]['rawvalue'].startswith('308'):
         return False
@@ -1916,7 +1934,17 @@ def DecodeMalleableC2Instructions(parameter):
 
 def AnalyzeEmbeddedPEFileSub(payloadsectiondata, options):
     result = []
-    dJSON = {}
+
+    if options.xorkeys:
+        for xorKey in range(256):
+            xorKeyBytes = bytes([xorKey])
+            startConfigXored = Xor(START_CONFIG, xorKeyBytes)
+            for position in FindAll(payloadsectiondata, startConfigXored):
+                result, dJSON = AnalyzeEmbeddedPEFileSub2(Xor(payloadsectiondata[position:position+0x10000], xorKeyBytes), result, options)
+                if result != [ERROR_SANITY_CHECK]:
+                    return result, dJSON
+        return [result, {}]
+
     xorKey = b'i'
     config, startconfig, endconfig = CutData(Xor(payloadsectiondata, xorKey), '[000100010002]:')
     if len(config) == 0:
@@ -1930,15 +1958,21 @@ def AnalyzeEmbeddedPEFileSub(payloadsectiondata, options):
             startconfig, endconfig = StatisticalSearch(payloadsectiondata, xorKey)
         if startconfig == None:
             result.append(ERROR_NO_CONFIG)
-            return [result, dJSON]
+            return [result, {}]
         else:
             result.append('Config found (statistical): xorkey %s 0x%08x 0x%08x' % (xorKey, startconfig, endconfig))
             result.append(cDump(Xor(payloadsectiondata[startconfig:endconfig + 1], xorKey)).HexAsciiDump(rle=True))
-            return [result, dJSON]
+            return [result, {}]
 #                result.append('Config found: 0x%08x 0x%08x %s' % (startconfig, endconfig, ' '.join(['0x%08x' % position for position in FindAll(payloadsectiondata, '\xFF\xFF\xFF\xFF\xFF\xFF\xFF\xFF')])))
 #                result.append('Config found: 0x%08x 0x%08x %s' % (startconfig, endconfig, ' '.join(['0x%08x' % position for position in FindAll(payloadsectiondata, '\x90\x01\x00\x00')])))
     result.append('Config found: xorkey %s 0x%08x 0x%08x' % (xorKey, startconfig, endconfig))
     data = config
+
+    return AnalyzeEmbeddedPEFileSub2(data, result, options)
+
+def AnalyzeEmbeddedPEFileSub2(data, result, options):
+    dJSON = {}
+
     dConfigIdentifiers = {
         0x0001: 'payload type',
         0x0002: 'port',
@@ -2030,11 +2064,17 @@ def AnalyzeEmbeddedPEFileSub(payloadsectiondata, options):
         formatNumber = '>H'
         formatTypeLength = '>HH'
         ntlBytes = data[0:struct.calcsize(formatNumber) + struct.calcsize(formatTypeLength)]
-        number, data = Unpack(formatNumber, data)
+        try:
+            number, data = Unpack(formatNumber, data)
+        except UnpackErrorNotEnoughData:
+            break
         if number == 0:
             result.append('0x%04x' % number)
             break
-        type, length, data = Unpack(formatTypeLength, data)
+        try:
+            type, length, data = Unpack(formatTypeLength, data)
+        except UnpackErrorNotEnoughData:
+            break
         parameter, data = GetChunk(length, data)
         info = ''
         rawvalue = None
@@ -2213,15 +2253,23 @@ def FinalTests(data, options, oOutput):
         # https://www.elastic.co/blog/detecting-cobalt-strike-with-memory-signatures
         'Sleep mask 64-bit 4.2 deobfuscation routine': b'\x4C\x8B\x53\x08\x45\x8B\x0A\x45\x8B\x5A\x04\x4D\x8D\x52\x08\x45\x85\xC9\x75\x05\x45\x85\xDB\x74\x33\x45\x3B\xCB\x73\xE6\x49\x8B\xF9\x4C\x8B\x03',
         'Sleep mask 32-bit 4.2 deobfuscation routine': b'\x8B\x46\x04\x8B\x08\x8B\x50\x04\x83\xC0\x08\x89\x55\x08\x89\x45\x0C\x85\xC9\x75\x04\x85\xD2\x74\x23\x3B\xCA\x73\xE6\x8B\x06\x8D\x3C\x08\x33\xD2',
+        'Public key config entry': b'\x00\x07\x00\x03\x01\x00\x30\x81\x9F\x30\x0D\x06\x09\x2A\x86\x48\x86\xF7\x0D\x01\x01\x01\x05\x00\x03\x81\x8D\x00\x30\x81\x89\x02\x81',
     }
 
     for name, signature in dSignatures.items():
-        for position in FindAll(data, signature):
-            oOutput.Line('%s found: 0x%08x' % (name, position))
-            if options.verbose:
-                oOutput.Line(cDump(data[position-0x100:position], '  ', position-0x100).HexAsciiDump(rle=True), eol='')
-                oOutput.Line('  ... signature ...')
-                oOutput.Line(cDump(data[position+len(signature):position+len(signature)+0x100], '  ', position+len(signature)).HexAsciiDump(rle=True), eol='')
+        xorKeys = [b'\x00']
+        if name == 'Public key config entry':
+            xorKeys = [b'\x00', b'\x2e', b'\x69']
+            if options.xorkeys:
+                xorKeys = [bytes([iter]) for iter in range(256)]
+        for xorKey in xorKeys:
+            signatureXored = Xor(signature, xorKey)
+            for position in FindAll(data, signatureXored):
+                oOutput.Line('%s found: 0x%08x%s' % (name, position, IFF(xorKey == b'\x00', '', ' (xorKey %s)' % xorKey)))
+                if options.verbose:
+                    oOutput.Line(cDump(data[position-0x100:position], '  ', position-0x100).HexAsciiDump(rle=True), eol='')
+                    oOutput.Line('  ... signature ...')
+                    oOutput.Line(cDump(data[position+len(signatureXored):position+len(signatureXored)+0x100], '  ', position+len(signatureXored)).HexAsciiDump(rle=True), eol='')
 
 #a# this is a kludge, to fix later when I have time
 def ProcessBinaryFileSub(sectiondata, data, oOutput, options):
@@ -2239,7 +2287,7 @@ def ProcessBinaryFileSub(sectiondata, data, oOutput, options):
     if error != None:
         positionMZ = payload.find(b'MZ')
         if positionMZ != 0:
-            if START_CONFIG_I in sectiondata or START_CONFIG_DOT in sectiondata:
+            if START_CONFIG_I in sectiondata or START_CONFIG_DOT in sectiondata or options.xorkeys:
                 AnalyzeEmbeddedPEFile(data, oOutput, options)
             elif TestShellcodeHeuristic(payload):
                 if IdentifyShellcode(payload) == '':
@@ -2251,6 +2299,7 @@ def ProcessBinaryFileSub(sectiondata, data, oOutput, options):
             elif positionMZ >= 0 and positionMZ < 0x20:
                 oOutput.Line('MZ header found position %d' % positionMZ)
                 AnalyzeEmbeddedPEFile(payload[positionMZ:], oOutput, options)
+                oOutput.Line(cDump(payload[:0x1000]).HexAsciiDump(rle=True))
             elif len(payload) == 0:
                 return False
             else:
@@ -2319,6 +2368,7 @@ def ProcessBinaryFile(filename, content, cutexpression, flag, oOutput, oLogfile,
                     bytesToSkip = 0x20
                     oOutput.Line('Skipping %d bytes' % bytesToSkip)
                     ProcessBinaryFileSub(sectiondata[bytesToSkip:], data, oOutput, options)
+            FinalTests(data, options, oOutput)
         elif TestShellcodeHeuristic(data):
             if IdentifyShellcode(data) == '':
                 oOutput.Line('Probably found shellcode:')
@@ -2329,15 +2379,23 @@ def ProcessBinaryFile(filename, content, cutexpression, flag, oOutput, oLogfile,
             FinalTests(data, options, oOutput)
         else:
             dConfigs = {}
-            for position in FindAll(data, START_CONFIG_I) + FindAll(data, START_CONFIG_DOT):
-                result, dJSON = AnalyzeEmbeddedPEFileSub(data[position:position+0x10000], options)
-                configSha256 = hashlib.sha256(''.join(result).encode()).hexdigest()
-                if not configSha256 in dConfigs:
-                    dConfigs[configSha256] = True
-                    if result != [ERROR_SANITY_CHECK]:
-                        oOutput.JSON(dJSON)
-                        for line in result:
-                            oOutput.Line(line)
+            if options.xorkeys:
+                xorKeys = range(256)
+            else:
+                xorKeys = [0x2E, 0x69]
+            for xorKey in xorKeys:
+                xorKeyBytes = bytes([xorKey])
+                startConfigXored = Xor(START_CONFIG, xorKeyBytes)
+                for position in FindAll(data, startConfigXored):
+                    result, dJSON = AnalyzeEmbeddedPEFileSub2(Xor(data[position:position+0x10000], xorKeyBytes), [], options)
+                    configSha256 = hashlib.sha256(''.join(result).encode()).hexdigest()
+                    if not configSha256 in dConfigs:
+                        dConfigs[configSha256] = True
+                        if result != [ERROR_SANITY_CHECK]:
+                            oOutput.JSON(dJSON)
+                            oOutput.Line('xorkey %s %02x' % (xorKeyBytes, xorKey))
+                            for line in result:
+                                oOutput.Line(line)
             FinalTests(data, options, oOutput)
         # ----------------------------------------------
     except:
@@ -2478,6 +2536,7 @@ class cAPIOptions(object):
         self.verbose = False
         self.hash = False
         self.sanitycheck = False
+        self.xorkeys = False
 
 class cAPIOutput(object):
     def __init__(self):
@@ -2539,6 +2598,7 @@ https://DidierStevens.com'''
     oParser.add_option('-p', '--password', default='infected', help='The ZIP password to be used (default infected)')
     oParser.add_option('-n', '--noextraction', action='store_true', default=False, help='Do not extract from archive file')
     oParser.add_option('-H', '--hash', action='store_true', default=False, help='Include hashes of file content')
+    oParser.add_option('-x', '--xorkeys', action='store_true', default=False, help='Try all single byte XOR keys (not only 0x69 and 0x2e)')
     oParser.add_option('--literalfilenames', action='store_true', default=False, help='Do not interpret filenames')
     oParser.add_option('--recursedir', action='store_true', default=False, help='Recurse directories (wildcards and here files (@...) allowed)')
     oParser.add_option('--checkfilenames', action='store_true', default=False, help='Perform check if files exist prior to file processing')
@@ -2568,7 +2628,10 @@ https://DidierStevens.com'''
         PrintError(oExpandFilenameArguments.message)
         oLogfile.Line('Warning', repr(oExpandFilenameArguments.message))
 
+    starttime = time.time()
     ProcessBinaryFiles(oExpandFilenameArguments.Filenames(), oLogfile, options)
+    if options.verbose:
+        print('Duration: %f' % (time.time() - starttime))
 
     if oLogfile.errors > 0:
         PrintError('Number of errors: %d' % oLogfile.errors)
