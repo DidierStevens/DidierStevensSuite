@@ -272,7 +272,7 @@ Source code put in the public domain by Didier Stevens, no Copyright
 Use at your own risk
 https://DidierStevens.com'''
 
-    oParser = optparse.OptionParser(usage='usage: %prog [options]\n' + __description__ + moredesc, version='%prog ' + __version__, epilog='This tool also accepts flag arguments (#f#), read the man page (-m) for more info.')
+    oParser = optparse.OptionParser(usage='usage: %prog [options]\n' + __description__ + moredesc, version='%prog ' + __version__)
     oParser.add_option('-m', '--man', action='store_true', default=False, help='Print manual')
     oParser.add_option('-s', '--script', type=str, default='', help='Script with definitions to include')
     oParser.add_option('-j', '--jsonoutput', action='store_true', default=False, help='Produce JSON output')
