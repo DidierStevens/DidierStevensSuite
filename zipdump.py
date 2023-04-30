@@ -2,8 +2,8 @@
 
 __description__ = 'ZIP dump utility'
 __author__ = 'Didier Stevens'
-__version__ = '0.0.24'
-__date__ = '2022/12/28'
+__version__ = '0.0.25'
+__date__ = '2023/04/30'
 
 """
 
@@ -61,6 +61,7 @@ History:
   2022/12/14: added option write
   2022/12/19: 0.0.24 added values hash and hashvir for option write
   2022/12/28: updated man
+  2023/04/30: 0.0.25 changed option translate
 
 Todo:
 """
@@ -163,7 +164,12 @@ MD5     hash: 9b7f8260724e2cb643ad0729ec995b40
 
 If the dump needs to be processed by a string codec, like utf16, use option -t instead of -d and provide the codec:
 C:\Demo>zipdump.py -s 1 -t utf16 example.zip
-You can also provide a Python string expression, like .decode('utf16').encode('utf8'). Remark that this uses the Python eval function with untrusted input, so be careful, it can be used for code injection.
+This will read the binary data as utf16 and convert it to utf8 binary data.
+If you want full control over the string format conversion, use this format:
+  i=codec[:error],o=codec[:error]
+i= is input and o= is output. If you don't specify an error handling mode, strict will be used.
+An example of the format is: i=utf16,o=latin:ignore
+This will read utf16 binary data in strict mode, and convert it to binary data in ANSI (latin) and ignore all utf16 characters that can not be represented in latin.
 
 When options -x, -a or -d are used without selecting a file (option -s), the first file in the ZIP file is selected and dumped.
 When options -X, -A or -D are used without selecting a file (option -s), all files in the ZIP file are selected and dumped.
@@ -739,13 +745,41 @@ def HexDump(data):
 def HexAsciiDump(data):
     return cDump(data, dumplinelength=dumplinelength).HexAsciiDump()
 
+def ParseOptionEncodingSub2(encoding):
+    if encoding == '':
+        encodingvalue = 'utf8'
+        errorsvalue = 'strict'
+    elif ':' in encoding:
+        encodingvalue, errorsvalue = encoding.split(':', 1)
+    else:
+        encodingvalue = encoding
+        errorsvalue = 'strict'
+    return encodingvalue, errorsvalue
+
+def ParseOptionEncodingSub(entry):
+    if not entry.startswith('i=') and not entry.startswith('o='):
+        entry = 'i=' + entry
+    stream, encoding = entry.split('=', 1)
+    encodingvalue, errorsvalue = ParseOptionEncodingSub2(encoding)
+    return stream, encodingvalue, errorsvalue
+
+def ParseOptionEncoding(streamId, encoding):
+    dStreamsPresent = {'i': False, 'o': False}
+    dStreams = {'i': ['utf8', 'strict'], 'o': ['utf8', 'strict']}
+    if encoding != '':
+        for entry in encoding.split(','):
+            stream, encodingvalue, errorsvalue = ParseOptionEncodingSub(entry)
+            if dStreamsPresent[stream]:
+                raise Exception('Encoding option error: %s' % encoding)
+            else:
+                dStreamsPresent[stream] = True
+                dStreams[stream] = [encodingvalue, errorsvalue]
+    return dStreams[streamId]
+
 def Translate(expression):
-    try:
-        codecs.lookup(expression)
-        command = '.decode("%s")' % expression
-    except LookupError:
-        command = expression
-    return lambda x: eval('x' + command)
+    encodingIn, errorIn = ParseOptionEncoding('i', expression)
+    encodingOut, errorOut = ParseOptionEncoding('o', expression)
+    return lambda binary: binary.decode(encodingIn, errorIn).encode(encodingOut, errorOut)
 
 #-BEGINCODE cBinaryFile------------------------------------------------------------------------------
 #import random
