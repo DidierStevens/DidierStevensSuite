@@ -2,8 +2,8 @@
 
 __description__ = 'ZIP dump utility'
 __author__ = 'Didier Stevens'
-__version__ = '0.0.25'
-__date__ = '2023/04/30'
+__version__ = '0.0.26'
+__date__ = '2023/06/14'
 
 """
 
@@ -62,6 +62,11 @@ History:
   2022/12/19: 0.0.24 added values hash and hashvir for option write
   2022/12/28: updated man
   2023/04/30: 0.0.25 changed option translate
+  2023/05/15: 0.0.26 added values ziphashvir and alphanumvir for option write
+  2023/05/16: updated byte statistics, added fields separator
+  2023/06/07: added bruteforce attack
+  2023/06/11: added alphanumvir
+  2023/06/14: updated man
 
 Todo:
 """
@@ -83,6 +88,7 @@ import zlib
 import codecs
 import json
 import struct
+import itertools
 try:
     import pyzipper as zipfile
 except ImportError:
@@ -125,7 +131,7 @@ And the last column (Timestamp) is the timestamp of the file inside the archive.
 
 Option -s takes the index number or the filename to select a file.
 
-By default, the separator used to delimit columns is the space character. When the default separator is used, padding is added to lign up the columns. Another separator character can be selected with option -S. No padding is used when the separator is provided (even if it is the space character). Use special separator * to produce a list of fielnames & values.
+By default, the separator used to delimit columns is the space character. When the default separator is used, padding is added to lign up the columns. Another separator character can be selected with option -S. No padding is used when the separator is provided (even if it is the space character). Use special separator 'fields' to produce a list of fielnames & values.
 C:\Demo>zipdump.py -S ; example.zip
 Index;Filename;Encrypted;Timestamp;
 1;Dialog42.exe;0;2012-02-25 12:08:26;
@@ -195,6 +201,23 @@ zipdump also has an internal password list (a few thousand passwords), that can 
 Example:
 C:\Demo>zipdump.py --passwordfilestop . secret.zip
 Password: letmein
+
+To perform a brute-force attack, provide #b# as passwordfilename. This will start a brute-force attack by generating password guesses from 1 character long to 3 character longs, using letters (uppercase and lowercase), digits, all special characters and the space character.
+To change these parameters, use the following syntax:
+#b#minimum=number,maximum=number,charsets=luds,characters=abc...
+All parameters are optional.
+Parameter minimum has to be a number: the minimum password guess length. Default value 1.
+Parameter maximum has to be a number: the maximum password guess length. Default value 3.
+Parameter charsets has to be a strings composed of one or more of the following characters: l, u, d and s.
+l represents all the lowercase ASCII letters.
+u represents all the uppercase ASCII letters.
+d represents all the digits.
+s represents all punctuation characters plus the space character.
+
+Example:
+C:\Demo>zipdump.py --passwordfilestop "#b#maximum=4,charsets=ud,characters=$!" sample.zip
+
+This performs a bruteforce attack of password guesses with a length between 1 and 4 characters. The characters are upper case letters and digits, together with special characters $ and !.
 
 If the ZIP file contains a single ZIP file, the contained ZIP file will be considered to be the ZIP file to analyze. To prevent this, use option -r. Option -r handles the contained ZIP file as a regular file.
 
@@ -275,12 +298,14 @@ C:\Demo>zipdump.py -E "#%HEADASCII%;%HEADHEX%" Book1.xlsm
 
 To include extra data with each use of zipdump, define environment variable ZIPDUMP_EXTRA with the parameter that should be passed to -E. When environment variable ZIPDUMP_EXTRA is defined, option -E can be ommited. When option -E is used together with environment variable ZIPDUMP_EXTRA, the parameter of option -E is used and the environment variable is ignored.
 
-To write all contained files to disk, use option -W value, where value can be vir, hash or hashvir.
+To write all contained files to disk, use option -W value, where value can be vir, hash, hashvir, ziphashvir or alphanumvir.
 All contained files are written to the current directory when you use this option.
 The filename depends on the value given for the -W option.
 vir: files are written under their name (without directory information) and with extension .vir appended to the filename (leaving the original extension).
 hash: files are written with a filename equal to the SHA256 hash of their content.
 hashvir: files are written with a filename equal to the SHA256 hash of their content and with extension .vir.
+ziphashvir: files are written with a filename equal to the SHA256 hash of their content prefixed with the ZIP filename and with extension .vir.
+alphanumvir: files are written under their name (without directory information, replacing all characters that are not alphanumeric with an underscore) and with extension .vir appended to the filename (leaving the original extension).
 
 zipdump supports YARA rules. Installation of the YARA Python module is not mandatory if you don't use YARA rules.
 You provide the YARA rules with option -y. You can provide one file with YARA rules, an at-file (@file containing the filenames of the YARA files) or a directory. In case of a directory, all files inside the directory are read as YARA files.
@@ -535,7 +560,23 @@ When this option is not used, the complete file is selected.
     for line in manual.split('\n'):
         print(textwrap.fill(line, 78))
 
-validWriteValues = ['vir', 'hash', 'hashvir']
+WRITE_VIR         = 'vir'
+WRITE_ALPHANUMVIR = 'alphanumvir'
+WRITE_HASH        = 'hash'
+WRITE_HASHVIR     = 'hashvir'
+WRITE_ZIPHASHVIR  = 'ziphashvir'
+
+BRUTEFORCE_PREFIX = '#b#'
+BRUTEFORCE_PARAMETER_MINIMUM = 'minimum'
+BRUTEFORCE_PARAMETER_MAXIMUM = 'maximum'
+BRUTEFORCE_PARAMETER_CHARSETS = 'charsets'
+BRUTEFORCE_PARAMETER_CHARACTERS = 'characters'
+BRUTEFORCE_PARAMETER_CHARSETS_VALUE_LOWERCASE = 'l'
+BRUTEFORCE_PARAMETER_CHARSETS_VALUE_UPPERCASE = 'u'
+BRUTEFORCE_PARAMETER_CHARSETS_VALUE_DIGITS = 'd'
+BRUTEFORCE_PARAMETER_CHARSETS_VALUE_SPECIAL = 's'
+
+validWriteValues = [WRITE_VIR, WRITE_ALPHANUMVIR, WRITE_HASH, WRITE_HASHVIR, WRITE_ZIPHASHVIR]
 
 #Convert 2 Bytes If Python 3
 def C2BIP3(string):
@@ -1185,7 +1226,58 @@ def Magic(data):
             magicHex += '%02x' % P23Ord(data[iter])
     return magicPrintable, magicHex
 
-def CalculateByteStatistics(dPrevalence):
+#Convert 2 Integer If Python 2
+def C2IIP2(data):
+    if sys.version_info[0] > 2:
+        return data
+    else:
+        return ord(data)
+
+def CalculateByteStatistics(dPrevalence=None, data=None):
+    longestString = 0
+    longestBASE64String = 0
+    longestHEXString = 0
+    base64digits = b'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789+/'
+    hexdigits = b'abcdefABCDEF0123456789'
+    averageConsecutiveByteDifference = None
+    if dPrevalence == None:
+        dPrevalence = {iter: 0 for iter in range(0x100)}
+        sumDifferences = 0.0
+        previous = None
+        if len(data) > 1:
+            lengthString = 0
+            lengthBASE64String = 0
+            lengthHEXString = 0
+            for byte in data:
+                byte = C2IIP2(byte)
+                dPrevalence[byte] += 1
+                if previous != None:
+                    sumDifferences += abs(byte - previous)
+                    if byte >= 0x20 and byte < 0x7F:
+                        lengthString += 1
+                    else:
+                        longestString = max(longestString, lengthString)
+                        lengthString = 0
+                    if byte in base64digits:
+                        lengthBASE64String += 1
+                    else:
+                        longestBASE64String = max(longestBASE64String, lengthBASE64String)
+                        lengthBASE64String = 0
+                    if byte in hexdigits:
+                        lengthHEXString += 1
+                    else:
+                        longestHEXString = max(longestHEXString, lengthHEXString)
+                        lengthHEXString = 0
+                else:
+                    if byte >= 0x20 and byte < 0x7F:
+                        lengthString = 1
+                    if byte in hexdigits:
+                        lengthHEXString = 1
+                previous = byte
+            averageConsecutiveByteDifference = sumDifferences /float(len(data)-1)
+            longestString = max(longestString, lengthString)
+            longestBASE64String = max(longestBASE64String, lengthBASE64String)
+            longestHEXString = max(longestHEXString, lengthHEXString)
     sumValues = sum(dPrevalence.values())
     countNullByte = dPrevalence[0]
     countControlBytes = 0
@@ -1203,24 +1295,36 @@ def CalculateByteStatistics(dPrevalence):
     countHighBytes = 0
     for iter in range(0x80, 0x100):
         countHighBytes += dPrevalence[iter]
+    countHexadecimalBytes = 0
+    countBASE64Bytes = 0
+    for iter in range(0x30, 0x3A):
+        countHexadecimalBytes += dPrevalence[iter]
+        countBASE64Bytes += dPrevalence[iter]
+    for iter in range(0x41, 0x47):
+        countHexadecimalBytes += dPrevalence[iter]
+    for iter in range(0x61, 0x67):
+        countHexadecimalBytes += dPrevalence[iter]
+    for iter in range(0x41, 0x5B):
+        countBASE64Bytes += dPrevalence[iter]
+    for iter in range(0x61, 0x7B):
+        countBASE64Bytes += dPrevalence[iter]
+    countBASE64Bytes += dPrevalence[ord('+')] + dPrevalence[ord('/')] + dPrevalence[ord('=')]
     entropy = 0.0
     for iter in range(0x100):
         if dPrevalence[iter] > 0:
             prevalence = float(dPrevalence[iter]) / float(sumValues)
             entropy += - prevalence * math.log(prevalence, 2)
             countUniqueBytes += 1
-    return sumValues, entropy, countUniqueBytes, countNullByte, countControlBytes, countWhitespaceBytes, countPrintableBytes, countHighBytes
+    return sumValues, entropy, countUniqueBytes, countNullByte, countControlBytes, countWhitespaceBytes, countPrintableBytes, countHighBytes, countHexadecimalBytes, countBASE64Bytes, averageConsecutiveByteDifference, longestString, longestHEXString, longestBASE64String, dPrevalence
+
+def CalculateByteStatisticsNT(dPrevalence=None, data=None):
+    oNT = collections.namedtuple('bytestatistics', 'sumValues entropy countUniqueBytes countNullByte countControlBytes countWhitespaceBytes countPrintableBytes countHighBytes countHexadecimalBytes countBASE64Bytes averageConsecutiveByteDifference longestString longestHEXString longestBASE64String dPrevalence')
+    return oNT(*CalculateByteStatistics(dPrevalence, data))
 
 def CalculateFileMetaData(data):
-    dPrevalence = {}
-    for iter in range(256):
-        dPrevalence[iter] = 0
-    for char in data:
-        dPrevalence[P23Ord(char)] += 1
-
-    fileSize, entropy, countUniqueBytes, countNullByte, countControlBytes, countWhitespaceBytes, countPrintableBytes, countHighBytes = CalculateByteStatistics(dPrevalence)
+    fileSize, entropy, countUniqueBytes, countNullByte, countControlBytes, countWhitespaceBytes, countPrintableBytes, countHighBytes, countHexadecimalBytes, countBASE64Bytes, averageConsecutiveByteDifference, longestString, longestHEXString, longestBASE64String, dPrevalence = CalculateByteStatistics(data=data)
     magicPrintable, magicHex = Magic(data[0:4])
-    return hashlib.md5(data).hexdigest(), magicPrintable, magicHex, fileSize, entropy, countUniqueBytes, countNullByte, countControlBytes, countWhitespaceBytes, countPrintableBytes, countHighBytes
+    return hashlib.md5(data).hexdigest(), magicPrintable, magicHex, fileSize, entropy, countUniqueBytes, countNullByte, countControlBytes, countWhitespaceBytes, countPrintableBytes, countHighBytes, countHexadecimalBytes, countBASE64Bytes, averageConsecutiveByteDifference, longestString, longestHEXString, longestBASE64String
 
 def AddDecoder(cClass):
     global decoders
@@ -1421,7 +1525,7 @@ def ExtraInfoENTROPY(data):
     dPrevalence = {iter: 0 for iter in range(0x100)}
     for char in data:
         dPrevalence[P23Ord(char)] += 1
-    sumValues, entropy, countUniqueBytes, countNullByte, countControlBytes, countWhitespaceBytes, countPrintableBytes, countHighBytes = CalculateByteStatistics(dPrevalence)
+    sumValues, entropy, countUniqueBytes, countNullByte, countControlBytes, countWhitespaceBytes, countPrintableBytes, countHighBytes, countHexadecimalBytes, countBASE64Bytes, averageConsecutiveByteDifference, longestString, longestHEXString, longestBASE64String, dPrevalence = CalculateByteStatistics(dPrevalence)
     return '%f' % entropy
 
 def ExtraInfoHEADHEX(data):
@@ -1477,7 +1581,7 @@ def ExtraInfoBYTESTATS(data):
     dPrevalence = {iter: 0 for iter in range(0x100)}
     for char in data:
         dPrevalence[P23Ord(char)] += 1
-    sumValues, entropy, countUniqueBytes, countNullByte, countControlBytes, countWhitespaceBytes, countPrintableBytes, countHighBytes = CalculateByteStatistics(dPrevalence)
+    sumValues, entropy, countUniqueBytes, countNullByte, countControlBytes, countWhitespaceBytes, countPrintableBytes, countHighBytes, countHexadecimalBytes, countBASE64Bytes, averageConsecutiveByteDifference, longestString, longestHEXString, longestBASE64String, dPrevalence = CalculateByteStatistics(dPrevalence)
     return '%d,%d,%d,%d,%d' % (countNullByte, countControlBytes, countWhitespaceBytes, countPrintableBytes, countHighBytes)
 
 def GenerateExtraInfo(extra, index, zipfilename, filename, encrypted, timestamp, stream):
@@ -1528,7 +1632,14 @@ def PrintOutput(output, outputExtraInfo, extra, separator, quote, fOut):
         for line, counter in sorted(dOutput.items(), key=operator.itemgetter(1)):
             Print('%4d: %s' % (counter, line), fOut)
     else:
-        if separator != '':
+        if separator == 'fields':
+            header = output[0]
+            for row in output[1:]:
+                for index in range(len(row)):
+                    Print('%-30s: %s' % (header[index], row[index]), fOut)
+                Print('', fOut)
+                    
+        elif separator != '':
             for i in range(len(output)):
                 Print(MakeCSVLine(output[i], separator, quote) + separator + outputExtraInfo[i], fOut)
         else:
@@ -1557,12 +1668,43 @@ def DecideToSelect(selectvalue, counter, zipfilename):
         return True
     return selectvalue == zipfilename
 
+def Products(minimum, maximum, chars):
+    for length in range(minimum, maximum + 1):
+        for product in itertools.product(chars, repeat=length):
+            yield ''.join(product)
+
 def GetDictionary(passwordfile):
-    if passwordfile != '.':
-        return File2Strings(passwordfile)
+    if passwordfile.startswith(BRUTEFORCE_PREFIX):
+        parameters = passwordfile[len(BRUTEFORCE_PREFIX):]
+        minimum = 1
+        maximum = 3
+        charsets = BRUTEFORCE_PARAMETER_CHARSETS_VALUE_LOWERCASE + BRUTEFORCE_PARAMETER_CHARSETS_VALUE_UPPERCASE + BRUTEFORCE_PARAMETER_CHARSETS_VALUE_DIGITS + BRUTEFORCE_PARAMETER_CHARSETS_VALUE_SPECIAL
+        characters = ''
+        for parameter in parameters.split(','):
+            if parameter != '':
+                key, value = parameter.split('=', 1)
+                if key == BRUTEFORCE_PARAMETER_MINIMUM:
+                    minimum = int(value)
+                elif key == BRUTEFORCE_PARAMETER_MAXIMUM:
+                    maximum = int(value)
+                elif key == BRUTEFORCE_PARAMETER_CHARSETS:
+                    charsets = value
+                elif key == BRUTEFORCE_PARAMETER_CHARACTERS:
+                    characters = value
+                else:
+                    raise Exception('Unexpected parameter: %s' % parameter)
+        for charset in charsets:
+            characters += {BRUTEFORCE_PARAMETER_CHARSETS_VALUE_LOWERCASE: string.ascii_lowercase, BRUTEFORCE_PARAMETER_CHARSETS_VALUE_UPPERCASE: string.ascii_uppercase, BRUTEFORCE_PARAMETER_CHARSETS_VALUE_DIGITS: string.digits, BRUTEFORCE_PARAMETER_CHARSETS_VALUE_SPECIAL: string.punctuation + ' '}[charset]
+        count = 0
+        for length in range(minimum, maximum + 1):
+            count += len(characters) ** length
+        return Products(minimum, maximum, characters), count
+    elif passwordfile != '.':
+        passwords = File2Strings(passwordfile)
+        return passwords, len(passwords)
     else:
 # https://github.com/magnumripper/JohnTheRipper/blob/bleeding-jumbo/run/password.lst
-        return [
+        passwords = [
           'infected',
           'P@ssw0rd',
           '123456',
@@ -5110,6 +5252,7 @@ def GetDictionary(passwordfile):
           'nite',
           'notused',
           'sss']
+        return passwords, len(passwords)
 
 def DictionaryAttack(passwordfile, oZipfile, fOut, stop):
     try:
@@ -5121,13 +5264,15 @@ def DictionaryAttack(passwordfile, oZipfile, fOut, stop):
         pass
 
     counter = 0
-    passwords = GetDictionary(passwordfile)
+    passwords, numberOfPasswords = GetDictionary(passwordfile)
     start = time.time()
     for password in passwords:
         try:
             oZipfile.open(oZipfile.infolist()[0], 'r', C2BIP3(password)).read(2)
             if stop:
                 Print('Password: %s' % password, fOut)
+                Print('Guesses: %d' % (counter + 1), fOut)
+                Print('Duration: %ds' % (time.time() - start), fOut)
             return password
         except KeyboardInterrupt:
             return None
@@ -5141,7 +5286,7 @@ def DictionaryAttack(passwordfile, oZipfile, fOut, stop):
         if counter % 10000 == 0:
             pps = float(counter) / float(time.time() - start)
             if stop:
-                Print('Passwords: %8d %.2f%% p/s: %d ETC: %s' % (counter, float(counter) / float(len(passwords)) * 100.0, pps, FormatTime(start + len(passwords) / pps)), fOut)
+                Print('Passwords: %8d %.2f%% p/s: %d ETC: %s' % (counter, float(counter) / float(numberOfPasswords) * 100.0, pps, FormatTime(start + numberOfPasswords / pps)), fOut)
     return None
 
 def SelectDumpFunction(options):
@@ -5221,12 +5366,16 @@ def ZIPDump(zipfilename, options, data=None):
             with oZipfile.open(oZipInfo, 'r', C2BIP3(zippassword)) as file:
                 if not oZipInfo.is_dir():
                     data = file.read()
-                    if options.write == 'vir':
+                    if options.write == WRITE_VIR:
                         memberFilename = os.path.basename(oZipInfo.filename) + '.vir'
+                    elif options.write == WRITE_ALPHANUMVIR:
+                        memberFilename = ''.join([char if char in (string.ascii_lowercase + string.ascii_uppercase + string.digits) else '_' for char in os.path.basename(oZipInfo.filename)]) + '.vir'
                     else:
                         memberFilename = hashlib.sha256(data).hexdigest()
-                        if options.write == 'hashvir':
+                        if options.write in [WRITE_HASHVIR, WRITE_ZIPHASHVIR]:
                             memberFilename += '.vir'
+                        if options.write in [WRITE_ZIPHASHVIR]:
+                            memberFilename = os.path.basename(zipfilename) + '.' + memberFilename
                     print('Writing: %s' % memberFilename)
                     with open(memberFilename, 'wb') as fWrite:
                         fWrite.write(data)
@@ -5265,7 +5414,7 @@ def ZIPDump(zipfilename, options, data=None):
             headers.extend(['Decoder', 'YARA namespace', 'YARA rule'])
         else:
             if options.extended:
-                headers.extend(['Encrypted', 'Timestamp', 'MD5', 'Filesize', 'Entropy', 'Unique bytes', 'Magic HEX', 'Magic ASCII', 'Null bytes', 'Control bytes', 'Whitespace bytes', 'Printable bytes', 'High bytes'])
+                headers.extend(['Encrypted', 'Timestamp', 'MD5', 'Filesize', 'Entropy', 'Unique bytes', 'Magic HEX', 'Magic ASCII', 'Null bytes', 'Control bytes', 'Whitespace bytes', 'Printable bytes', 'High bytes', 'Hexadecimal bytes', 'BASE64 bytes', 'ACBD', 'Longest string', 'Longest Hexadecimal string', 'Longest BASE64 String'])
             else:
                 headers.extend(['Encrypted', 'Timestamp'])
         if not options.yarastringsraw:
@@ -5281,8 +5430,8 @@ def ZIPDump(zipfilename, options, data=None):
                 timestamp = '%04d-%02d-%02d %02d:%02d:%02d' % oZipInfo.date_time
                 if options.yara == None:
                     if options.extended:
-                        filehash, magicPrintable, magicHex, fileSize, entropy, countUniqueBytes, countNullByte, countControlBytes, countWhitespaceBytes, countPrintableBytes, countHighBytes = CalculateFileMetaData(filecontent)
-                        row = [oZipInfo.filename, encrypted, timestamp, filehash, fileSize, entropy, countUniqueBytes, magicHex, magicPrintable, countNullByte, countControlBytes, countWhitespaceBytes, countPrintableBytes, countHighBytes]
+                        filehash, magicPrintable, magicHex, fileSize, entropy, countUniqueBytes, countNullByte, countControlBytes, countWhitespaceBytes, countPrintableBytes, countHighBytes, countHexadecimalBytes, countBASE64Bytes, averageConsecutiveByteDifference, longestString, longestHEXString, longestBASE64String = CalculateFileMetaData(filecontent)
+                        row = [oZipInfo.filename, encrypted, timestamp, filehash, fileSize, entropy, countUniqueBytes, magicHex, magicPrintable, countNullByte, countControlBytes, countWhitespaceBytes, countPrintableBytes, countHighBytes, countHexadecimalBytes, countBASE64Bytes, averageConsecutiveByteDifference, longestString, longestHEXString, longestBASE64String]
                     else:
                         row = [oZipInfo.filename, encrypted, timestamp]
                     if options.zipfilename:
@@ -5402,9 +5551,9 @@ class cPKDIR(cPKRecord):
     def __init__(self, data):
         self.fields = None
         self.data = None
-        format = '<HHHHHHHHIIIHHHHHII'
-        self.formatDescription = ['signature1', 'signature2', 'versionmadeby', 'versiontoextract', 'flags', 'compressiontype', 'filetime', 'filedate', 'crc', 'compressedsize', 'uncompressedsize', 'filenamelength', 'extrafieldlength', 'filecommentlength', 'disknumberstart', 'internalattributes', 'headeroffset']
-        self.formatFormat = ['%04x', '%04x', '', '', '', 'dictionary', '%08x', '%08x', '%08x', '', '', '', '', '', '', '', '']
+        format = '<HHHHHHHHIIIHHHHHIIH'
+        self.formatDescription = ['signature1', 'signature2', 'versionmadeby', 'versiontoextract', 'flags', 'compressiontype', 'filetime', 'filedate', 'crc', 'compressedsize', 'uncompressedsize', 'filenamelength', 'extrafieldlength', 'filecommentlength', 'disknumberstart', 'internalattributes', 'externalattributes', 'headeroffset']
+        self.formatFormat = ['%04x', '%04x', '', '', '', 'dictionary', '%08x', '%08x', '%08x', '', '', '', '', '', '', '', '', '']
         formatLength = struct.calcsize(format)
         dataFields = data[:formatLength]
         if len(dataFields) == formatLength:
