@@ -4,8 +4,8 @@ from __future__ import print_function
 
 __description__ = 'Analyze Cobalt Strike beacons'
 __author__ = 'Didier Stevens'
-__version__ = '0.0.18'
-__date__ = '2023/04/03'
+__version__ = '0.0.19'
+__date__ = '2023/04/27'
 
 """
 Source code put in the public domain by Didier Stevens, no Copyright
@@ -59,6 +59,7 @@ History:
   2022/08/30: 0.0.17 added option -x
   2023/04/02: updated man page
   2023/04/03: 0.0.18 cleanup debugging
+  2023/04/27: 0.0.19 added LSFIF
 
 Todo:
 
@@ -131,6 +132,10 @@ The sanity check checks for the presence of config values 1 and 7, and check if 
 Option -V (--verbose) produces more output:
 - verbosity for config values (like the private key for leaked keys)
 - hex/ascii dump of found signatures
+
+When a signature is found, the longest ASCII string in front of the signature (256 bytes span) is included, like this:
+Sleep mask 64-bit 4.2 deobfuscation routine found: 0x122f12d31 (LSFIF: b'!#ALF:Y2V:Elastic/HKTL_CobaltStrike_Beacon_4_2_Decrypt')
+LSFIF is abbreviation Longest String Found In Front.
 
 A JSON file with name 1768.json placed in the same directory as 1768.py will be used to enhance fields with information, like the license-id field.
 
@@ -2266,7 +2271,12 @@ def FinalTests(data, options, oOutput):
         for xorKey in xorKeys:
             signatureXored = Xor(signature, xorKey)
             for position in FindAll(data, signatureXored):
-                oOutput.Line('%s found: 0x%08x%s' % (name, position, IFF(xorKey == b'\x00', '', ' (xorKey %s)' % xorKey)))
+                stringsInFront = sorted(ExtractStringsASCII(data[position-0x100:position]), key=len, reverse=True)
+                if len(stringsInFront) > 0:
+                    longestString = ' (LSFIF: %s)' % stringsInFront[0]
+                else:
+                    longestString = ''
+                oOutput.Line('%s found: 0x%08x%s%s' % (name, position, IFF(xorKey == b'\x00', '', ' (xorKey %s)' % xorKey), longestString))
                 if options.verbose:
                     oOutput.Line(cDump(data[position-0x100:position], '  ', position-0x100).HexAsciiDump(rle=True), eol='')
                     oOutput.Line('  ... signature ...')
