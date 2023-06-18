@@ -2,8 +2,8 @@
 
 __description__ = 'ZIP dump utility'
 __author__ = 'Didier Stevens'
-__version__ = '0.0.26'
-__date__ = '2023/06/14'
+__version__ = '0.0.27'
+__date__ = '2023/06/18'
 
 """
 
@@ -67,6 +67,7 @@ History:
   2023/06/07: added bruteforce attack
   2023/06/11: added alphanumvir
   2023/06/14: updated man
+  2023/06/18: 0.0.27 fixed password cracking false positives
 
 Todo:
 """
@@ -5269,6 +5270,8 @@ def DictionaryAttack(passwordfile, oZipfile, fOut, stop):
     for password in passwords:
         try:
             oZipfile.open(oZipfile.infolist()[0], 'r', C2BIP3(password)).read(2)
+            # read complete contained file to check for false positive password hit
+            oZipfile.open(oZipfile.infolist()[0], 'r', C2BIP3(password)).read()
             if stop:
                 Print('Password: %s' % password, fOut)
                 Print('Guesses: %d' % (counter + 1), fOut)

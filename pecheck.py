@@ -2,8 +2,8 @@
 
 __description__ = 'Tool for displaying PE file info'
 __author__ = 'Didier Stevens'
-__version__ = '0.7.15'
-__date__ = '2022/05/25'
+__version__ = '0.7.16'
+__date__ = '2023/06/18'
 
 """
 
@@ -55,6 +55,9 @@ History:
   2021/05/29: 0.7.14 added file size
   2021/12/27: support option -D with -l P
   2022/05/25: 0.7.15 added extra information for overlay; now option verbose is needed to dump the signature
+  2023/05/26: 0.7.16 added pyzipper support and extra statistics
+  2023/05/28: added locate options valid values PE and PO
+  2023/06/18: updated man
 
 Todo:
 """
@@ -75,6 +78,11 @@ import textwrap
 import zlib
 import string
 import math
+import collections
+try:
+    import pyzipper as zipfile
+except ImportError:
+    import zipfile
 if sys.version_info[0] >= 3:
     from io import StringIO
 else:
@@ -105,8 +113,8 @@ Use option -l to locate and select PE files embedded inside the provided file.
 Use -l P to get an overview of all embedded PE files, like this:
 
 C:\Demo>pecheck.py -l P sample.png.vir
-1: 0x00002ebb DLL 32-bit 0x00016eba 3bd4fcbee95711392260549669df7236 0x000270ba (EOF)
-2: 0x00016ebb DLL 64-bit 0x000270ba 6eede113112f85b0ae99a2210e07cdd0 0x000270ba (EOF)
+  1: 0x00002ebb DLL 32-bit 0x00016eba 3bd4fcbee95711392260549669df7236 0x000270ba (EOF) b'' b'module.dll'
+  2: 0x00016ebb DLL 64-bit 0x000270ba 6eede113112f85b0ae99a2210e07cdd0 0x000270ba (EOF) b'' b'init.dll'
 
 The first column is the position of the embedded PE file, the fourth column is the end of the embedded PE file without overlay, and the sixth column is the end with overlay.
 The fifth column is the hash of the embedded PE file without overlay. By default, it's the MD5 hash, but this can be changed by setting environment variable DSS_DEFAULT_HASH_ALGORITHMS.
@@ -118,7 +126,26 @@ C:\Demo>pecheck.py -l 2 sample.png.vir
 
 Use option -g o (o = overlay) to extract the overlay, and -g s (s = stripped) to extract the PE file without overlay.
 
-When using option -D together with -l P, all found PE files are written to disk in the current directory, with filename: hash.vir.
+When using option -D together with -l P, all found PE files are written to disk in the current directory, with filename: hash.pe.vir.
+
+Use -l PE to get an overview of all embedded PE files, just like -l P, but with an extra column:
+  1: 0x00002ebb      11963 DLL 32-bit 0x00016eba 3bd4fcbee95711392260549669df7236 0x000270ba (EOF) b'' b'module.dll'
+  2: 0x00016ebb          0 DLL 64-bit 0x000270ba 6eede113112f85b0ae99a2210e07cdd0 0x000270ba (EOF) b'' b'init.dll'
+
+The extra column is the second column: a decimal number that represents the number of bytes between the end of the previous PE file (without overlay) and the start of the current PE file.
+When this number is 0, there are no extra bytes.
+When this number is negative, the current PE file actually starts before the end of the previous PE file.
+
+Option -D is alos supported with -l PE.
+
+Use -l PO to get an overview of all embedded PE files, just like -l PE, but with metadata for the parts of the file that are not PE files (Other):
+     0x00000000            Other: 89504e47 .PNG 112faa336904c913412b06334dc0f385 11963 7.63 256
+  1: 0x00002ebb      11963 DLL 32-bit 0x00016eba 3bd4fcbee95711392260549669df7236 0x000270ba (EOF) b'' b'module.dll'
+  2: 0x00016ebb          0 DLL 64-bit 0x000270ba 6eede113112f85b0ae99a2210e07cdd0 0x000270ba (EOF) b'' b'init.dll'
+
+The information provided for "Other" data is: first 4 bytes in hexadecimal, first 4 bytes in ASCII, hash, length, entropy and number of unique byte values.
+
+Option -D is alos supported with -l PO. PE files are saved as hash.pe.vir. and "Other" are saved as hash.other.vir.
 
 '''
     for line in manual.split('\n'):
@@ -218,10 +245,16 @@ def ProcessAt(argument):
     else:
         return [argument]
 
+def CreateZipFileObject(arg1, arg2):
+    if 'AESZipFile' in dir(zipfile):
+        return zipfile.AESZipFile(arg1, arg2)
+    else:
+        return zipfile.ZipFile(arg1, arg2)
+
 def ReadFile(filename):
     if filename.lower().endswith('.zip'):
         try:
-            oZipfile = zipfile.ZipFile(filename, 'r')
+            oZipfile = CreateZipFileObject(filename, 'r')
             file = oZipfile.open(oZipfile.infolist()[0], 'r', C2BIP3('infected'))
         except:
             print('Error opening file %s' % filename)
@@ -406,7 +439,7 @@ def ProcessDumpInfo(oPE):
     for line in lines:
         skipLine = False
         if line == 'Ordinal      RVA         Name':
-            result.append(oPE.DIRECTORY_ENTRY_EXPORT.name.decode())
+            result.append(oPE.DIRECTORY_ENTRY_EXPORT.name.decode('utf8', 'ignore'))
             result.append('')
         if not relocation and line == '[IMAGE_BASE_RELOCATION]':
             relocation = True
@@ -426,19 +459,50 @@ def C2IIP2(data):
         return ord(data)
 
 def CalculateByteStatistics(dPrevalence=None, data=None):
+    longestString = 0
+    longestBASE64String = 0
+    longestHEXString = 0
+    base64digits = b'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789+/'
+    hexdigits = b'abcdefABCDEF0123456789'
     averageConsecutiveByteDifference = None
     if dPrevalence == None:
         dPrevalence = {iter: 0 for iter in range(0x100)}
         sumDifferences = 0.0
         previous = None
         if len(data) > 1:
+            lengthString = 0
+            lengthBASE64String = 0
+            lengthHEXString = 0
             for byte in data:
                 byte = C2IIP2(byte)
                 dPrevalence[byte] += 1
                 if previous != None:
                     sumDifferences += abs(byte - previous)
+                    if byte >= 0x20 and byte < 0x7F:
+                        lengthString += 1
+                    else:
+                        longestString = max(longestString, lengthString)
+                        lengthString = 0
+                    if byte in base64digits:
+                        lengthBASE64String += 1
+                    else:
+                        longestBASE64String = max(longestBASE64String, lengthBASE64String)
+                        lengthBASE64String = 0
+                    if byte in hexdigits:
+                        lengthHEXString += 1
+                    else:
+                        longestHEXString = max(longestHEXString, lengthHEXString)
+                        lengthHEXString = 0
+                else:
+                    if byte >= 0x20 and byte < 0x7F:
+                        lengthString = 1
+                    if byte in hexdigits:
+                        lengthHEXString = 1
                 previous = byte
             averageConsecutiveByteDifference = sumDifferences /float(len(data)-1)
+            longestString = max(longestString, lengthString)
+            longestBASE64String = max(longestBASE64String, lengthBASE64String)
+            longestHEXString = max(longestHEXString, lengthHEXString)
     sumValues = sum(dPrevalence.values())
     countNullByte = dPrevalence[0]
     countControlBytes = 0
@@ -476,7 +540,12 @@ def CalculateByteStatistics(dPrevalence=None, data=None):
             prevalence = float(dPrevalence[iter]) / float(sumValues)
             entropy += - prevalence * math.log(prevalence, 2)
             countUniqueBytes += 1
-    return sumValues, entropy, countUniqueBytes, countNullByte, countControlBytes, countWhitespaceBytes, countPrintableBytes, countHighBytes, countHexadecimalBytes, countBASE64Bytes, averageConsecutiveByteDifference
+    return sumValues, entropy, countUniqueBytes, countNullByte, countControlBytes, countWhitespaceBytes, countPrintableBytes, countHighBytes, countHexadecimalBytes, countBASE64Bytes, averageConsecutiveByteDifference, longestString, longestHEXString, longestBASE64String, dPrevalence
+
+def CalculateByteStatisticsNT(dPrevalence=None, data=None):
+    oNT = collections.namedtuple('bytestatistics', 'sumValues entropy countUniqueBytes countNullByte countControlBytes countWhitespaceBytes countPrintableBytes countHighBytes countHexadecimalBytes countBASE64Bytes averageConsecutiveByteDifference longestString longestHEXString longestBASE64String dPrevalence')
+    return oNT(*CalculateByteStatistics(dPrevalence, data))
+
 
 def SingleFileInfo(filename, data, signatures, options):
     pe = pefile.PE(data=data)
@@ -536,9 +605,9 @@ def SingleFileInfo(filename, data, signatures, options):
         print(' MD5:            %s' % hashlib.md5(raw[overlayOffset:]).hexdigest())
         print(' SHA-256:        %s' % hashlib.sha256(raw[overlayOffset:]).hexdigest())
         print(' MAGIC:          %s' % GenerateMAGIC(raw[overlayOffset:][:4]))
-        resultCalculateByteStatistics = CalculateByteStatistics(data=raw[overlayOffset:])
-        print(' Entropy:        %.2f' % resultCalculateByteStatistics[1])
-        print(' Unique bytes:   %d' % resultCalculateByteStatistics[2])
+        resultCalculateByteStatistics = CalculateByteStatisticsNT(data=raw[overlayOffset:])
+        print(' Entropy:        %.2f' % resultCalculateByteStatistics.entropy)
+        print(' Unique bytes:   %d' % resultCalculateByteStatistics.countUniqueBytes)
         print(' PE file without overlay:')
         print('  MD5:          %s' % hashlib.md5(raw[:overlayOffset]).hexdigest())
         print('  SHA-256:      %s' % hashlib.sha256(raw[:overlayOffset]).hexdigest())
@@ -940,7 +1009,7 @@ def Sections(data, options):
     for section in pe.sections:
         sectionname = SectionNameToString(section.Name)
         if options.getdata == '':
-            print('%d: %-10s %8d %f %s' % (counter, sectionname, section.SizeOfRawData, section.get_entropy(), dSections.get(sectionname, '')))
+            print('%d: %-10s %8d %s %f %s' % (counter, sectionname, section.SizeOfRawData, CalculateChosenHash(section.get_data())[0], section.get_entropy(), dSections.get(sectionname, '')))
             if options.yara != None:
                 for result in rules.match(data=section.get_data()):
                     print(' YARA rule: %s' % result.rule)
@@ -1055,7 +1124,7 @@ def GetInfoCarvedFile(data, position, extractfile):
         lengthWithOverlay = len(dataPEFile)
         hashStripped, _ = CalculateChosenHash(dataPEFileStripped)
         if extractfile:
-            with open(hashStripped + '.vir', 'wb') as fWrite:
+            with open(hashStripped + '.pe.vir', 'wb') as fWrite:
                 fWrite.write(dataPEFileStripped)
 
         info += ' 0x%08x %s 0x%08x' % (position + lengthStripped - 1, hashStripped, position + lengthWithOverlay - 1)
@@ -1071,13 +1140,26 @@ def GetInfoCarvedFile(data, position, extractfile):
         info += ' %s %s' % (repr(originalFilename), repr(exportDLLName))
     except:
         info += ' parsing error %s' % repr(sys.exc_info()[1])
-    return info
+    return info, lengthStripped
 
 def SingleFile(filename, signatures, options):
     data = ReadFile(filename)
-    if options.locate == 'P':
+    if options.locate in ['P', 'PE', 'PO']:
+        nextPosition = 0
         for index, position in enumerate(FindAllPEFiles(data)):
-            print('%d: 0x%08x%s' % (index + 1, position, PrefixIfNeeded(GetInfoCarvedFile(data, position, options.dump))))
+            info, lengthStripped = GetInfoCarvedFile(data, position, options.dump)
+            difference = '%10d' % (position - nextPosition)
+            if options.locate == 'PO' and position > nextPosition:
+                dataGap = data[nextPosition:position]
+                resultCalculateByteStatistics = CalculateByteStatisticsNT(data=dataGap)
+                print('     0x%08x            Other: %s %s %d %.2f %d' % (nextPosition, GenerateMAGIC(dataGap[:4]), CalculateChosenHash(dataGap)[0], resultCalculateByteStatistics.sumValues, resultCalculateByteStatistics.entropy, resultCalculateByteStatistics.countUniqueBytes))
+                if options.dump:
+                    with open(CalculateChosenHash(dataGap)[0] + '.other.vir', 'wb') as fWrite:
+                        fWrite.write(dataGap)
+            if options.locate in ['P']:
+                difference = ''
+            print('%3d: 0x%08x%s%s' % (index + 1, position, PrefixIfNeeded(difference), PrefixIfNeeded(info)))
+            nextPosition = position + lengthStripped
         return
     elif options.locate != '':
         try:
