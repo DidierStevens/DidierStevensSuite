@@ -2,8 +2,8 @@
 
 __description__ = 'EML dump utility'
 __author__ = 'Didier Stevens'
-__version__ = '0.0.11'
-__date__ = '2020/11/21'
+__version__ = '0.0.12'
+__date__ = '2023/08/29'
 
 """
 
@@ -30,6 +30,7 @@ History:
   2016/04/13: 0.0.9 changed handling of obfuscating lines
   2017/07/21: 0.0.10 added filename to parts
   2020/11/21: 0.0.11 Python 3 support; updated cutting; updated yara; added selection warning
+  2023/08/29: 0.0.12 bug fixes; added option -F
 
 Todo:
 """
@@ -81,6 +82,8 @@ Warning: the first 2 lines do not contain a field.
 Skipping these first lines can be done with option -H.
 
 Some MIME files are obfuscated, for example they contain long lines of random letters and numbers. The filter option will filter out obfuscating lines: the filter option filters out first lines that are not fields (like with option -H), and every line that is longer than 100 characters.
+
+Option fix (-F) will fix some obfuscations (for the moment: mime-version obfuscation).
 
 A particular part of the MIME file can be selected for further analysis with option -s. Here is an example where we use the index 2 to select the second part:
 
@@ -715,6 +718,57 @@ def GenerateExtraInfo(extra, index, indicator, type, stream):
             extra = extra.replace(variable, dExtras[variable](stream))
     return prefix + extra.replace(r'\t', '\t').replace(r'\n', '\n')
 
+def HeaderValueDecode(value):
+    valueDecoded, valueType = email.header.decode_header(value)[0]
+    if valueType != None:
+        valueDecoded = valueDecoded.decode(valueType)
+    if isinstance(valueDecoded, bytes):
+        valueDecoded = repr(valueDecoded)
+    return valueDecoded
+
+def HeaderValueJWT(value):
+    value = HeaderValueDecode(value).strip()
+    result = value.split('.')
+    if len(result) >= 2:
+        jwtAlg = binascii.a2b_base64(result[0]).decode('latin')
+        jwtToken = binascii.a2b_base64(result[1]).decode('latin')
+        result = '%s %s' % (jwtAlg, jwtToken)
+    else:
+        result = '<ERROR>'
+    return result
+
+def GenerateExtraInfoHeaders(extra, key, value):
+    if extra == '':
+        return ''
+    if extra.startswith('!'):
+        extra = extra[1:]
+        prefix = ''
+    else:
+        prefix = ' '
+    dExtras = {'%INDEX%': lambda x: '%d' % index,
+               '%INDICATOR%': lambda x: indicator,
+               '%LENGTH%': lambda x: IFF(stream == None, '', lambda: '%d' % len(stream)),
+               '%TYPE%': lambda x: type,
+               '%MD5%': ExtraInfoMD5,
+               '%SHA1%': ExtraInfoSHA1,
+               '%SHA256%': ExtraInfoSHA256,
+               '%ENTROPY%': ExtraInfoENTROPY,
+               '%HEADHEX%': ExtraInfoHEADHEX,
+               '%HEADASCII%': ExtraInfoHEADASCII,
+               '%TAILHEX%': ExtraInfoTAILHEX,
+               '%TAILASCII%': ExtraInfoTAILASCII,
+               '%HISTOGRAM%': ExtraInfoHISTOGRAM,
+
+               '%RAW%': lambda x: x,
+               '%DECODE%': HeaderValueDecode,
+               '%DECODESTRIP%': lambda x: HeaderValueDecode(x).strip(),
+               '%JWT%': HeaderValueJWT,
+              }
+    for variable in dExtras:
+        if variable in extra:
+            extra = extra.replace(variable, dExtras[variable](value))
+    return prefix + extra.replace(r'\t', '\t').replace(r'\n', '\n')
+
 def ContainsField(line):
     for c in line:
         if c == ' ':
@@ -734,13 +788,20 @@ def PrintWarningSelection(select, selectionCounter):
     if select != '' and selectionCounter == 0:
         print('Warning: no part was selected with expression %s' % select)
 
+def Deobfuscate(data):
+    oMatch = re.search(b'mime +-version:(.+)', data, flags=re.I|re.S)
+    if oMatch != None:
+        return b'mime-version:' + oMatch.groups()[0]
+    return data
+    
+
 def EMLDump(emlfilename, options):
     FixPipe()
     if emlfilename == '':
         if sys.platform == 'win32':
             import msvcrt
             msvcrt.setmode(sys.stdin.fileno(), os.O_BINARY)
-        data = sys.stdin.read()
+        data = sys.stdin.buffer.read()
     elif emlfilename.lower().endswith('.zip'):
         oZipfile = zipfile.ZipFile(emlfilename, 'r')
         oZipContent = oZipfile.open(oZipfile.infolist()[0], 'r', C2BIP3(MALWARE_PASSWORD))
@@ -750,7 +811,10 @@ def EMLDump(emlfilename, options):
     else:
         data = File2String(emlfilename)
 
-    data = data.decode()
+    if options.fix:
+        data = Deobfuscate(data)
+
+    data = data.decode(encoding='utf8', errors='ignore')
 
     global decoders
     decoders = []
@@ -807,7 +871,17 @@ def EMLDump(emlfilename, options):
 
     oEML = email.message_from_string(data)
 
-    if options.select == '':
+    if options.headers:
+        for key, value in oEML.items():
+            line = key
+            if options.select == '' or options.select == key:
+                extrainfo = GenerateExtraInfoHeaders(options.extra, key, value)
+                if options.extra.startswith('!'):
+                    line = ''
+                line += extrainfo
+            if options.select == '' or options.select == key:
+                print(line)
+    elif options.select == '':
         if options.yara == None:
             counter = 1
             for oPart in oEML.walk():
@@ -890,6 +964,7 @@ def Main():
     oParser.add_option('-x', '--hexdump', action='store_true', default=False, help='perform hex dump')
     oParser.add_option('-a', '--asciidump', action='store_true', default=False, help='perform ascii dump')
     oParser.add_option('-H', '--header', action='store_true', default=False, help='skip first lines without fields')
+    oParser.add_option('-I', '--headers', action='store_true', default=False, help='Display headers')
     oParser.add_option('-s', '--select', default='', help='select item nr or MIME type for dumping')
     oParser.add_option('-y', '--yara', help="YARA rule file (or directory or @file) to check streams (YARA search doesn't work with -s option)")
     oParser.add_option('--yarastrings', action='store_true', default=False, help='Print YARA strings')
@@ -899,6 +974,7 @@ def Main():
     oParser.add_option('-c', '--cut', type=str, default='', help='cut data')
     oParser.add_option('-E', '--extra', type=str, default='', help='add extra info (environment variable: EMLDUMP_EXTRA)')
     oParser.add_option('-f', '--filter', action='store_true', default=False, help='filter out obfuscatiing lines')
+    oParser.add_option('-F', '--fix', action='store_true', default=False, help='Fix obfuscated lines')
     (options, args) = oParser.parse_args()
 
     if options.man:
