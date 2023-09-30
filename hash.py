@@ -2,8 +2,8 @@
 
 __description__ = 'This is essentialy a wrapper for the hashlib module'
 __author__ = 'Didier Stevens'
-__version__ = '0.0.9'
-__date__ = '2022/12/14'
+__version__ = '0.0.10'
+__date__ = '2023/09/18'
 
 """
 Source code put in public domain by Didier Stevens, no Copyright
@@ -24,6 +24,8 @@ History:
   2020/01/25: 0.0.8 added checksum8; added ParsePackExpression #p#; added #h# support for spaces; bugfix #e#chr
   2020/10/21: 0.0.9 Python 3 fix in cBinaryFile
   2022/12/14: added here-file for validate option; added validate summary
+  2023/09/17: 0.0.10 added option rename
+  2023/09/18: added option humanhash
 
 Todo:
 """
@@ -45,6 +47,8 @@ import math
 import hashlib
 import fnmatch
 import zlib
+import functools
+import operator
 if sys.version_info[0] >= 3:
     from io import BytesIO as DataIO
 else:
@@ -215,6 +219,8 @@ sha256: 0f8a84968fac3cadc04471c1ee5c4644414491c89a4a7149845c170258b6a6d1
 This tool can also split each processed file in blocks and calculate hash values for each block. This "block mode" is initiated with option -b.
 Option -c (compare) and option -b (block) are mutually exclusive.
 
+Option -r (rename) is used to rename files to their hash (option value hash) or hash with extension .vir (option value vir).
+
 Option -b requires an integer: the size of the block. This can be a decimal integer (example 1000) or an hexadecimal integer (example 0xA00).
 
 Here is an example with block size hundred thousand (100000) and one file:
@@ -265,6 +271,7 @@ Summary sha256 values: 2 different blocks (3 blocks in total)
 
 Block mode is useful to identify repeating byte sequences inside files, but often requires the selection of a part of the input file. This can be done with the cut operator, that will be explained later.
 
+Use option -H to include the "human hash" of each hash (see https://github.com/zacharyvoase/humanhash for more info).
 
 As stated at the beginning of this manual, this tool is very versatile when it comes to handling files. This will be explained now.
 
@@ -419,6 +426,132 @@ This cut-expression can be used to dump the OLE file located inside the stream: 
 
 SEPARATOR = ';'
 QUOTE = '"'
+
+#https://github.com/zacharyvoase/humanhash
+class HumanHasher(object):
+
+    """
+    Transforms hex digests to human-readable strings.
+
+    The format of these strings will look something like:
+    `victor-bacon-zulu-lima`. The output is obtained by compressing the input
+    digest to a fixed number of bytes, then mapping those bytes to one of 256
+    words. A default wordlist is provided, but you can override this if you
+    prefer.
+
+    As long as you use the same wordlist, the output will be consistent (i.e.
+    the same digest will always render the same representation).
+    """
+
+    DEFAULT_WORDLIST = (
+        'ack', 'alabama', 'alanine', 'alaska', 'alpha', 'angel', 'apart', 'april',
+        'arizona', 'arkansas', 'artist', 'asparagus', 'aspen', 'august', 'autumn',
+        'avocado', 'bacon', 'bakerloo', 'batman', 'beer', 'berlin', 'beryllium',
+        'black', 'blossom', 'blue', 'bluebird', 'bravo', 'bulldog', 'burger',
+        'butter', 'california', 'carbon', 'cardinal', 'carolina', 'carpet', 'cat',
+        'ceiling', 'charlie', 'chicken', 'coffee', 'cola', 'cold', 'colorado',
+        'comet', 'connecticut', 'crazy', 'cup', 'dakota', 'december', 'delaware',
+        'delta', 'diet', 'don', 'double', 'early', 'earth', 'east', 'echo',
+        'edward', 'eight', 'eighteen', 'eleven', 'emma', 'enemy', 'equal',
+        'failed', 'fanta', 'fifteen', 'fillet', 'finch', 'fish', 'five', 'fix',
+        'floor', 'florida', 'football', 'four', 'fourteen', 'foxtrot', 'freddie',
+        'friend', 'fruit', 'gee', 'georgia', 'glucose', 'golf', 'green', 'grey',
+        'hamper', 'happy', 'harry', 'hawaii', 'helium', 'high', 'hot', 'hotel',
+        'hydrogen', 'idaho', 'illinois', 'india', 'indigo', 'ink', 'iowa',
+        'island', 'item', 'jersey', 'jig', 'johnny', 'juliet', 'july', 'jupiter',
+        'kansas', 'kentucky', 'kilo', 'king', 'kitten', 'lactose', 'lake', 'lamp',
+        'lemon', 'leopard', 'lima', 'lion', 'lithium', 'london', 'louisiana',
+        'low', 'magazine', 'magnesium', 'maine', 'mango', 'march', 'mars',
+        'maryland', 'massachusetts', 'may', 'mexico', 'michigan', 'mike',
+        'minnesota', 'mirror', 'mississippi', 'missouri', 'mobile', 'mockingbird',
+        'monkey', 'montana', 'moon', 'mountain', 'muppet', 'music', 'nebraska',
+        'neptune', 'network', 'nevada', 'nine', 'nineteen', 'nitrogen', 'north',
+        'november', 'nuts', 'october', 'ohio', 'oklahoma', 'one', 'orange',
+        'oranges', 'oregon', 'oscar', 'oven', 'oxygen', 'papa', 'paris', 'pasta',
+        'pennsylvania', 'pip', 'pizza', 'pluto', 'potato', 'princess', 'purple',
+        'quebec', 'queen', 'quiet', 'red', 'river', 'robert', 'robin', 'romeo',
+        'rugby', 'sad', 'salami', 'saturn', 'september', 'seven', 'seventeen',
+        'shade', 'sierra', 'single', 'sink', 'six', 'sixteen', 'skylark', 'snake',
+        'social', 'sodium', 'solar', 'south', 'spaghetti', 'speaker', 'spring',
+        'stairway', 'steak', 'stream', 'summer', 'sweet', 'table', 'tango', 'ten',
+        'tennessee', 'tennis', 'texas', 'thirteen', 'three', 'timing', 'triple',
+        'twelve', 'twenty', 'two', 'uncle', 'undress', 'uniform', 'uranus', 'utah',
+        'vegan', 'venus', 'vermont', 'victor', 'video', 'violet', 'virginia',
+        'washington', 'west', 'whiskey', 'white', 'william', 'winner', 'winter',
+        'wisconsin', 'wolfram', 'wyoming', 'xray', 'yankee', 'yellow', 'zebra',
+        'zulu')
+
+    def __init__(self, wordlist=DEFAULT_WORDLIST):
+        if len(wordlist) != 256:
+            raise ArgumentError("Wordlist must have exactly 256 items")
+        self.wordlist = wordlist
+
+    def humanize(self, hexdigest, words=4, separator='-'):
+
+        """
+        Humanize a given hexadecimal digest.
+
+        Change the number of words output by specifying `words`. Change the
+        word separator with `separator`.
+
+            >>> digest = '60ad8d0d871b6095808297'
+            >>> HumanHasher().humanize(digest)
+            'sodium-magnesium-nineteen-hydrogen'
+        """
+
+        # Gets a list of byte values between 0-255.
+        bytes = list(map(lambda x: int(x, 16), map(''.join, zip(hexdigest[::2], hexdigest[1::2]))))
+        # Compress an arbitrary number of bytes to `words`.
+        compressed = self.compress(bytes, words)
+        # Map the compressed byte values through the word list.
+        return separator.join(self.wordlist[byte] for byte in compressed)
+
+    @staticmethod
+    def compress(bytes, target):
+
+        """
+        Compress a list of byte values to a fixed target length.
+
+            >>> bytes = [96, 173, 141, 13, 135, 27, 96, 149, 128, 130, 151]
+            >>> HumanHasher.compress(bytes, 4)
+            [205, 128, 156, 96]
+
+        Attempting to compress a smaller number of bytes to a larger number is
+        an error:
+
+            >>> HumanHasher.compress(bytes, 15)  # doctest: +ELLIPSIS
+            Traceback (most recent call last):
+            ...
+            ValueError: Fewer input bytes than requested output
+        """
+
+        length = len(bytes)
+        if target > length:
+            raise ValueError("Fewer input bytes than requested output")
+
+        # Split `bytes` into `target` segments.
+        seg_size = length // target
+        segments = [bytes[i * seg_size:(i + 1) * seg_size]
+                    for i in range(target)]
+        # Catch any left-over bytes in the last segment.
+        segments[-1].extend(bytes[target * seg_size:])
+
+        # Use a simple XOR checksum-like function for compression.
+        checksum = lambda bytes: functools.reduce(operator.xor, bytes, 0)
+        checksums = map(checksum, segments)
+        return checksums
+
+    def uuid(self, **params):
+
+        """
+        Generate a UUID with a human-readable representation.
+
+        Returns `(human_repr, full_digest)`. Accepts the same keyword arguments
+        as :meth:`humanize` (they'll be passed straight through).
+        """
+
+        digest = str(uuidlib.uuid4()).replace('-', '')
+        return self.humanize(digest, **params), digest
 
 #Convert 2 Bytes If Python 3
 def C2BIP3(string):
@@ -1036,7 +1169,7 @@ def CutData(stream, cutArgument):
 
 def GetHashObjects(algorithms):
     global dSpecialHashes
-    
+
     dHashes = {}
 
     if algorithms == '':
@@ -1086,6 +1219,7 @@ def MakeCSVLine(row, separator, quote):
 def HashSingle(filename, cutexpression, prefix, dFileHashes, skipHashes, validateHashes, options):
     oBinaryFile = cBinaryFile(filename, C2BIP3(options.password), options.noextraction, options.literalfilenames)
     data = oBinaryFile.read()
+    oBinaryFile.close()
     if cutexpression != '':
         data = CutData(data, cutexpression)[0]
     hashes, dHashes = GetHashObjects(options.algorithms)
@@ -1113,11 +1247,24 @@ def HashSingle(filename, cutexpression, prefix, dFileHashes, skipHashes, validat
                     row.append(hashdigest)
                 else:
                     validated = ''
+                    if options.humanhash:
+                        humanhash = ' (%s)' % HumanHasher().humanize(hashdigest)
+                    else:
+                        humanhash = ''
                     if hashdigest.lower() in validateHashes:
                         validated = ' (validated)'
-                    print('%s%-6s: %s%s' % (prefix, name, hashdigest, validated))
+                    print('%s%-6s: %s%s%s' % (prefix, name, hashdigest, validated, humanhash))
         if options.csv:
             print(MakeCSVLine(row, SEPARATOR, QUOTE))
+        if filename != '' and options.rename != '':
+            if not options.rename in ['hash', 'vir']:
+                raise Exception('rename: %s' % options.rename)
+            headFilename, tailFilename = os.path.split(filename)
+            newFilename = os.path.join(headFilename, hashdigest)
+            if options.rename == 'vir':
+                newFilename += '.vir'
+            os.rename(filename, newFilename)
+            print(' renaming: %s -> %s' % (filename, newFilename))
     else:
         dBlockHashes = {name: {} for name in hashes}
         countBlocks = 0
@@ -1215,8 +1362,10 @@ https://DidierStevens.com'''
     oParser.add_option('-b', '--block', default='', help='Block size for hashing')
     oParser.add_option('-s', '--skip', default='', help='Hashes to skip (except in block mode)')
     oParser.add_option('-v', '--validate', default='', help='Hashes to validate (except in block mode)')
+    oParser.add_option('-r', '--rename', default='', help='Rename files (hash, vir)')
     oParser.add_option('-q', '--quiet', action='store_true', default=False, help='Just print hash values (except in block mode)')
     oParser.add_option('-C', '--csv', action='store_true', default=False, help='Output CSV')
+    oParser.add_option('-H', '--humanhash', action='store_true', default=False, help='Include human hash')
     oParser.add_option('--password', default='infected', help='The ZIP password to be used (default infected)')
     oParser.add_option('--noextraction', action='store_true', default=False, help='Do not extract from archive file')
     oParser.add_option('--literalfilenames', action='store_true', default=False, help='Do not interpret filenames')

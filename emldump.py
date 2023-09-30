@@ -2,8 +2,8 @@
 
 __description__ = 'EML dump utility'
 __author__ = 'Didier Stevens'
-__version__ = '0.0.12'
-__date__ = '2023/08/29'
+__version__ = '0.0.13'
+__date__ = '2023/09/18'
 
 """
 
@@ -31,6 +31,7 @@ History:
   2017/07/21: 0.0.10 added filename to parts
   2020/11/21: 0.0.11 Python 3 support; updated cutting; updated yara; added selection warning
   2023/08/29: 0.0.12 bug fixes; added option -F
+  2023/09/18: 0.0.13 added option --jsonoutput
 
 Todo:
 """
@@ -47,6 +48,7 @@ import binascii
 import textwrap
 import string
 import math
+import json
 try:
     import yara
 except:
@@ -160,6 +162,8 @@ emldump.py -y contains_pe_file.yara -D decoder_xor1,decoder_rol1,decoder_add1 ex
 3:    114704 application/octet-stream contains_pe_file.yara Contains_PE_File (XOR 1 byte key 0x14)
 
 Some decoders take options, to be provided with option --decoderoptions.
+
+Use option --jsonoutput to produce JSON output for all the parts that are not multiparts. This output can be consumed by other tools like strings.py, file-magic.py, ...
 
 Option -c (--cut) allows for the partial selection of a stream. Use this option to "cut out" part of the stream.
 The --cut option takes an argument to specify which section of bytes to select from the stream. This argument is composed of 2 terms separated by a colon (:), like this:
@@ -794,6 +798,21 @@ def Deobfuscate(data):
         return b'mime-version:' + oMatch.groups()[0]
     return data
     
+class cMyJSONOutput():
+
+    def __init__(self):
+        self.items = []
+        self.counter = 1
+
+    def AddIdItem(self, id, name, data):
+        self.items.append({'id': id, 'name': name, 'content': binascii.b2a_base64(data).strip(b'\n').decode()})
+
+    def AddItem(self, name, data):
+        self.AddIdItem(self.counter, name, data)
+        self.counter += 1
+
+    def GetJSON(self):
+        return json.dumps({'version': 2, 'id': 'didierstevens.com', 'type': 'content', 'fields': ['id', 'name', 'content'], 'items': self.items})
 
 def EMLDump(emlfilename, options):
     FixPipe()
@@ -882,7 +901,7 @@ def EMLDump(emlfilename, options):
             if options.select == '' or options.select == key:
                 print(line)
     elif options.select == '':
-        if options.yara == None:
+        if options.yara == None and not options.jsonoutput:
             counter = 1
             for oPart in oEML.walk():
                 data = oPart.get_payload(decode=True)
@@ -902,7 +921,7 @@ def EMLDump(emlfilename, options):
                 line += extrainfo
                 print(line)
                 counter += 1
-        else:
+        elif options.yara != None:
             counter = 1
             for oPart in oEML.walk():
                 data = oPart.get_payload(decode=True)
@@ -929,6 +948,17 @@ def EMLDump(emlfilename, options):
                                     for stringdata in result.strings:
                                         print(' %06x %s %s %s' % (stringdata[0], stringdata[1], binascii.hexlify(stringdata[2]), repr(stringdata[2])))
                 counter += 1
+        elif options.jsonoutput:
+            oMyJSONOutput = cMyJSONOutput()
+            counter = 1
+            for oPart in oEML.walk():
+                data = oPart.get_payload(decode=True)
+                if data == None:
+                    data = b''
+                if not oPart.is_multipart():
+                    oMyJSONOutput.AddIdItem(counter, oPart.get_content_type(), data)
+                counter += 1
+            print(oMyJSONOutput.GetJSON())
 
     else:
         if options.dump:
@@ -973,8 +1003,9 @@ def Main():
     oParser.add_option('-v', '--verbose', action='store_true', default=False, help='verbose output with decoder errors')
     oParser.add_option('-c', '--cut', type=str, default='', help='cut data')
     oParser.add_option('-E', '--extra', type=str, default='', help='add extra info (environment variable: EMLDUMP_EXTRA)')
-    oParser.add_option('-f', '--filter', action='store_true', default=False, help='filter out obfuscatiing lines')
+    oParser.add_option('-f', '--filter', action='store_true', default=False, help='filter out obfuscating lines')
     oParser.add_option('-F', '--fix', action='store_true', default=False, help='Fix obfuscated lines')
+    oParser.add_option('-j', '--jsonoutput', action='store_true', default=False, help='produce json output')
     (options, args) = oParser.parse_args()
 
     if options.man:

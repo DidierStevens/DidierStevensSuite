@@ -2,8 +2,8 @@
 
 __description__ = 'ZIP dump utility'
 __author__ = 'Didier Stevens'
-__version__ = '0.0.27'
-__date__ = '2023/06/18'
+__version__ = '0.0.29'
+__date__ = '2023/09/18'
 
 """
 
@@ -68,6 +68,8 @@ History:
   2023/06/11: added alphanumvir
   2023/06/14: updated man
   2023/06/18: 0.0.27 fixed password cracking false positives
+  2023/08/27: 0.0.28 added externalattributes parsing
+  2023/09/18: 0.0.29 added DOSTIME & DOSDATE parsing
 
 Todo:
 """
@@ -1639,7 +1641,7 @@ def PrintOutput(output, outputExtraInfo, extra, separator, quote, fOut):
                 for index in range(len(row)):
                     Print('%-30s: %s' % (header[index], row[index]), fOut)
                 Print('', fOut)
-                    
+
         elif separator != '':
             for i in range(len(output)):
                 Print(MakeCSVLine(output[i], separator, quote) + separator + outputExtraInfo[i], fOut)
@@ -5519,14 +5521,51 @@ class cPKRecord(object):
             'compressiontype': {
                 0: 'STORED',
                 8: 'DEFLATED',
-            }
+            },
+            'filetype': {
+                0o14: 'S_IFSOCK',
+                0o12: 'S_IFLNK',
+                0o10: 'S_IFREG',
+                0o06: 'S_IFBLK',
+                0o04: 'S_IFDIR',
+                0o02: 'S_IFCHR',
+                0o01: 'S_IFIFO',
+            },
         }
+
+        def DecodeFileAttributes(fileattributes):
+            result = ''
+            if fileattributes & 0x20:
+              result += 'A'
+            if fileattributes & 0x4:
+              result += 'S'
+            if fileattributes & 0x2:
+              result += 'H'
+            if fileattributes & 0x1:
+              result += 'R'
+            return result;
 
         try:
             self.formatFormat[index]
         except IndexError:
             return None
-        if self.formatFormat[index] == '':
+
+        if self.formatDescription[index] == 'externalattributes':
+            msdos = self.fields[index] & 0xFFFF
+            permissions = (self.fields[index] >> 16) & 0x0FFF
+            entrytype = self.fields[index] >> 28
+            value = '0x%08x Unix: type: 0o%02o (%s) perms: 0o%04o  DOS: 0x%04x (%s)' % (self.fields[index], entrytype, dDictionaries['filetype'].get(entrytype, '?'), permissions, msdos, DecodeFileAttributes(msdos))
+        elif self.formatDescription[index] == 'filetime':
+            filetimeSecondsX2 = self.fields[index] & 0b0000000000011111
+            filetimeMinutes = (self.fields[index] & 0b0000011111100000) >> 5
+            filetimeHours = (self.fields[index] & 0b1111100000000000) >> (5 + 6)
+            value = '0x%08x DOSTIME %02d:%02d:%02d' % (self.fields[index], filetimeHours, filetimeMinutes, filetimeSecondsX2 * 2)
+        elif self.formatDescription[index] == 'filedate':
+            filedateDay = self.fields[index] & 0b0000000000011111
+            filedateMonth = (self.fields[index] & 0b0000000111100000) >> 5
+            filedateYear1980Offset = (self.fields[index] & 0b1111111000000000) >> (5 + 4)
+            value = '0x%08x DOSDATE %02d-%02d-%02d' % (self.fields[index], filedateYear1980Offset + 1980, filedateMonth, filedateDay)
+        elif self.formatFormat[index] == '':
             value = self.fields[index]
         elif self.formatFormat[index] == 'dictionary':
             value = self.fields[index]

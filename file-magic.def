@@ -30,3 +30,10 @@
 #
 0	bequad	0xE4525C7B8CD8A74D
 >8	bequad	0xAEB15378D02996D3	.one OneNote file
+
+# 2023/09/18
+
+#------------------------------------------------------------------------------
+# mso:  file(1) magic .mso MSO file (application/x-mso, ActiveMime)
+#
+0	string	ActiveMime	.mso MSO file (application/x-mso, ActiveMime)

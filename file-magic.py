@@ -4,8 +4,8 @@ from __future__ import print_function
 
 __description__ = 'Essentialy a wrapper for file (libmagic)'
 __author__ = 'Didier Stevens'
-__version__ = '0.0.6'
-__date__ = '2023/02/13'
+__version__ = '0.0.7'
+__date__ = '2023/09/18'
 
 """
 Source code put in public domain by Didier Stevens, no Copyright
@@ -31,6 +31,7 @@ History:
   2022/04/09: added option --jsonoutput
   2022/12/18: updated man page
   2023/02/13: 0.0.6 added pyzipper
+  2023/09/18: 0.0.7 bump for mso file-magic.def
 
 Todo:
 """
