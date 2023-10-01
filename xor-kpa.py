@@ -2,8 +2,8 @@
 
 __description__ = 'XOR known-plaintext attack'
 __author__ = 'Didier Stevens'
-__version__ = '0.0.7'
-__date__ = '2023/02/12'
+__version__ = '0.0.8'
+__date__ = '2023/03/04'
 
 """
 
@@ -26,6 +26,7 @@ History:
   2017/06/16: 0.0.6 continued #e# support
   2022/09/04: Python 3 upgrade, added plaintexts
   2023/02/12: 0.0.7 added plaintexts cs-key-mod
+  2023/03/04: 0.0.8 refactoring
 
 Todo:
   updated man starting changes 2017/06/03
@@ -39,6 +40,7 @@ import sys
 import os
 import re
 import random
+import time
 try:
     import pyzipper as zipfile
 except ImportError:
@@ -193,6 +195,11 @@ STATE_STRING = 2
 STATE_SPECIAL_CHAR = 3
 STATE_ERROR = 4
 
+FUNCTIONNAME_REPEAT = 'repeat'
+FUNCTIONNAME_RANDOM = 'random'
+FUNCTIONNAME_CHR = 'chr'
+FUNCTIONNAME_LOREMIPSUM = 'loremipsum'
+
 def Tokenize(expression):
     result = []
     token = ''
@@ -245,6 +252,8 @@ def ParseFunction(tokens):
     if len(tokens) == 0:
         print('Parsing error')
         return None, tokens
+    if tokens[0][0] == STATE_STRING or tokens[0][0] == STATE_IDENTIFIER and tokens[0][1].startswith('0x'):
+        return [[FUNCTIONNAME_REPEAT, [[STATE_IDENTIFIER, '1'], tokens[0]]], tokens[1:]]
     if tokens[0][0] != STATE_IDENTIFIER:
         print('Parsing error')
         return None, tokens
@@ -313,21 +322,31 @@ def InterpretInteger(token):
     except:
         return None
 
+def Hex2Bytes(hexadecimal):
+    if len(hexadecimal) % 2 == 1:
+        hexadecimal = '0' + hexadecimal
+    try:
+        return binascii.a2b_hex(hexadecimal)
+    except:
+        return None
+
+def C2IIP2(data):
+    if sys.version_info[0] > 2:
+        return data
+    else:
+        return ord(data)
+
 def InterpretHexInteger(token):
     if token[0] != STATE_IDENTIFIER:
         return None
     if not token[1].startswith('0x'):
         return None
-    hex = token[1][2:]
-    if len(hex) % 2 == 1:
-        hex = '0' + hex
-    try:
-        bytes = binascii.a2b_hex(hex)
-    except:
+    bytes = Hex2Bytes(token[1][2:])
+    if bytes == None:
         return None
     integer = 0
     for byte in bytes:
-        integer = integer * 0x100 + ord(byte)
+        integer = integer * 0x100 + C2IIP2(byte)
     return integer
 
 def InterpretNumber(token):
@@ -344,21 +363,23 @@ def InterpretBytes(token):
         return None
     if not token[1].startswith('0x'):
         return None
-    try:
-        return binascii.a2b_hex(token[1][2:])
-    except:
-        return None
+    return Hex2Bytes(token[1][2:])
 
-def CheckFunction(functionname, arguments, countarguments):
-    if countarguments == 0 and len(arguments) != 0:
-        print('Error: function %s takes no arguments, %d are given' % (functionname, len(arguments)))
-        return True
-    if countarguments == 1 and len(arguments) != 1:
-        print('Error: function %s takes 1 argument, %d are given' % (functionname, len(arguments)))
-        return True
-    if countarguments != len(arguments):
-        print('Error: function %s takes %d arguments, %d are given' % (functionname, countarguments, len(arguments)))
-        return True
+def CheckFunction(functionname, arguments, countarguments, maxcountarguments=None):
+    if maxcountarguments == None:
+        if countarguments == 0 and len(arguments) != 0:
+            print('Error: function %s takes no arguments, %d are given' % (functionname, len(arguments)))
+            return True
+        if countarguments == 1 and len(arguments) != 1:
+            print('Error: function %s takes 1 argument, %d are given' % (functionname, len(arguments)))
+            return True
+        if countarguments != len(arguments):
+            print('Error: function %s takes %d arguments, %d are given' % (functionname, countarguments, len(arguments)))
+            return True
+    else:
+        if len(arguments) < countarguments or len(arguments) > maxcountarguments:
+            print('Error: function %s takes between %d and %d arguments, %d are given' % (functionname, countarguments, maxcountarguments, len(arguments)))
+            return True
     return False
 
 def CheckNumber(argument, minimum=None, maximum=None):
@@ -373,11 +394,6 @@ def CheckNumber(argument, minimum=None, maximum=None):
         print('Error: argument should be maximum %d: %d' % (maximum, number))
         return None
     return number
-    
-FUNCTIONNAME_REPEAT = 'repeat'
-FUNCTIONNAME_RANDOM = 'random'
-FUNCTIONNAME_CHR = 'chr'
-FUNCTIONNAME_LOREMIPSUM = 'loremipsum'
 
 def Interpret(expression):
     functioncalls = Parse(expression)
@@ -396,7 +412,7 @@ def Interpret(expression):
             if bytes == None:
                 print('Error: argument should be a byte sequence: %s' % arguments[1][1])
                 return None
-            decoded += number * bytes
+            decoded += number * bytes.decode('latin')
         elif functionname == FUNCTIONNAME_RANDOM:
             if CheckFunction(functionname, arguments, 1):
                 return None
@@ -412,35 +428,107 @@ def Interpret(expression):
                 return None
             decoded += LoremIpsum(number)
         elif functionname == FUNCTIONNAME_CHR:
-            if CheckFunction(functionname, arguments, 1):
+            if CheckFunction(functionname, arguments, 1, 2):
                 return None
-            number = CheckNumber(arguments[0], minimum=1, maximum=255)
+            number = CheckNumber(arguments[0], minimum=0, maximum=255)
             if number == None:
                 return None
-            decoded += chr(number)
+            if len(arguments) == 1:
+                decoded += chr(number)
+            else:
+                number2 = CheckNumber(arguments[1], minimum=0, maximum=255)
+                if number2 == None:
+                    return None
+                decoded += ''.join([chr(n) for n in range(number, number2 + 1)])
         else:
             print('Error: unknown function: %s' % functionname)
             return None
     return decoded
 
-def FilenameCheckHash(filename):
-    decoded = None
-    if filename.startswith('#h#'):
-        try:
-            decoded = binascii.a2b_hex(filename[3:])
-        finally:
-            return decoded
+def ParsePackExpression(expression, data):
+    try:
+        packFormat, pythonExpression = expression.split('#', 1)
+        result = struct.pack(packFormat, eval(pythonExpression))
+        return result
+    except:
+        return None
+
+FCH_FILENAME = 0
+FCH_DATA = 1
+FCH_ERROR = 2
+
+ESCAPE_SEQUENCE_RE = re.compile(r'''
+    ( \\U........      # 8-digit hex escapes
+    | \\u....          # 4-digit hex escapes
+    | \\x..            # 2-digit hex escapes
+    | \\[0-7]{1,3}     # Octal escapes
+    | \\N\{[^}]+\}     # Unicode characters by name
+    | \\[\\'"abfnrtv]  # Single-character escapes
+    )''', re.UNICODE | re.VERBOSE)
+
+def DecodeEscapes(str):
+    def DecodeMatch(match):
+        return codecs.decode(match.group(0), 'unicode-escape')
+
+    return ESCAPE_SEQUENCE_RE.sub(DecodeMatch, str)
+
+def DownloadFile(url):
+    try:
+        if sys.hexversion >= 0x020601F0:
+            infile = urllib23.urlopen(url, timeout=5)
+        else:
+            infile = urllib23.urlopen(url)
+    except urllib23.HTTPError:
+        return None, 'urlopen'
+    try:
+        data = infile.read()
+    except:
+        return None, 'read'
+    infile.close()
+    return data, None
+
+def FilenameCheckHash(filename, literalfilename, data=b''):
+    if literalfilename:
+        return FCH_FILENAME, filename
+    elif filename.startswith('#h#'):
+        result = Hex2Bytes(filename[3:].replace(' ', ''))
+        if result == None:
+            return FCH_ERROR, 'hexadecimal'
+        else:
+            return FCH_DATA, result
     elif filename.startswith('#b#'):
         try:
-            decoded = binascii.a2b_base64(filename[3:])
-        finally:
-            return decoded
+            return FCH_DATA, binascii.a2b_base64(filename[3:])
+        except:
+            return FCH_ERROR, 'base64'
     elif filename.startswith('#e#'):
-        return Interpret(filename[3:])
+        result = Interpret(filename[3:])
+        if result == None:
+            return FCH_ERROR, 'expression'
+        else:
+            return FCH_DATA, C2BIP3(result)
+    elif filename.startswith('#p#'):
+        result = ParsePackExpression(filename[3:], data)
+        if result == None:
+            return FCH_ERROR, 'pack'
+        else:
+            return FCH_DATA, result
+    elif filename.startswith('#u#'):
+        result, error = DownloadFile(filename[3:])
+        if result == None:
+            return FCH_ERROR, 'url:' + error
+        else:
+            return FCH_DATA, result
+    elif filename.startswith('#E#'):
+        result = DecodeEscapes(filename[3:])
+        if result == None:
+            return FCH_ERROR, 'escapes'
+        else:
+            return FCH_DATA, C2BIP3(result)
     elif filename.startswith('#'):
-        return filename[1:].encode('latin')
+        return FCH_DATA, C2BIP3(filename[1:])
     else:
-        return b''
+        return FCH_FILENAME, filename
 
 def CreateZipFileObject(arg1, arg2):
     if 'AESZipFile' in dir(zipfile):
@@ -449,8 +537,8 @@ def CreateZipFileObject(arg1, arg2):
         return zipfile.ZipFile(arg1, arg2)
 
 def File2StringHash(filename):
-    decoded = FilenameCheckHash(filename)
-    if decoded != b'':
+    fch, decoded = FilenameCheckHash(filename, False)
+    if fch == FCH_DATA:
         return decoded
     elif filename.lower().endswith('.zip'):
         oZipfile = CreateZipFileObject(filename, 'r')
@@ -492,6 +580,17 @@ def SplitKey(extractedKeyStream):
         result.append(keys)
     return result
 
+def IsMultiple(str1, str2):
+    len1 = len(str1)
+    while True:
+        if str2.startswith(str1):
+            str2 = str2[len1:]
+            if len(str2) < len1:
+                break
+        else:
+            return False
+    return str1.startswith(str2)
+
 def FilterKeys(keyss):
     result = []
     for keys in keyss:
@@ -501,7 +600,7 @@ def FilterKeys(keyss):
             result.append(keys[0])
 
     while len(result) > 1:
-        if result[0] * int(len(result[1]) / len(result[0])) == result[1]:
+        if IsMultiple(result[0], result[1]):
             del result[1]
         else:
             break
@@ -537,13 +636,21 @@ def XOR(filenamePlaintext, filenameCiphertext, options):
         return
 
     results = []
-    for i in range(len(ciphertext) - len(plaintext)):
-        extractedKeyStream = XORData(plaintext, ciphertext[i:])
+    ciphertextChunkPrevious = None
+    lenPlaintext = len(plaintext)
+    for i in range(len(ciphertext) - lenPlaintext):
+        ciphertextChunk = ciphertext[i:i + lenPlaintext]
+        if ciphertextChunk == ciphertextChunkPrevious:
+            continue
+        ciphertextChunkPrevious = ciphertextChunk
+        extractedKeyStream = XORData(plaintext, ciphertextChunk)
         keys = FilterKeys(SplitKey(extractedKeyStream))
         if len(keys) == 1:
             key = keys[0]
             start = len(key) - i % len(key)
             results.append(nKeydata(len(extractedKeyStream) - len(keys[0]), extractedKeyStream, key[start:] + key[0:start]))
+            if options.verbose and results[-1].extra >= options.extra:
+                print(results[-1]) #a# proper output
         elif len(keys) > 1 and options.verbose:
             print('Found more than one repeating key in key stream')
             print('Extracted key stream: %s' % repr(extractedKeyStream))
@@ -605,6 +712,7 @@ https://DidierStevens.com'''
         PrintManual()
         return
 
+    starttime = time.time()
     if len(args) != 1 and len(args) != 2:
         oParser.print_help()
         print('')
@@ -616,6 +724,8 @@ https://DidierStevens.com'''
         XOR(args[0], '', options)
     else:
         XOR(args[0], args[1], options)
+    if options.verbose:
+        print('Duration: %f' % (time.time() - starttime))
 
 if __name__ == '__main__':
     Main()
