@@ -2,8 +2,8 @@
 
 __description__ = 'TCP and UDP listener'
 __author__ = 'Didier Stevens'
-__version__ = '0.1.3'
-__date__ = '2023/03/16'
+__version__ = '0.1.4'
+__date__ = '2023/04/09'
 
 """
 Source code put in public domain by Didier Stevens, no Copyright
@@ -45,6 +45,7 @@ History:
   2022/09/02: 0.1.3 changed THP_READALL logic
   2023/01/19: added print lock; THP_ECHO_THIS; THP_ALLOW_LIST
   2023/03/16: man update for THP_ECHO_THIS
+  2023/04/09: 0.1.4 added zip file support to ReadBinaryFile, added option --prompt
 
 Todo:
   Add support for PyDivert
@@ -133,6 +134,10 @@ try:
     import paramiko
 except:
     pass
+try:
+    import pyzipper as zipfile
+except ImportError:
+    import zipfile
 
 def PrintManual():
     manual = r'''
@@ -655,6 +660,11 @@ dListeners = {
 
 simple_listener.py #v#FILETOSERVE=malware.vir httpservefile.py
 
+If function ReadBinaryFile receives a filename that starts with #z#, the function will handle the file as a ZIP file and extract the first files from the ZIP container. If the file is password protected, password infected will be used.
+
+Use option --prompt to prompt the user that launched this program after each request.
+When this option is enabled, a prompt will be displayed one second after the processing of a request has started. This stops the processing of all new requests, until the user has provided an answer.
+Answer s (letter s + ENTER key) stops the program, any other answer resumes processing.
 
 Output is written to stdout and a log file.
 
@@ -1220,8 +1230,7 @@ class cConnectionThread(threading.Thread):
                             self.SendTCP(echodata)
                             self.LogData('TCP', 'send echo', echodata)
                     if THP_REPLY in self.dListener:
-                        self.SendTCP(ReplaceAliases(self.dListener[THP_REPLY], self.EchoThis(splitdata)))
-                        self.oOutput.LineTimestamped('%s TCP send reply' % self.connectionID)
+                        self.SendTCP(ReplaceAliases(self.dListener[THP_REPLY], self.EchoThis(splitdata)), 'TCP send reply')
                     if THP_MATCH in self.dListener:
                         dKeys = {}
                         for item in self.dListener[THP_MATCH].items():
@@ -1274,10 +1283,15 @@ class cConnectionThread(threading.Thread):
                 lineno = ''
             self.oOutput.LineTimestamped("%s TCP exception%s '%s'" % (self.connectionID, lineno, str(e)))
 
-    def SendTCP(self, data):
+    def SendTCP(self, data, logmessage=''):
         if THP_DELAY in self.dListener:
             time.sleep(self.dListener[THP_DELAY])
         self.connection.send(data)
+        if logmessage != '':
+            self.oOutput.LineTimestamped('%s %s len=%d md5=%s' % (self.connectionID, logmessage, len(data), hashlib.md5(data).hexdigest()))
+            httpcontent = GetContent(data)
+            if httpcontent != '':
+                self.oOutput.LineTimestamped('%s (%s) HTTP content len=%d md5=%s' % (self.connectionID, logmessage, len(httpcontent), hashlib.md5(httpcontent).hexdigest()))
         if self.options.dumpdata:
             self.LogData('TCP', 'sent', data)
 
@@ -1448,18 +1462,38 @@ def ParseArgumentListeners(argument):
 
     raise Exception('Unexpected argument: %s' % argument)
 
+def CreateZipFileObject(arg1, arg2):
+    if 'AESZipFile' in dir(zipfile):
+        return zipfile.AESZipFile(arg1, arg2)
+    else:
+        return zipfile.ZipFile(arg1, arg2)
+
 def ReadBinaryFile(filename):
+    oOutput.LineTimestamped('Reading binary file: %s' % filename)
+
     if filename == '':
         return b''
 
-    try:
-        with open(filename, 'rb') as fIn:
-            data = fIn.read()
-        oOutput.LineTimestamped('File %s read: size %d MD5 %s' % (filename, len(data), hashlib.md5(data).hexdigest()))
-        return data
-    except Exception as e:
-        oOutput.LineTimestamped('Error reading file %s: %s' % (filename, e))
-        raise
+    isZIP, zipfilename = StartsWithGetRemainder(filename, '#z#') # z = zip
+
+    if isZIP:
+        try:
+            oZipfile = CreateZipFileObject(zipfilename, 'r')
+            data = oZipfile.open(oZipfile.infolist()[0], 'r', b'infected').read()
+            oOutput.LineTimestamped('File %s inside ZIP %s read: size %d MD5 %s' % (oZipfile.infolist()[0].filename, zipfilename, len(data), hashlib.md5(data).hexdigest()))
+            return data
+        except Exception as e:
+            oOutput.LineTimestamped('Error reading file %s: %s' % (filename, e))
+            raise e
+    else:
+        try:
+            with open(filename, 'rb') as fIn:
+                data = fIn.read()
+            oOutput.LineTimestamped('File %s read: size %d MD5 %s' % (filename, len(data), hashlib.md5(data).hexdigest()))
+            return data
+        except Exception as e:
+            oOutput.LineTimestamped('Error reading file %s: %s' % (filename, e))
+            raise e
 
 def SimpleListener(arguments, options):
     global dListeners
@@ -1599,6 +1633,13 @@ def SimpleListener(arguments, options):
                 cConnectionThread(oSocket, oOutput, options).start()
             except:
                 oOutput.Exception()
+        if options.prompt:
+            time.sleep(1)
+            oOutput.LineTimestamped('Prompting to stop')
+            answer = input('Answer s to stop, any other answer to continue: ')
+            if answer == 's':
+                oOutput.LineTimestamped('Stopping')
+                return
 
 def Main():
     moredesc = '''
@@ -1619,6 +1660,7 @@ https://DidierStevens.com'''
     oParser.add_option('--loglevel', type=int, default=1, help='Log level: 1=log everything to console and log file, 2=log only startup to console, log everything to file')
     oParser.add_option('--validate', action='store_true', default=False, help='Stop the program before processing connections')
     oParser.add_option('--utcdatetime', default='', help='The UTC start date & time to be used for time variables (format: 2022-07-07T09:48:00)')
+    oParser.add_option('--prompt', action='store_true', default=False, help='Prompt after each processed connection')
     (options, args) = oParser.parse_args()
 
     if options.man:

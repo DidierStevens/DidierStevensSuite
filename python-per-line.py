@@ -2,8 +2,8 @@
 
 __description__ = "Program to evaluate a Python expression for each line in the provided text file(s)"
 __author__ = 'Didier Stevens'
-__version__ = '0.0.10'
-__date__ = '2023/03/25'
+__version__ = '0.0.11'
+__date__ = '2023/04/08'
 
 """
 
@@ -32,6 +32,7 @@ History:
   2022/06/06: 0.0.8 added option -l, fixed xrange for Python 3
   2022/12/03: 0.0.9 added lineNumber
   2023/03/25: 0.0.10 added options --regex --split --join and Reverse* functions
+  2023/04/08: 0.0.11 added option --group
 
 Todo:
 """
@@ -148,6 +149,8 @@ With separator ;: -j ";"
 Use option -R for regular expression matching. Only lines that match the regular expression will be processed, and the result of the regex match is available in variable oMatch.
 
 Option -n is used when you just want to invoke a single Python function taking one argument (i.e. the line of text). Then you just have to provide the name of the Python function, and not a Python expression where this Python function is called with line as argument.
+
+Option -g is used to group all selected lines into Python variable "lines". The provided expression is not evaluated per line, but evaluated after each file has been read an its lines have been stored into Python variable "lines".
 
 Option -r is used to generated a list of numbers and use that as input, in stead of a file.
 This option accepts 1 to 3 numbers (separeted by a comma (,)), which are used as arguments to Python function xrange.
@@ -571,6 +574,15 @@ def Duckify(line):
         result[0:0] = ['STRING ' + line]
     return result
 
+def OutputResult(result, oOutput, options):
+    if not isinstance(result, list):
+        result = [result]
+    for item in result:
+        if options.join == None:
+            oOutput.Line(item)
+        else:
+            oOutput.Line(item, options.join)
+
 def PythonPerLineSingle(expression, filename, oBeginGrep, oGrep, oEndGrep, oOutput, options):
     if filename == '':
         if options.encoding != '':
@@ -589,26 +601,34 @@ def PythonPerLineSingle(expression, filename, oBeginGrep, oGrep, oEndGrep, oOutp
         oRE = re.compile(options.regex, re.I)
     else:
         oRE = None
-    for line in ProcessFile(fIn, oBeginGrep, oGrep, oEndGrep, options.split, False):
-        lineNumber += 1
-        expressionToEvaluate = expression.replace('{}', repr(line))
-        if oRE != None:
-            oMatch = oRE.search(line)
-            if oMatch == None:
-                continue
+
+    if options.group:
+        lines = []
+        for line in ProcessFile(fIn, oBeginGrep, oGrep, oEndGrep, options.split, False):
+            lines.append(line)
         try:
-            result = eval(expressionToEvaluate)
+            result = eval(expression)
         except:
             result = []
             if not options.ignore:
                 raise
-        if not isinstance(result, list):
-            result = [result]
-        for item in result:
-            if options.join == None:
-                oOutput.Line(item)
-            else:
-                oOutput.Line(item, options.join)
+        OutputResult(result, oOutput, options)
+    else:
+        for line in ProcessFile(fIn, oBeginGrep, oGrep, oEndGrep, options.split, False):
+            lineNumber += 1
+            expressionToEvaluate = expression.replace('{}', repr(line))
+            if oRE != None:
+                oMatch = oRE.search(line)
+                if oMatch == None:
+                    continue
+            try:
+                result = eval(expressionToEvaluate)
+            except:
+                result = []
+                if not options.ignore:
+                    raise
+            OutputResult(result, oOutput, options)
+
     if fIn != sys.stdin and type(fIn) != list:
         fIn.close()
 
@@ -690,6 +710,7 @@ https://DidierStevens.com'''
     oParser.add_option('-i', '--ignore', action='store_true', default=False, help='Ignore errors when evaluating the expression')
     oParser.add_option('-R', '--regex', type=str, default='', help='Regular expression to apply to each line')
     oParser.add_option('-j', '--join', type=str, default=None, help='Join lines together')
+    oParser.add_option('-g', '--group', action='store_true', default=False, help='Group all lines into variable lines')
     oParser.add_option('--grep', type=str, default='', help='Grep expression')
     oParser.add_option('--grepoptions', type=str, default='', help='Grep options (ivF)')
     oParser.add_option('--begingrep', type=str, default='', help='Grep expression for begin line')
