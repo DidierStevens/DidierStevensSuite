@@ -2,8 +2,8 @@
 
 __description__ = 'This is essentialy a wrapper for the struct module'
 __author__ = 'Didier Stevens'
-__version__ = '0.0.14'
-__date__ = '2022/06/27'
+__version__ = '0.0.15'
+__date__ = '2023/10/06'
 
 """
 Source code put in public domain by Didier Stevens, no Copyright
@@ -51,6 +51,7 @@ History:
   2020/10/21: 0.0.14 Python 3 fix in cBinaryFile
   2022/06/15: update option find
   2022/06/27: Python 3 fix
+  2023/10/06: 0.0.15 added data dump when a file # is used; added 16N format
 
 Todo:
 """
@@ -73,6 +74,7 @@ import time
 import hashlib
 import json
 import datetime
+import socket
 if sys.version_info[0] >= 3:
     from io import BytesIO as DataIO
 else:
@@ -96,7 +98,7 @@ Example:
 
 format-bytes.py random.bin
 File: random.bin
-s:signed u:unsigned l:little-endian b:big-endian m:mixed-endian
+s:signed u:unsigned l:little-endian b:big-endian m:mixed-endian l4:little-endian grouped by 4 bytes
 1I: s -69 u 187
 2I: sl 26043 ul 26043 sb -17563 ub 47973
 4I: sl 881419707 ul 881419707 sb -1150973644 ub 3143993652
@@ -107,18 +109,19 @@ s:signed u:unsigned l:little-endian b:big-endian m:mixed-endian
 8T: ul N/A ub N/A
 8F: l -1661678170725283018588028971660576297715302893638508902075603349019820032.000000 b -0.000000
 16G: b BB658934-6218-EECE-3AC3-179F6B7428FB m {348965BB-1862-CEEE-3AC3-179F6B7428FB}
+16N: b bb65:8934:6218:eece:3ac3:179f:6b74:28fb l fb28:746b:9f17:c33a:ceee:1862:3489:65bb l4 3489:65bb:ceee:1862:9f17:c33a:fb28:746b
 
 By default, format-bytes.py reads the first 16 bytes (if available) of the file(s) provided as argument, and parses these bytes as:
  Integer: I
  Float: F
- IPv4 address: N
+ IPv4 & IPv6 address: N
  epoch: E
  FILETIME: T
  GUID: G
 
 1I is a 8-bit integer, 2I is a 16-bit integer, ...
 
-Bytes are interpreted in little-endian (l), big-endian (b) and mixed-endian (m) format. Mixed-endian is only used for GUIDs (G).
+Bytes are interpreted in little-endian (l), big-endian (b), mixed-endian (m) and little-endian grouped by 4 bytes (l4) format. Mixed-endian is only used for GUIDs (G). Little-endian grouped by 4 bytes is only used for IPv6 addresses (16N).
 Integers can be signed (s) or unsigned (u).
 
 Use option -f to specify how bytes should be parsed: this option takes a Python struct format string.
@@ -306,7 +309,7 @@ Example:
 
 format-bytes.py -C 2 -S 4 random.bin
 File: random.bin
-s:signed u:unsigned l:little-endian b:big-endian m:mixed-endian
+s:signed u:unsigned l:little-endian b:big-endian m:mixed-endian l4:little-endian grouped by 4 bytes
 00 1I: s -69 u 187
 00 2I: sl 26043 ul 26043 sb -17563 ub 47973
 00 4I: sl 881419707 ul 881419707 sb -1150973644 ub 3143993652
@@ -317,6 +320,7 @@ s:signed u:unsigned l:little-endian b:big-endian m:mixed-endian
 00 8T: ul N/A ub N/A
 00 8F: l -1661678170725283018588028971660576297715302893638508902075603349019820032.000000 b -0.000000
 00 16G: b BB658934-6218-EECE-3AC3-179F6B7428FB m {348965BB-1862-CEEE-3AC3-179F6B7428FB}
+00 16N: b bb65:8934:6218:eece:3ac3:179f:6b74:28fb l fb28:746b:9f17:c33a:ceee:1862:3489:65bb l4 3489:65bb:ceee:1862:9f17:c33a:fb28:746b
 04 1I: s 98 u 98
 04 2I: sl 6242 ul 6242 sb 25112 ub 25112
 04 4I: sl -823256990 ul 3471710306 sb 1645801166 ub 1645801166
@@ -326,7 +330,6 @@ s:signed u:unsigned l:little-endian b:big-endian m:mixed-endian
 04 8I: sl -6982898039867434910 ul 11463846033842116706 sb 7068662184674531231 ub 7068662184674531231
 04 8T: ul N/A ub N/A
 04 8F: l -0.000000 b 358946151129582029215291849393230786808315346836706673156033999581834828933214436444158528577134449241373022018959436034143150814561128186558682352782632064229834752.000000
-04 16G: b 6218EECE-3AC3-179F-6B74-28FBEB2AD62A m {CEEE1862-C33A-9F17-6B74-28FBEB2AD62A}
 
 To search for a value inside the provided file(s), use option -F. For the moment, only numbers (integers and reals) can be searched.
 To search for integers, start the option value with #i# followed by the decimal number to search for.
@@ -886,8 +889,8 @@ class cBinaryFile:
             self.fIn = DataIO(content)
             return
 
-        fch, data = FilenameCheckHash(self.filename, self.literalfilename)
-        if fch == FCH_ERROR:
+        self.fch, data = FilenameCheckHash(self.filename, self.literalfilename)
+        if self.fch == FCH_ERROR:
             raise Exception('Error %s parsing filename: %s' % (data, self.filename))
 
         if self.filename == '':
@@ -895,7 +898,7 @@ class cBinaryFile:
                 import msvcrt
                 msvcrt.setmode(sys.stdin.fileno(), os.O_BINARY)
             self.fIn = sys.stdin
-        elif fch == FCH_DATA:
+        elif self.fch == FCH_DATA:
             self.fIn = DataIO(data)
         elif not self.noextraction and self.filename.lower().endswith('.zip'):
             self.oZipfile = zipfile.ZipFile(self.filename, 'r')
@@ -1281,6 +1284,7 @@ def FormatBytesData(data, position, options):
     if len(data) < 16:
         return
     print(prefix + '16G: b %02X%02X%02X%02X-%02X%02X-%02X%02X-%02X%02X-%02X%02X%02X%02X%02X%02X m {%02X%02X%02X%02X-%02X%02X-%02X%02X-%02X%02X-%02X%02X%02X%02X%02X%02X}' % tuple(bytes[0:16] + bytes[3::-1] + bytes[5:3:-1] + bytes[7:5:-1] + bytes[8:16]))
+    print(prefix + '16N: b %s l %s l4 %s' % (socket.inet_ntop(socket.AF_INET6, data[:16]), socket.inet_ntop(socket.AF_INET6, data[:16][::-1]), socket.inet_ntop(socket.AF_INET6, data[:4][::-1] + data[4:8][::-1] + data[8:12][::-1] + data[12:16][::-1])))
 
 def CalculateByteStatistics(dPrevalence):
     sumValues = sum(dPrevalence.values())
@@ -1770,8 +1774,11 @@ def FormatBytesSingle(filename, cutexpression, content, options):
 
     if filename != '' and not dumpData:
         print('File: %s%s' % (filename, IFF(oBinaryFile.extracted, ' (extracted)', '')))
+        if oBinaryFile.fch == FCH_DATA:
+            print('Data:')
+            print(cDump(data, ' ').HexDump(), end='')
     if format == '' and options.find == '':
-        print('s:signed u:unsigned l:little-endian b:big-endian m:mixed-endian')
+        print('s:signed u:unsigned l:little-endian b:big-endian m:mixed-endian l4:little-endian grouped by 4 bytes')
     if format != '':
         if dumpData:
             if options.dump:
