@@ -323,7 +323,7 @@ class cPPT(cPluginParent):
             0xF145: 'RT_TimeSubEffectContainer'
         }
 
-        if self.streamname == ['PowerPoint Document']:
+        if self.streamname[-1] == 'PowerPoint Document':
             self.ran = True
             stream = self.stream
 
