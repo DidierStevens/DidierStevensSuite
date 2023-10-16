@@ -4,8 +4,8 @@ from __future__ import print_function
 
 __description__ = 'Analyze Cobalt Strike beacons'
 __author__ = 'Didier Stevens'
-__version__ = '0.0.19'
-__date__ = '2023/04/27'
+__version__ = '0.0.20'
+__date__ = '2023/10/15'
 
 """
 Source code put in the public domain by Didier Stevens, no Copyright
@@ -60,6 +60,8 @@ History:
   2023/04/02: updated man page
   2023/04/03: 0.0.18 cleanup debugging
   2023/04/27: 0.0.19 added LSFIF
+  2023/10/06: 0.0.20 updated APIAnalyze
+  2023/10/15: added runtime config parsing
 
 Todo:
 
@@ -82,6 +84,11 @@ import fnmatch
 import json
 import time
 import hashlib
+try:
+    from minidump.minidumpfile import MinidumpFile
+    from minidump.streams import MemoryInfoListStream
+except ImportError:
+    pass
 try:
     import pyzipper as zipfile
 except ImportError:
@@ -2259,7 +2266,9 @@ def FinalTests(data, options, oOutput):
         # https://www.elastic.co/blog/detecting-cobalt-strike-with-memory-signatures
         'Sleep mask 64-bit 4.2 deobfuscation routine': b'\x4C\x8B\x53\x08\x45\x8B\x0A\x45\x8B\x5A\x04\x4D\x8D\x52\x08\x45\x85\xC9\x75\x05\x45\x85\xDB\x74\x33\x45\x3B\xCB\x73\xE6\x49\x8B\xF9\x4C\x8B\x03',
         'Sleep mask 32-bit 4.2 deobfuscation routine': b'\x8B\x46\x04\x8B\x08\x8B\x50\x04\x83\xC0\x08\x89\x55\x08\x89\x45\x0C\x85\xC9\x75\x04\x85\xD2\x74\x23\x3B\xCA\x73\xE6\x8B\x06\x8D\x3C\x08\x33\xD2',
+
         'Public key config entry': b'\x00\x07\x00\x03\x01\x00\x30\x81\x9F\x30\x0D\x06\x09\x2A\x86\x48\x86\xF7\x0D\x01\x01\x01\x05\x00\x03\x81\x8D\x00\x30\x81\x89\x02\x81',
+        'Public key header': b'\x30\x81\x9F\x30\x0D\x06\x09\x2A\x86\x48\x86\xF7\x0D\x01\x01\x01\x05\x00\x03\x81\x8D\x00\x30\x81\x89\x02\x81',
     }
 
     for name, signature in dSignatures.items():
@@ -2323,6 +2332,82 @@ def ProcessBinaryFileSub(sectiondata, data, oOutput, options):
         AnalyzeEmbeddedPEFile(payloadsectiondata, oOutput, options)
     FinalTests(payload, options, oOutput)
     return True
+
+# cfr blog post Hendrik Eckardt
+def RuntimeAnalysis(datamdmp, dConfigs, oOutput, options):
+    listData = []
+    oMinidumpFile = MinidumpFile.parse_bytes(datamdmp)
+    oget_buffered_reader = oMinidumpFile.get_reader().get_buffered_reader()
+    for info in oMinidumpFile.memory_info.infos:
+#        print(info.Protect, info.BaseAddress, info.RegionSize, info.Type)
+        try:
+            oget_buffered_reader.move(info.BaseAddress)
+        except Exception as e:
+            if e.args[0].endswith(' is not in process memory space'):
+#                print('Error: %s' % e.args[0])
+                continue
+            else:
+                raise e
+        try:
+            bytesSegment = oget_buffered_reader.read(info.RegionSize)
+            listData.append([['segment', info], bytesSegment])
+        except OverflowError:
+#            print('OverflowError') #a# handle overflow
+            pass
+        except Exception as e:
+            if e.args[0] == 'Would read over segment boundaries!':
+#                print('Error: %s' % e.args[0])
+                pass
+            else:
+                raise e
+    listData = sorted(listData, reverse=True, key=lambda item: len(item[1]))
+    listData = [[dataInfo[1].BaseAddress, data] for dataInfo, data in listData]
+    publickey = b'\x30\x81\x9F\x30\x0D\x06\x09\x2A\x86\x48\x86\xF7\x0D\x01\x01\x01\x05\x00\x03\x81\x8D\x00\x30\x81\x89\x02\x81'
+    for baseAddress, data in listData:
+        positionsPublickey = FindAll(data, publickey)
+        if len(positionsPublickey) > 0:
+            for positionPublickey in positionsPublickey:
+                addressPublickey = baseAddress + positionPublickey
+                for packformatBits, packformat in {'32-bit': '<II', '64-bit': '<QQ'}.items():
+                    packformatSize = struct.calcsize(packformat)
+                    positionsPublickeyEntry = FindAll(data, struct.pack(packformat, 3, addressPublickey))
+                    for positionPublickeyEntry in positionsPublickeyEntry:
+                        positionRuntimeConfig = positionPublickeyEntry - 7 * packformatSize
+                        oOutput.Line('Runtime config %s found: 0x%08x' % (packformatBits, addressPublickey))
+                        oStruct = cStruct(data[positionRuntimeConfig:])
+                        abConfig = b''
+                        for counter in range(128):
+                            entrytype, entrydata = oStruct.Unpack(packformat)
+                            if entrytype == 0:
+                                pass
+                            elif entrytype == 3:
+                                configItem = data[entrydata - baseAddress:]
+                                if counter in [0x07, 0x0b, 0x0c, 0x0d]:
+                                    configItem = configItem[:0x100]
+                                else:
+                                    configItem = configItem[:configItem.find(b'\x00')]
+    #                            print('%04x %08x -> %s' % (counter, entrytype, configItem))
+                                abConfig += struct.pack('>HHH', counter, entrytype, 0x100)
+                                abConfig += configItem + b'\x00' * (0x100 - len(configItem))
+                            elif entrytype == 1:
+    #                            print('%04x %08x -> %d' % (counter, entrytype, entrydata))
+                                abConfig += struct.pack('>HHH', counter, entrytype, 2)
+                                abConfig += struct.pack('>H', entrydata)
+                            elif entrytype == 2:
+    #                            print('%04x %08x -> %d' % (counter, entrytype, entrydata))
+                                abConfig += struct.pack('>HHH', counter, entrytype, 4)
+                                abConfig += struct.pack('>I', entrydata)
+                            else:
+                                break
+                        abConfig += struct.pack('>HHH', 0, 0, 0)
+                        result, dJSON = AnalyzeEmbeddedPEFileSub2(abConfig, [], options)
+                        configSha256 = hashlib.sha256(''.join(result).encode()).hexdigest()
+                        if not configSha256 in dConfigs:
+                            dConfigs[configSha256] = True
+                            if result != [ERROR_SANITY_CHECK]:
+                                oOutput.JSON(dJSON)
+                                for line in result:
+                                    oOutput.Line(line)
 
 def ProcessBinaryFile(filename, content, cutexpression, flag, oOutput, oLogfile, options):
     if content == None:
@@ -2406,6 +2491,13 @@ def ProcessBinaryFile(filename, content, cutexpression, flag, oOutput, oLogfile,
                             oOutput.Line('xorkey %s %02x' % (xorKeyBytes, xorKey))
                             for line in result:
                                 oOutput.Line(line)
+            if data[:4] == b'MDMP':
+                try:
+                    MinidumpFile
+                except NameError:
+                    print('minidump module is required for runtime config analysis: pip install minidump')
+                else:
+                    RuntimeAnalysis(data, dConfigs, oOutput, options)
             FinalTests(data, options, oOutput)
         # ----------------------------------------------
     except:
@@ -2562,9 +2654,12 @@ class cAPIOutput(object):
     def LineError(self, line):
         pass
 
-def APIAnalyze(data):
+def APIAnalyze(data, raw=False):
     oOutput = cAPIOutput()
-    ProcessBinaryFile('', data, ':', '', oOutput, cAPIOutput(), cAPIOptions())
+    oOptions = cAPIOptions()
+    if raw:
+        oOptions.raw = True
+    ProcessBinaryFile('', data, ':', '', oOutput, cAPIOutput(), oOptions)
     return oOutput.JSONs
 
 def ProcessBinaryFiles(filenames, oLogfile, options):
