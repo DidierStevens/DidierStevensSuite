@@ -2,8 +2,8 @@
 
 __description__ = 'count unique items'
 __author__ = 'Didier Stevens'
-__version__ = '0.3.1'
-__date__ = '2022/12/05'
+__version__ = '0.3.2'
+__date__ = '2024/01/26'
 
 """
 Source code put in public domain by Didier Stevens, no Copyright
@@ -26,6 +26,7 @@ History:
   2021/01/15: 0.3.0 Python 3
   2022/12/04: 0.3.1 added singles and multiples
   2022/12/05: added options singles and multiples
+  2024/01/26: 0.3.1 added option encoding
 
 Todo:
 """
@@ -299,8 +300,10 @@ def CountDictionary(args, options):
     for file in args:
         if file == '':
             fIn = sys.stdin
-        else:
+        elif options.encoding == '':
             fIn = open(file, 'r')
+        else:
+            fIn = open(file, 'r', encoding=options.encoding)
         for line in fIn:
             line = line.strip('\n')
             if options.lowercase:
@@ -398,6 +401,7 @@ https://DidierStevens.com'''
     oParser.add_option('-z', '--zeroinput', action='store_true', default=False, help='no input to process')
     oParser.add_option('-c', '--countingmethod', default=':dictionary:', help='internal method used to count: :dictionary: or sqlite3 database name: :memory:, '', ...')
     oParser.add_option('-w', '--where', default='', help='where clause for sqlite3 database')
+    oParser.add_option('--encoding', type=str, default='', help='Encoding for file open')
     (options, args) = oParser.parse_args()
 
     if options.zeroinput:

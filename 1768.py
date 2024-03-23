@@ -4,8 +4,8 @@ from __future__ import print_function
 
 __description__ = 'Analyze Cobalt Strike beacons'
 __author__ = 'Didier Stevens'
-__version__ = '0.0.20'
-__date__ = '2023/10/15'
+__version__ = '0.0.21'
+__date__ = '2024/01/21'
 
 """
 Source code put in the public domain by Didier Stevens, no Copyright
@@ -62,6 +62,8 @@ History:
   2023/04/27: 0.0.19 added LSFIF
   2023/10/06: 0.0.20 updated APIAnalyze
   2023/10/15: added runtime config parsing
+  2024/01/18: 0.0.21 FindAlternativeRuntimeConfig1
+  2024/01/21: fix jsonoutput bug for missing config; added option experimental
 
 Todo:
 
@@ -143,6 +145,8 @@ Option -V (--verbose) produces more output:
 When a signature is found, the longest ASCII string in front of the signature (256 bytes span) is included, like this:
 Sleep mask 64-bit 4.2 deobfuscation routine found: 0x122f12d31 (LSFIF: b'!#ALF:Y2V:Elastic/HKTL_CobaltStrike_Beacon_4_2_Decrypt')
 LSFIF is abbreviation Longest String Found In Front.
+
+Use option -e (--experimental) to enable experimental features.
 
 A JSON file with name 1768.json placed in the same directory as 1768.py will be used to enhance fields with information, like the license-id field.
 
@@ -1528,14 +1532,14 @@ def Xor(data, key):
     key = C2SIP3(key)
     return C2BIP3(''.join(chr(ord(data[i]) ^ ord(key[i % len(key)])) for i in range(len(data))))
 
-def FindAll(data, sub):
+def FindAll(data, sub, offset=0):
     result = []
     start = 0
     while True:
         position = data.find(sub, start)
         if position == -1:
             return result
-        result.append(position)
+        result.append(position + offset)
         start = position + 1
 
 def FindAllList(data, searches):
@@ -1983,93 +1987,94 @@ def AnalyzeEmbeddedPEFileSub(payloadsectiondata, options):
 
     return AnalyzeEmbeddedPEFileSub2(data, result, options)
 
+dConfigIdentifiers = {
+    0x0001: 'payload type',
+    0x0002: 'port',
+    0x0003: 'sleeptime',
+    0x0004: 'maxgetsize', #
+    0x0005: 'jitter',
+    0x0006: 'maxdns',
+    0x0007: 'publickey',
+    0x0008: 'server,get-uri',
+    0x0009: 'useragent',
+    0x000a: 'post-uri',
+    0x000b: 'Malleable_C2_Instructions', #
+    0x000c: 'http_get_header',
+    0x000d: 'http_post_header',
+    0x000e: 'SpawnTo', #
+    0x000f: 'pipename',
+    0x0010: 'killdate_year', #
+    0x0011: 'killdate_month', #
+    0x0012: 'killdate_day', #
+    0x0013: 'DNS_Idle', #
+    0x0014: 'DNS_Sleep', #
+    0x0015: 'SSH_HOST', #
+    0x0016: 'SSH_PORT', #
+    0x0017: 'SSH_USER-NAME', #
+    0x0018: 'SSH_PASSWORD', #
+    0x0019: 'SSH_PUBKEY', #
+    0x001a: 'get-verb',
+    0x001b: 'post-verb',
+    0x001c: 'HttpPostChunk', #
+    0x001d: 'spawnto_x86',
+    0x001e: 'spawnto_x64',
+    0x001f: 'CryptoScheme', #
+    0x0020: 'proxy',
+    0x0021: 'proxy_username',
+    0x0022: 'proxy_password',
+    0x0023: 'proxy_type',
+    0x0024: 'deprecated', #
+    0x0025: 'license-id',
+    0x0026: 'bStageCleanup', #
+    0x0027: 'bCFGCaution', #
+    0x0028: 'killdate',
+    0x0029: 'textSectionEnd', #
+    0x002a: 'ObfuscateSectionsInfo', #
+    0x002b: 'process-inject-start-rwx',
+    0x002c: 'process-inject-use-rwx',
+    0x002d: 'process-inject-min_alloc',
+    0x002e: 'process-inject-transform-x86',
+    0x002f: 'process-inject-transform-x64',
+    0x0030: 'DEPRECATED_PROCINJ_ALLOWED',
+    0x0031: 'BIND_HOST',
+    0x0032: 'UsesCookies',
+    0x0033: 'process-inject-execute',
+    0x0034: 'process-inject-allocation-method',
+    0x0035: 'process-inject-stub',
+    0x0036: 'HostHeader',
+    0x0037: 'EXIT_FUNK',
+    0x0038: 'SSH_BANNER',
+    0x0039: 'SMB_FRAME_HEADER',
+    0x003a: 'TCP_FRAME_HEADER',
+    0x003b: 'HEADERS_TO_REMOVE',
+    0x003c: 'DNS_beacon',
+    0x003d: 'DNS_A',
+    0x003e: 'DNS_AAAA',
+    0x003f: 'DNS_TXT',
+    0x0040: 'DNS_metadata',
+    0x0041: 'DNS_output',
+    0x0042: 'DNS_resolver',
+    0x0043: 'DNS_STRATEGY',
+    0x0044: 'DNS_STRATEGY_ROTATE_SECONDS',
+    0x0045: 'DNS_STRATEGY_FAIL_X',
+    0x0046: 'DNS_STRATEGY_FAIL_SECONDS',
+    0x0047: 'MAX_RETRY_STRATEGY_ATTEMPTS',
+    0x0048: 'MAX_RETRY_STRATEGY_INCREASE',
+    0x0049: 'MAX_RETRY_STRATEGY_DURATION',
+}
+dConfigValueInterpreter = {
+    0x0001: lambda value: LookupConfigValue(0x0001, value),
+    0x0007: ToHexadecimal,
+    0x000b: DecodeMalleableC2Instructions,
+    0x0013: ConvertIntToIPv4,
+    0x0023: lambda value: LookupConfigValue(0x0023, value),
+    0x002b: lambda value: LookupConfigValue(0x002b, value),
+    0x002c: lambda value: LookupConfigValue(0x002b, value),
+}
+
 def AnalyzeEmbeddedPEFileSub2(data, result, options):
     dJSON = {}
 
-    dConfigIdentifiers = {
-        0x0001: 'payload type',
-        0x0002: 'port',
-        0x0003: 'sleeptime',
-        0x0004: 'maxgetsize', #
-        0x0005: 'jitter',
-        0x0006: 'maxdns',
-        0x0007: 'publickey',
-        0x0008: 'server,get-uri',
-        0x0009: 'useragent',
-        0x000a: 'post-uri',
-        0x000b: 'Malleable_C2_Instructions', #
-        0x000c: 'http_get_header',
-        0x000d: 'http_post_header',
-        0x000e: 'SpawnTo', #
-        0x000f: 'pipename',
-        0x0010: 'killdate_year', #
-        0x0011: 'killdate_month', #
-        0x0012: 'killdate_day', #
-        0x0013: 'DNS_Idle', #
-        0x0014: 'DNS_Sleep', #
-        0x0015: 'SSH_HOST', #
-        0x0016: 'SSH_PORT', #
-        0x0017: 'SSH_USER-NAME', #
-        0x0018: 'SSH_PASSWORD', #
-        0x0019: 'SSH_PUBKEY', #
-        0x001a: 'get-verb',
-        0x001b: 'post-verb',
-        0x001c: 'HttpPostChunk', #
-        0x001d: 'spawnto_x86',
-        0x001e: 'spawnto_x64',
-        0x001f: 'CryptoScheme', #
-        0x0020: 'proxy',
-        0x0021: 'proxy_username',
-        0x0022: 'proxy_password',
-        0x0023: 'proxy_type',
-        0x0024: 'deprecated', #
-        0x0025: 'license-id',
-        0x0026: 'bStageCleanup', #
-        0x0027: 'bCFGCaution', #
-        0x0028: 'killdate',
-        0x0029: 'textSectionEnd', #
-        0x002a: 'ObfuscateSectionsInfo', #
-        0x002b: 'process-inject-start-rwx',
-        0x002c: 'process-inject-use-rwx',
-        0x002d: 'process-inject-min_alloc',
-        0x002e: 'process-inject-transform-x86',
-        0x002f: 'process-inject-transform-x64',
-        0x0030: 'DEPRECATED_PROCINJ_ALLOWED',
-        0x0031: 'BIND_HOST',
-        0x0032: 'UsesCookies',
-        0x0033: 'process-inject-execute',
-        0x0034: 'process-inject-allocation-method',
-        0x0035: 'process-inject-stub',
-        0x0036: 'HostHeader',
-        0x0037: 'EXIT_FUNK',
-        0x0038: 'SSH_BANNER',
-        0x0039: 'SMB_FRAME_HEADER',
-        0x003a: 'TCP_FRAME_HEADER',
-        0x003b: 'HEADERS_TO_REMOVE',
-        0x003c: 'DNS_beacon',
-        0x003d: 'DNS_A',
-        0x003e: 'DNS_AAAA',
-        0x003f: 'DNS_TXT',
-        0x0040: 'DNS_metadata',
-        0x0041: 'DNS_output',
-        0x0042: 'DNS_resolver',
-        0x0043: 'DNS_STRATEGY',
-        0x0044: 'DNS_STRATEGY_ROTATE_SECONDS',
-        0x0045: 'DNS_STRATEGY_FAIL_X',
-        0x0046: 'DNS_STRATEGY_FAIL_SECONDS',
-        0x0047: 'MAX_RETRY_STRATEGY_ATTEMPTS',
-        0x0048: 'MAX_RETRY_STRATEGY_INCREASE',
-        0x0049: 'MAX_RETRY_STRATEGY_DURATION',
-    }
-    dConfigValueInterpreter = {
-        0x0001: lambda value: LookupConfigValue(0x0001, value),
-        0x0007: ToHexadecimal,
-        0x000b: DecodeMalleableC2Instructions,
-        0x0013: ConvertIntToIPv4,
-        0x0023: lambda value: LookupConfigValue(0x0023, value),
-        0x002b: lambda value: LookupConfigValue(0x002b, value),
-        0x002c: lambda value: LookupConfigValue(0x002b, value),
-    }
     dJSONData = GetJSONData()
     dLookupValues = dJSONData.get('dLookupValues', {})
 
@@ -2273,7 +2278,7 @@ def FinalTests(data, options, oOutput):
 
     for name, signature in dSignatures.items():
         xorKeys = [b'\x00']
-        if name == 'Public key config entry':
+        if name.startswith('Public key'):
             xorKeys = [b'\x00', b'\x2e', b'\x69']
             if options.xorkeys:
                 xorKeys = [bytes([iter]) for iter in range(256)]
@@ -2285,7 +2290,7 @@ def FinalTests(data, options, oOutput):
                     longestString = ' (LSFIF: %s)' % stringsInFront[0]
                 else:
                     longestString = ''
-                oOutput.Line('%s found: 0x%08x%s%s' % (name, position, IFF(xorKey == b'\x00', '', ' (xorKey %s)' % xorKey), longestString))
+                oOutput.Line('%s found: 0x%08x%s%s' % (name, position, IFF(xorKey == b'\x00', '', ' (xorKey 0x%02x)' % xorKey[0]), longestString))
                 if options.verbose:
                     oOutput.Line(cDump(data[position-0x100:position], '  ', position-0x100).HexAsciiDump(rle=True), eol='')
                     oOutput.Line('  ... signature ...')
@@ -2333,6 +2338,73 @@ def ProcessBinaryFileSub(sectiondata, data, oOutput, options):
     FinalTests(payload, options, oOutput)
     return True
 
+def Truncate(data, truncate=b'\x00'):
+    position = data.find(truncate)
+    if position == -1:
+        return data
+    else:
+        return data[:position]
+
+def PackIntegers(formats, integer):
+    result = []
+    for format in formats:
+        try:
+            bytesInteger = struct.pack(format, integer)
+        except struct.error:
+            pass
+        else:
+            result.append(bytesInteger)
+    return result
+
+def FindGenericArrayPointingToStrings(listData, publickey, oOutput):
+    selectedStrings = []
+    for baseAddress, data in listData:
+        addressesPublicKey = FindAll(data, publickey, baseAddress)
+        if len(addressesPublicKey) > 0:
+            for addressPublicKey in addressesPublicKey:
+                for bytesInteger in PackIntegers(['<I', '<Q'], addressPublicKey):
+                    for addressPointer in FindAll(data, bytesInteger, baseAddress):
+                        selectedStrings.append([addressPointer, addressPublicKey, publickey])
+            for extractedString in set(ExtractStringsASCII(data)):
+                if len(extractedString) > 4:
+                    for addressExtractedString in FindAll(data, extractedString + b'\x00', baseAddress):
+                        for bytesInteger in PackIntegers(['<I', '<Q'], addressExtractedString):
+                            for addressPointer in FindAll(data, bytesInteger, baseAddress):
+                                selectedStrings.append([addressPointer, addressExtractedString, extractedString])
+    previousAddressPointer = 0
+    foundPublicKey = False
+    for addressPointer, addressExtractedString, extractedString in sorted(selectedStrings):
+        if addressPointer != previousAddressPointer:
+            if not foundPublicKey and extractedString == publickey:
+                foundPublicKey = True
+                oOutput.Line('0x%012x 0x%06x 0x%06x %s' % (addressPointer, addressPointer - previousAddressPointer, addressExtractedString, extractedString))
+                oOutput.Line('Experimental: runtime array with string pointers found:')
+            if foundPublicKey:
+                oOutput.Line('0x%012x 0x%06x 0x%06x %s' % (addressPointer, addressPointer - previousAddressPointer, addressExtractedString, extractedString))
+            previousAddressPointer = addressPointer
+
+def FindAlternativeRuntimeConfig1(listData, oOutput):
+    dTypeFormats = {10: True, 26: True, 27: True, 29: True, 30: True, 36: True, 108: True, 109: True}
+    for formatRecordBits, formatRecord in {'32-bit': '<BHII', '64-bit': '<BHIQ'}.items():
+        runtimeHeader = struct.pack(formatRecord, 0, 0, 0, 0) * 9 + struct.pack(formatRecord[:-1], 9, 0, 0)
+        for baseAddress, data in listData:
+            positionsruntimeHeader = FindAll(data, runtimeHeader)
+            for positionruntimeHeader in positionsruntimeHeader:
+                oStruct = cStruct(data[positionruntimeHeader+len(runtimeHeader):])
+                if oStruct.GetBytes(8) and oStruct.Unpack(formatRecord)[0:3] == (9, 0, 0) and oStruct.Unpack(formatRecord)[0:3] == (9, 0, 0):
+                    oOutput.Line('Experimental: "alternative" runtime config %s %s found at %d (baseAddress 0x%016x):' % (formatRecordBits, formatRecord, positionruntimeHeader, baseAddress))
+                    oStruct = cStruct(data[positionruntimeHeader:])
+                    for iter in range(1, 128):
+                        var1, var2, var3, var4 = oStruct.Unpack(formatRecord)
+                        if [var1, var2, var3, var4] == [0, 0, 0, 0]:
+                            continue
+                        if var1 == 9:
+                            var4 = data[var4-baseAddress:var4-baseAddress+256]
+                            if iter in dTypeFormats:
+                                var4 = Truncate(var4)
+                        oOutput.Line(' %3d %-30s %d %d %d %s' % (iter, dConfigIdentifiers.get(iter - 100 if iter > 100 else iter, ''), var1, var2, var3, var4))
+
+
 # cfr blog post Hendrik Eckardt
 def RuntimeAnalysis(datamdmp, dConfigs, oOutput, options):
     listData = []
@@ -2370,8 +2442,11 @@ def RuntimeAnalysis(datamdmp, dConfigs, oOutput, options):
                 addressPublickey = baseAddress + positionPublickey
                 for packformatBits, packformat in {'32-bit': '<II', '64-bit': '<QQ'}.items():
                     packformatSize = struct.calcsize(packformat)
-                    positionsPublickeyEntry = FindAll(data, struct.pack(packformat, 3, addressPublickey))
-                    for positionPublickeyEntry in positionsPublickeyEntry:
+                    try:
+                        bytesAddressPublickey = struct.pack(packformat, 3, addressPublickey)
+                    except struct.error:
+                        continue
+                    for positionPublickeyEntry in FindAll(data, bytesAddressPublickey):
                         positionRuntimeConfig = positionPublickeyEntry - 7 * packformatSize
                         oOutput.Line('Runtime config %s found: 0x%08x' % (packformatBits, addressPublickey))
                         oStruct = cStruct(data[positionRuntimeConfig:])
@@ -2386,15 +2461,15 @@ def RuntimeAnalysis(datamdmp, dConfigs, oOutput, options):
                                     configItem = configItem[:0x100]
                                 else:
                                     configItem = configItem[:configItem.find(b'\x00')]
-    #                            print('%04x %08x -> %s' % (counter, entrytype, configItem))
+#                                print('%04x %08x -> %s' % (counter, entrytype, configItem))
                                 abConfig += struct.pack('>HHH', counter, entrytype, 0x100)
                                 abConfig += configItem + b'\x00' * (0x100 - len(configItem))
                             elif entrytype == 1:
-    #                            print('%04x %08x -> %d' % (counter, entrytype, entrydata))
+#                                print('%04x %08x -> %d' % (counter, entrytype, entrydata))
                                 abConfig += struct.pack('>HHH', counter, entrytype, 2)
                                 abConfig += struct.pack('>H', entrydata)
                             elif entrytype == 2:
-    #                            print('%04x %08x -> %d' % (counter, entrytype, entrydata))
+#                                print('%04x %08x -> %d' % (counter, entrytype, entrydata))
                                 abConfig += struct.pack('>HHH', counter, entrytype, 4)
                                 abConfig += struct.pack('>I', entrydata)
                             else:
@@ -2408,6 +2483,33 @@ def RuntimeAnalysis(datamdmp, dConfigs, oOutput, options):
                                 oOutput.JSON(dJSON)
                                 for line in result:
                                     oOutput.Line(line)
+
+    if options.experimental:
+        FindAlternativeRuntimeConfig1(listData, oOutput)
+        FindGenericArrayPointingToStrings(listData, publickey, oOutput)
+
+def FindAlternativeStoredConfig1(data, oOutput):
+    header = b'\x00\x65\x00\x07\x00\x02\x00'
+    for key in range(0x100):
+        headerXored = bytes([b ^ key for b in header])
+        for position in FindAll(data, headerXored):
+            oOutput.Line('Experimental: "alternative" stored config found %s XOR 0x%02x position 0x%08x:' % (header, key, position))
+            oStruct = cStruct(bytes([b ^ key for b in data[position:position+0x1000]]))
+            while oStruct.Length() > 0:
+                var1, var2, var3 = oStruct.Unpack('>HHH')
+                if var1 == 0:
+                    break
+                if var3 == 2:
+                    value = oStruct.Unpack('>H')
+                elif var3 == 4:
+                    value = oStruct.Unpack('>I')
+                else:
+                    value = oStruct.GetBytes(var3).rstrip(b'\x00')
+                if var1 > 100:
+                    identifier = var1 - 100
+                else:
+                    identifier = var1
+                oOutput.Line('%3d %-40s %d %3d %s' % (var1, dConfigIdentifiers.get(identifier, ''), var2, var3, value))
 
 def ProcessBinaryFile(filename, content, cutexpression, flag, oOutput, oLogfile, options):
     if content == None:
@@ -2499,6 +2601,9 @@ def ProcessBinaryFile(filename, content, cutexpression, flag, oOutput, oLogfile,
                 else:
                     RuntimeAnalysis(data, dConfigs, oOutput, options)
             FinalTests(data, options, oOutput)
+
+        if options.experimental:
+            FindAlternativeStoredConfig1(data, oOutput)
         # ----------------------------------------------
     except:
         oLogfile.LineError('Processing file %s %s' % (filename, repr(sys.exc_info()[1])))
@@ -2674,7 +2779,11 @@ def ProcessBinaryFiles(filenames, oLogfile, options):
             index += 1
             ProcessBinaryFile(item['name'], item['content'], '', '', oOutput, oLogfile, options)
             if options.jsonoutput:
-                oOutput.oOutput.Line(json.dumps({'filename': oOutput.filename, 'messages': oOutput.messages, 'config': oOutput.JSONs[0]}))
+                if oOutput.JSONs == []:
+                    dJsonData = {}
+                else:
+                    dJsonData = oOutput.JSONs[0]
+                oOutput.oOutput.Line(json.dumps({'filename': oOutput.filename, 'messages': oOutput.messages, 'config': dJsonData}))
     elif options.licenseids != '':
         ProcessLicenseIDs(oOutput, oLogfile, options)
     else:
@@ -2683,7 +2792,11 @@ def ProcessBinaryFiles(filenames, oLogfile, options):
             index += 1
             ProcessBinaryFile(filename, None, cutexpression, flag, oOutput, oLogfile, options)
             if options.jsonoutput:
-                oOutput.oOutput.Line(json.dumps({'filename': oOutput.filename, 'messages': oOutput.messages, 'config': oOutput.JSONs[0]}))
+                if oOutput.JSONs == []:
+                    dJsonData = {}
+                else:
+                    dJsonData = oOutput.JSONs[0]
+                oOutput.oOutput.Line(json.dumps({'filename': oOutput.filename, 'messages': oOutput.messages, 'config': dJsonData}))
 
 def Main():
     moredesc = '''
@@ -2710,6 +2823,7 @@ https://DidierStevens.com'''
     oParser.add_option('-j', '--jsoninput', action='store_true', default=False, help='Consume JSON from stdin')
     oParser.add_option('-J', '--jsonoutput', action='store_true', default=False, help='Output JSON')
     oParser.add_option('-V', '--verbose', action='store_true', default=False, help='Verbose output')
+    oParser.add_option('-e', '--experimental', action='store_true', default=False, help='Enabe experimental features')
     oParser.add_option('--logfile', type=str, default='', help='Create logfile with given keyword')
     oParser.add_option('--logcomment', type=str, default='', help='A string with comments to be included in the log file')
     oParser.add_option('--ignoreprocessingerrors', action='store_true', default=False, help='Ignore errors during file processing')

@@ -2,8 +2,8 @@
 
 __description__ = 'ZIP dump utility'
 __author__ = 'Didier Stevens'
-__version__ = '0.0.29'
-__date__ = '2023/09/18'
+__version__ = '0.0.30'
+__date__ = '2024/02/20'
 
 """
 
@@ -70,6 +70,8 @@ History:
   2023/06/18: 0.0.27 fixed password cracking false positives
   2023/08/27: 0.0.28 added externalattributes parsing
   2023/09/18: 0.0.29 added DOSTIME & DOSDATE parsing
+  2023/12/18: 0.0.30 added option stats and cPKEND
+  2024/02/20: added alphanumhashvir
 
 Todo:
 """
@@ -301,7 +303,7 @@ C:\Demo>zipdump.py -E "#%HEADASCII%;%HEADHEX%" Book1.xlsm
 
 To include extra data with each use of zipdump, define environment variable ZIPDUMP_EXTRA with the parameter that should be passed to -E. When environment variable ZIPDUMP_EXTRA is defined, option -E can be ommited. When option -E is used together with environment variable ZIPDUMP_EXTRA, the parameter of option -E is used and the environment variable is ignored.
 
-To write all contained files to disk, use option -W value, where value can be vir, hash, hashvir, ziphashvir or alphanumvir.
+To write all contained files to disk, use option -W value, where value can be vir, hash, hashvir, ziphashvir, alphanumvir or alphanumhashvir.
 All contained files are written to the current directory when you use this option.
 The filename depends on the value given for the -W option.
 vir: files are written under their name (without directory information) and with extension .vir appended to the filename (leaving the original extension).
@@ -309,6 +311,7 @@ hash: files are written with a filename equal to the SHA256 hash of their conten
 hashvir: files are written with a filename equal to the SHA256 hash of their content and with extension .vir.
 ziphashvir: files are written with a filename equal to the SHA256 hash of their content prefixed with the ZIP filename and with extension .vir.
 alphanumvir: files are written under their name (without directory information, replacing all characters that are not alphanumeric with an underscore) and with extension .vir appended to the filename (leaving the original extension).
+alphanumhashvir: like alphanumvir but with the SHA256 hash after the name and before .vir.
 
 zipdump supports YARA rules. Installation of the YARA Python module is not mandatory if you don't use YARA rules.
 You provide the YARA rules with option -y. You can provide one file with YARA rules, an at-file (@file containing the filenames of the YARA files) or a directory. In case of a directory, all files inside the directory are read as YARA files.
@@ -568,6 +571,7 @@ WRITE_ALPHANUMVIR = 'alphanumvir'
 WRITE_HASH        = 'hash'
 WRITE_HASHVIR     = 'hashvir'
 WRITE_ZIPHASHVIR  = 'ziphashvir'
+WRITE_ALPHANUMHASHVIR = 'alphanumhashvir'
 
 BRUTEFORCE_PREFIX = '#b#'
 BRUTEFORCE_PARAMETER_MINIMUM = 'minimum'
@@ -579,7 +583,7 @@ BRUTEFORCE_PARAMETER_CHARSETS_VALUE_UPPERCASE = 'u'
 BRUTEFORCE_PARAMETER_CHARSETS_VALUE_DIGITS = 'd'
 BRUTEFORCE_PARAMETER_CHARSETS_VALUE_SPECIAL = 's'
 
-validWriteValues = [WRITE_VIR, WRITE_ALPHANUMVIR, WRITE_HASH, WRITE_HASHVIR, WRITE_ZIPHASHVIR]
+validWriteValues = [WRITE_VIR, WRITE_ALPHANUMVIR, WRITE_HASH, WRITE_HASHVIR, WRITE_ZIPHASHVIR, WRITE_ALPHANUMHASHVIR]
 
 #Convert 2 Bytes If Python 3
 def C2BIP3(string):
@@ -5375,6 +5379,8 @@ def ZIPDump(zipfilename, options, data=None):
                         memberFilename = os.path.basename(oZipInfo.filename) + '.vir'
                     elif options.write == WRITE_ALPHANUMVIR:
                         memberFilename = ''.join([char if char in (string.ascii_lowercase + string.ascii_uppercase + string.digits) else '_' for char in os.path.basename(oZipInfo.filename)]) + '.vir'
+                    elif options.write == WRITE_ALPHANUMHASHVIR:
+                        memberFilename = ''.join([char if char in (string.ascii_lowercase + string.ascii_uppercase + string.digits) else '_' for char in os.path.basename(oZipInfo.filename)]) + '.' + hashlib.sha256(data).hexdigest() + '.vir'
                     else:
                         memberFilename = hashlib.sha256(data).hexdigest()
                         if options.write in [WRITE_HASHVIR, WRITE_ZIPHASHVIR]:
@@ -5601,6 +5607,18 @@ class cPKDIR(cPKRecord):
         if len(dataFields) == formatLength:
             self.fields = struct.unpack(format, dataFields)
 
+class cPKEND(cPKRecord):
+    def __init__(self, data):
+        self.fields = None
+        self.data = None
+        format = '<HHHHHHIIH'
+        self.formatDescription = ['signature1', 'signature2', 'disknumber', 'startdisknumber', 'entriesondisk', 'entriesindirectory', 'directorysize', 'directoryoffset', 'commentlength']
+        self.formatFormat = ['%04x', '%04x', '', '', '', '', '', '%08x', '%08x', '']
+        formatLength = struct.calcsize(format)
+        dataFields = data[:formatLength]
+        if len(dataFields) == formatLength:
+            self.fields = struct.unpack(format, dataFields)
+
 #a# todo: add more record types - https://pkware.cachefly.net/webdocs/casestudies/APPNOTE.TXT
 def ParseZIPRecord(data):
     if data[0:2] != b'PK':
@@ -5628,6 +5646,7 @@ def ParseZIPRecord(data):
                     magic += ' ' + repr(filename)
         elif data[2:4] == b'\x05\x06':
             magic += ' end'
+            oPKRecord = cPKEND(data)
             if len(data[20:22]) == 2:
                 length = struct.unpack('<H', data[20:22])[0]
                 extra = 22 + length
@@ -5770,7 +5789,7 @@ def ZIPFind(zipfilename, options):
         records.append(['s', locations[-1][0] + locations[-1][1][1], 'data', len(data) - locations[-1][0] - locations[-1][1][1], None])
     if options.find == 'list':
         index = 1
-        overview = []
+        dStats = {}
         for index, location, record, info, oPKRecord in records:
             if index in ['p', 's']:
                 print(' %3s 0x%08x %s %d:%dl' % (index, location, record, location, info))
@@ -5789,6 +5808,12 @@ def ZIPFind(zipfilename, options):
                             print('                         %s' % item)
                 else:
                     print(line)
+            recordtype = record.split(' ')[0]
+            dStats[recordtype] = dStats.get(recordtype, 0) + 1
+        if options.stats:
+            print()
+            for recordtype in sorted(dStats.keys()):
+                print('%s: %d' % (recordtype, dStats[recordtype]))
     elif options.find in ['p', 's']:
         DumpFunction = SelectDumpFunction(options)
         partial = None
@@ -5916,6 +5941,7 @@ def Main():
     oParser.add_option('-f', '--find', type=str, default='', help='Find PK MAGIC sequence (use l or list for listing, number for selecting)')
     oParser.add_option('-i', '--info', action='store_true', default=False, help='display extra info')
     oParser.add_option('-W', '--write', type=str, default='', help='Write all files to disk')
+    oParser.add_option('--stats', action='store_true', default=False, help='produce statistics')
     (options, args) = oParser.parse_args()
 
     if options.man:

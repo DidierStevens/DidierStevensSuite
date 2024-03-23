@@ -2,8 +2,8 @@
 
 __description__ = 'Calculate byte statistics'
 __author__ = 'Didier Stevens'
-__version__ = '0.0.9'
-__date__ = '2022/10/17'
+__version__ = '0.0.10'
+__date__ = '2024/01/10'
 
 """
 Source code put in public domain by Didier Stevens, no Copyright
@@ -26,6 +26,7 @@ History:
   2017/11/01: added option -g
   2020/12/21: 0.0.8 Python 3
   2022/10/17: 0.0.9 added statistics for longest strings
+  2024/01/10: 0.0.10 added some changes to entropy
 
 Todo:
 """
@@ -489,6 +490,14 @@ class cCalculateByteStatistics():
                 prevalence = float(self.dPrevalence[iter]) / float(sumValues)
                 entropy += - prevalence * math.log(prevalence, 2)
                 countUniqueBytes += 1
+        if sumValues >= 256:
+            entropymax = 8.0
+            entropynormalized = entropy
+            entropystr = '%f' % entropy
+        else:
+            entropymax = math.log(sumValues, 2)
+            entropynormalized = entropy / entropymax * 8.0
+            entropystr = '%f (normalized %f max %.02f)' % (entropy, entropynormalized, entropymax)
         if self.count == 0:
             averageConsecutiveByteDifference = None
         else:
@@ -496,7 +505,7 @@ class cCalculateByteStatistics():
         self.hexLength = max(self.hexLength, self.hexLengthMax)
         self.base64Length = max(self.base64Length, self.base64LengthMax)
         self.printableStringLength = max(self.printableStringLength, self.printableStringLengthMax)
-        return sumValues, entropy, countUniqueBytes, countNullByte, countControlBytes, countWhitespaceBytes, countPrintableBytes, countHighBytes, countHexadecimalBytes, countBASE64Bytes, averageConsecutiveByteDifference, self.printableStringLength, self.hexLength, self.base64Length
+        return sumValues, entropy, entropymax, entropynormalized, entropystr, countUniqueBytes, countNullByte, countControlBytes, countWhitespaceBytes, countPrintableBytes, countHighBytes, countHexadecimalBytes, countBASE64Bytes, averageConsecutiveByteDifference, self.printableStringLength, self.hexLength, self.base64Length
 
 def GenerateLine(prefix, counter, sumValues, buckets, index, options):
     line = '%-18s%9d %6.2f%%' % (prefix + ':', counter, float(counter) / sumValues * 100.0)
@@ -623,7 +632,7 @@ def ByteStats(args, options):
         print('Empty file(s)! Statistics can not be calculated.')
         return
 
-    sumValues, entropy, countUniqueBytes, countNullByte, countControlBytes, countWhitespaceBytes, countPrintableBytes, countHighBytes, countHexadecimalBytes, countBASE64Bytes, averageConsecutiveByteDifference, maxPrintableStringLength, maxHexLength, maxBase64Length = oCalculateByteStatistics.Stats()
+    sumValues, entropy, entropymax, entropynormalized, entropystr, countUniqueBytes, countNullByte, countControlBytes, countWhitespaceBytes, countPrintableBytes, countHighBytes, countHexadecimalBytes, countBASE64Bytes, averageConsecutiveByteDifference, maxPrintableStringLength, maxHexLength, maxBase64Length = oCalculateByteStatistics.Stats()
     dProperties = {'e': 1, 'u': 2, 'n': 3, 'c': 4, 'w': 5, 'p': 6, 'h': 7, 'x': 8, 'b': 9, 'a': 10}
     if options.list:
         if options.property not in dProperties:
@@ -700,11 +709,13 @@ def ByteStats(args, options):
         elif len(buckets) > 1:
             line += '           Minimum buckets   Maximum buckets'
         print(line)
-        line = 'Entropy:           %f' % entropy
         if len(buckets) > 0:
+            line = 'Entropy:           %f' % entropy
             line += '          %f' % MinimumAndPosition(buckets, 1)[0]
             if len(buckets) > 1:
                 line += '          %f' % MaximumAndPosition(buckets, 1)[0]
+        else:
+            line = 'Entropy:           %s' % entropystr
         print(line)
         if len(buckets) > 0:
             line = '                     Position:       0x%08x' % MinimumAndPosition(buckets, 1)[1]
@@ -725,15 +736,15 @@ def ByteStats(args, options):
             print(line)
         print(GenerateLine('Unique bytes', countUniqueBytes, 256, buckets, 2, options))
         print(GenerateLine('NULL bytes', countNullByte, sumValues, buckets, 3, options))
-        print(GenerateLine('Control bytes', countControlBytes, sumValues, buckets, 4, options))
-        print(GenerateLine('Whitespace bytes', countWhitespaceBytes, sumValues, buckets, 5, options))
-        print(GenerateLine('Printable bytes', countPrintableBytes, sumValues, buckets, 6, options))
-        print(GenerateLine('High bytes', countHighBytes, sumValues, buckets, 7, options))
-        print(GenerateLine('Hexadecimal bytes', countHexadecimalBytes, sumValues, buckets, 8, options))
-        print(GenerateLine('BASE64 bytes', countBASE64Bytes, sumValues, buckets, 9, options))
-        print(GenerateLine('Longest string', maxPrintableStringLength, sumValues, buckets, 11, options))
-        print(GenerateLine('Longest hex', maxHexLength, sumValues, buckets, 12, options))
-        print(GenerateLine('Longest base64', maxBase64Length, sumValues, buckets, 13, options))
+        print(GenerateLine('Control bytes', countControlBytes, sumValues, buckets, 7, options))
+        print(GenerateLine('Whitespace bytes', countWhitespaceBytes, sumValues, buckets, 8, options))
+        print(GenerateLine('Printable bytes', countPrintableBytes, sumValues, buckets, 9, options))
+        print(GenerateLine('High bytes', countHighBytes, sumValues, buckets, 10, options))
+        print(GenerateLine('Hexadecimal bytes', countHexadecimalBytes, sumValues, buckets, 11, options))
+        print(GenerateLine('BASE64 bytes', countBASE64Bytes, sumValues, buckets, 12, options))
+        print(GenerateLine('Longest string', maxPrintableStringLength, sumValues, buckets, 14, options))
+        print(GenerateLine('Longest hex', maxHexLength, sumValues, buckets, 15, options))
+        print(GenerateLine('Longest base64', maxBase64Length, sumValues, buckets, 16, options))
 
     if options.sequence:
         print('')

@@ -4,8 +4,8 @@ from __future__ import print_function
 
 __description__ = 'Strings command in Python'
 __author__ = 'Didier Stevens'
-__version__ = '0.0.8'
-__date__ = '2022/07/30'
+__version__ = '0.0.9'
+__date__ = '2024/03/17'
 
 """
 Source code put in the public domain by Didier Stevens, no Copyright
@@ -33,6 +33,7 @@ History:
   2020/12/10: 0.0.6 added option -a
   2021/01/05: 0.0.7 added : to option -P
   2022/07/30: 0.0.8 added option -N and goodware fix
+  2024/03/17: 0.0.9 added option -V
 
 Todo:
 """
@@ -55,6 +56,7 @@ import fnmatch
 import json
 import time
 import pickle
+import operator
 if sys.version_info[0] >= 3:
     from io import BytesIO as DataIO
 else:
@@ -116,6 +118,7 @@ Use option -f to prefix each string with the name of the file it was found it.
 To search for strings, use option -s. This search is case-insensitive, use option -c to make it case-ssensitive.
 
 To display statistics, use option -a.
+Use option -V (verbose) for extra statistics.
 
 As stated at the beginning of this manual, this tool is very versatile when it comes to handling files. This will be explained now.
 
@@ -1566,6 +1569,26 @@ def ProcessBinaryFile(filename, content, cutexpression, goodware, oLogfile, opti
         if not options.ignoreprocessingerrors:
             raise
 
+def CalculateStringStatistics(str, oOutput):
+    dPrevalence = {}
+    for char in str:
+        dPrevalence[char] = dPrevalence.get(char, 0) + 1
+    oOutput.Line(' String: %s%s' % (str[:100], ' (truncated)' if len(str) > 100 else ''))
+    oOutput.Line(' Length: %d' % len(str))
+    oOutput.Line(' Uniques: %d' % len(dPrevalence))
+    for key, value in sorted(dPrevalence.items(), key=operator.itemgetter(1), reverse=True)[:10]:
+        oOutput.Line('  %s %d %.02f%%' % (chr(key), value, float(value) / float(len(str)) * 100.0))
+
+    dRepetitions = {}
+    for iter1 in range(2, 11):
+        for iter2 in range(iter1):
+            position = iter2
+            while position < len(str):
+                substring = str[position:position + iter1]
+                dRepetitions[substring] = dRepetitions.get(substring, 0) + 1
+                position += iter1
+    print(sorted(dRepetitions.items(), key=operator.itemgetter(1), reverse=True)[:10])
+
 def ProcessBinaryFiles(filenames, oLogfile, options):
     oOutput = InstantiateCOutput(options)
     index = 0
@@ -1625,6 +1648,10 @@ def ProcessBinaryFiles(filenames, oLogfile, options):
                 else:
                     median = len(selectedStrings[numberOfStrings // 2][0])
                 oOutput.Line('Median length: %f' % median)
+                if options.verbose:
+                    oOutput.Line('10 longest strings:')
+                    for string, filename in selectedStrings[-10:]:
+                        CalculateStringStatistics(string, oOutput)
 
     oOutput.Close()
 
@@ -1665,6 +1692,7 @@ https://DidierStevens.com'''
     oParser.add_option('--logfile', type=str, default='', help='Create logfile with given keyword')
     oParser.add_option('--logcomment', type=str, default='', help='A string with comments to be included in the log file')
     oParser.add_option('--ignoreprocessingerrors', action='store_true', default=False, help='Ignore errors during file processing')
+    oParser.add_option('-V', '--verbose', action='store_true', default=False, help='verbose output')
     (options, args) = oParser.parse_args()
 
     if options.man:

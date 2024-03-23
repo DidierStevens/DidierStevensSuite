@@ -2,8 +2,8 @@
 
 __description__ = 'This is essentialy a wrapper for the hashlib module'
 __author__ = 'Didier Stevens'
-__version__ = '0.0.10'
-__date__ = '2023/09/18'
+__version__ = '0.0.11'
+__date__ = '2024/01/09'
 
 """
 Source code put in public domain by Didier Stevens, no Copyright
@@ -26,6 +26,8 @@ History:
   2022/12/14: added here-file for validate option; added validate summary
   2023/09/17: 0.0.10 added option rename
   2023/09/18: added option humanhash
+  2024/01/09: 0.0.11 added option unvalidatedhashes
+  2024/02/10: added sorted for unvalidatedhashes
 
 Todo:
 """
@@ -1341,11 +1343,18 @@ def HashFiles(filenames, options):
 
     if options.validate:
         print('Validated files:')
+        validatedHashes = set()
         for key, hashes in dFileHashes.items():
             for hash, filenames in hashes.items():
                 if hash in validateHashes:
+                    validatedHashes.add(hash)
                     for filename in filenames:
                         print(filename)
+
+        if options.unvalidatedhashes:
+            print('Unvalidated hashes:')
+            for hash in sorted(set(validateHashes) - validatedHashes):
+                print(hash)
 
 def Main():
     moredesc = '''
@@ -1366,6 +1375,7 @@ https://DidierStevens.com'''
     oParser.add_option('-q', '--quiet', action='store_true', default=False, help='Just print hash values (except in block mode)')
     oParser.add_option('-C', '--csv', action='store_true', default=False, help='Output CSV')
     oParser.add_option('-H', '--humanhash', action='store_true', default=False, help='Include human hash')
+    oParser.add_option('-U', '--unvalidatedhashes', action='store_true', default=False, help='Display unvalidated hashes')
     oParser.add_option('--password', default='infected', help='The ZIP password to be used (default infected)')
     oParser.add_option('--noextraction', action='store_true', default=False, help='Do not extract from archive file')
     oParser.add_option('--literalfilenames', action='store_true', default=False, help='Do not interpret filenames')

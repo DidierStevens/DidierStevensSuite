@@ -2,8 +2,8 @@
 
 __description__ = 'pdf-parser, use it to parse a PDF document'
 __author__ = 'Didier Stevens'
-__version__ = '0.7.8'
-__date__ = '2023/01/03'
+__version__ = '0.7.9'
+__date__ = '2024/03/21'
 __minimum_python_version__ = (2, 5, 1)
 __maximum_python_version__ = (3, 11, 1)
 
@@ -74,6 +74,7 @@ History:
   2022/05/24: bug fixes
   2022/11/09: V0.7.7 added support for environment variable DSS_DEFAULT_HASH_ALGORITHMS
   2023/01/03: V0.7.8 added unreferenced objects to statistics
+  2024/03/21: V0.7.9 added option jsonoutput; added verbose YARA rules
 
 Todo:
   - handle printf todo
@@ -91,6 +92,7 @@ import zipfile
 import time
 import os
 import textwrap
+import json
 if sys.version_info[0] >= 3:
     from io import StringIO
     import urllib.request
@@ -144,6 +146,9 @@ PS: this feature is experimental.
 Option -H calculates the MD5 hash by default.
 This can be changed by setting environment variable DSS_DEFAULT_HASH_ALGORITHMS.
 Like this: set DSS_DEFAULT_HASH_ALGORITHMS=sha256
+
+Option --jsonoutput produces JSON output with the stream content of all objects with streams. Options -f and --overridingfilters apply.
+For example, if option -f is used, the JSON output contains the filtered streams, otherwise the JSON output contains the unfiltered streams.
 
 '''
     for line in manual.split('\n'):
@@ -1200,9 +1205,13 @@ def YARACompile(ruledata):
             rule = 'rule string {strings: $a = "%s" ascii wide nocase condition: $a}' % ruledata[3:]
         elif ruledata.startswith('#q#'):
             rule = ruledata[3:].replace("'", '"')
+        elif ruledata.startswith('#x#'):
+            rule = 'rule hexadecimal {strings: $a = { %s } condition: $a}' % ruledata[3:]
+        elif ruledata.startswith('#r#'):
+            rule = 'rule regex {strings: $a = /%s/ ascii wide nocase condition: $a}' % ruledata[3:]
         else:
             rule = ruledata[1:]
-        return yara.compile(source=rule)
+        return yara.compile(source=rule), rule
     else:
         dFilepaths = {}
         if os.path.isdir(ruledata):
@@ -1213,7 +1222,7 @@ def YARACompile(ruledata):
         else:
             for filename in ProcessAt(ruledata):
                 dFilepaths[filename] = filename
-        return yara.compile(filepaths=dFilepaths)
+        return yara.compile(filepaths=dFilepaths), ','.join(dFilepaths.values())
 
 def AddDecoder(cClass):
     global decoders
@@ -1390,6 +1399,22 @@ def CalculateChosenHash(data):
     dHashes[hashes[0]].update(data)
     return dHashes[hashes[0]].hexdigest(), hashes[0]
 
+class cMyJSONOutput():
+
+    def __init__(self):
+        self.items = []
+        self.counter = 1
+
+    def AddIdItem(self, id, name, data):
+        self.items.append({'id': id, 'name': name, 'content': binascii.b2a_base64(data).strip(b'\n').decode()})
+
+    def AddItem(self, name, data):
+        self.AddIdItem(self.counter, name, data)
+        self.counter += 1
+
+    def GetJSON(self):
+        return json.dumps({'version': 2, 'id': 'didierstevens.com', 'type': 'content', 'fields': ['id', 'name', 'content'], 'items': self.items})
+
 def Main():
     """pdf-parser, use it to parse a PDF document
     """
@@ -1426,6 +1451,7 @@ def Main():
     oParser.add_option('--decoders', type=str, default='', help='decoders to load (separate decoders with a comma , ; @file supported)')
     oParser.add_option('--decoderoptions', type=str, default='', help='options for the decoder')
     oParser.add_option('-k', '--key', help='key to search in dictionaries')
+    oParser.add_option('-j', '--jsonoutput', action='store_true', default=False, help='produce json output')
     (options, args) = oParser.parse_args(GetArguments())
 
     if options.man:
@@ -1540,9 +1566,12 @@ def Main():
             if not 'yara' in sys.modules:
                 print('Error: option yara requires the YARA Python module.')
                 return
-            rules = YARACompile(options.yara)
+            rules, rulesVerbose = YARACompile(options.yara)
+            if options.verbose:
+                print(rulesVerbose)
 
         oPDFParserOBJSTM = None
+        oMyJSONOutput = cMyJSONOutput()
         while True:
             if oPDFParserOBJSTM == None:
                 object = oPDFParser.GetObject()
@@ -1600,6 +1629,13 @@ def Main():
                         for reference in object.GetReferences():
                             objectsReferenced.add(reference)
                         objectsAll.add((str(object.id), str(object.version), 'R'))
+                elif options.jsonoutput:
+                    if object.type == PDF_ELEMENT_INDIRECT_OBJECT:
+                        if object.ContainsStream():
+                            filtered = object.Stream(options.filter == True, options.overridingfilters)
+                            if filtered == []:
+                                filtered = ''
+                            oMyJSONOutput.AddItem('obj %s %s' % (object.id, object.version), C2BIP3(filtered))
                 else:
                     if object.type == PDF_ELEMENT_COMMENT and selectComment:
                         if options.generate:
@@ -1730,6 +1766,9 @@ def Main():
                 for keyword in keywords:
                     if len(dKeywords[keyword]) > 0:
                         print(' %s %d: %s' % (keyword, len(dKeywords[keyword]), ', '.join(map(lambda x: '%d' % x, dKeywords[keyword]))))
+
+        if options.jsonoutput:
+            print(oMyJSONOutput.GetJSON())
 
         if options.generate or options.generateembedded != 0:
             print("    oPDF.xrefAndTrailer('%s')" % ' '.join(savedRoot))

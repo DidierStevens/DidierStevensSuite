@@ -22,25 +22,7 @@ dListeners = {
                                          b'</html>'])},
 
     'HTTPSWELCOME': {THP_SSL: {THP_CERTFILE: 'cert-20220428-185313.crt', THP_KEYFILE: 'key-20220428-185313.pem'},
-                     THP_REPLY: TW_CRLF([b'HTTP/1.1 200 OK',
-                                         b'Date: %TIME_GMT_RFC2822%',
-                                         b'Server: Apache',
-                                         b'Last-Modified: Wed, 06 Jul 2016 17:51:03 GMT',
-                                         b'ETag: "59652-cfd-edc33a50bfec6"',
-                                         b'Accept-Ranges: bytes',
-                                         b'Content-Length: %CONTENT_LENGTH%',
-                                         b'Connection: close',
-                                         b'Content-Type: text/html; charset=UTF-8',
-                                         b'',
-                                         b'<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">',
-                                         b'<link rel="icon" type="image/png" href="favicon.png"/>',
-                                         b'<html>',
-                                         b'  <head>',
-                                         b'    <title>Home</title>',
-                                         b'    <meta http-equiv="Content-Type" content="text/html; charset=iso-8859-1">',
-                                         b'  </head>',
-                                         b'  <body>Welcome home!</body>',
-                                         b'</html>'])
+                     THP_REFERENCE: 'HTTPWELCOME'
                     },
 
     'HTTPSERVEFILE':  {THP_REPLY: TW_CRLF([b'HTTP/1.1 200 OK',
@@ -51,14 +33,10 @@ dListeners = {
                       },
 
     'HTTPSSERVEFILE': {THP_SSL: {THP_CERTFILE: 'cert-20220428-185313.crt', THP_KEYFILE: 'key-20220428-185313.pem'},
-                       THP_REPLY: TW_CRLF([b'HTTP/1.1 200 OK',
-                                           b'Date: %TIME_GMT_RFC2822%',
-                                           b'Content-Type: application/octet-stream',
-                                           b'Content-Length: %CONTENT_LENGTH%',
-                                           b'']) + FILECONTENTTOSERVE
+                       THP_REFERENCE: 'HTTPSERVEFILE'
                       },
 
-	    THP_DATA: {THP_FILES: {
+    THP_DATA: {THP_FILES: {
                             'cert-20220428-185313.crt': {THP_CONTENT:
 '''-----BEGIN CERTIFICATE-----
 MIIE3jCCAsYCAQEwDQYJKoZIhvcNAQELBQAwNTELMAkGA1UEBhMCVVMxEDAOBgNV

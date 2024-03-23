@@ -4,8 +4,8 @@ from __future__ import print_function
 
 __description__ = 'Template binary file argument'
 __author__ = 'Didier Stevens'
-__version__ = '0.0.9'
-__date__ = '2023/02/13'
+__version__ = '0.0.10'
+__date__ = '2024/01/10'
 
 """
 Source code put in the public domain by Didier Stevens, no Copyright
@@ -52,6 +52,15 @@ History:
   2022/10/13: 0.0.8 updated CalculateByteStatistics
   2023/01/21: added pyzipper, updated cDump, added cStruct, FindAll, cEnumeration, cMagicValue, CalculateChosenHash
   2023/02/13: 0.0.9 bugfix cutdata
+  2023/03/30: 0.0.10 updated cStruct
+  2023/04/07: added CalculateByteStatisticsNT and --filenamedatabase
+  2023/04/08: man filenamedatabase
+  2023/09/04: updated cEnumeration
+  2023/09/12: added DoDump
+  2023/09/22: added logging counter
+  2023/09/24: added cWriteProcessedFile
+  2023/10/01: cOutput: utf8 ignore errors
+  2024/01/10: updated CalculateByteStatistics and CalculateByteStatisticsNT
 
 Todo:
   Document flag arguments in man page
@@ -146,6 +155,9 @@ tool.py C:\Windows\*.exe C:\Windows\*.dll
 To prevent the tool from processing file arguments with wildcard characters or special initial characters (@ and #) differently, but to process them as normal files, use option --literalfilenames.
 
 The content of folders can be processed too: use option --recursedir and provide folder names as argument. Wildcards and here files (for folder names) can be used too.
+
+To keep track of files processed by this tool, use option --filenamedatabase. The value provided with this option, is used to create a JSON file containing all the files (using their filenames) that have already been processed by this tool.
+Use this option to process only new files between subsequent program executions, and make sure that a file is processed only once.
 
 File arguments that start with character # have special meaning. These are not processed as actual files on disk (except when option --literalfilenames is used), but as file arguments that specify how to "generate" the file content.
 
@@ -1251,9 +1263,15 @@ class cOutput():
         if self.filenameOption:
             if self.ParseHash(self.filenameOption):
                 if not self.separateFiles and self.filename != '':
-                    self.fOut = open(self.filename, self.fileoptions)
+                    if binary:
+                        self.fOut = open(self.filename, self.fileoptions)
+                    else:
+                        self.fOut = open(self.filename, self.fileoptions, encoding='utf8', errors='ignore')
             elif self.filenameOption != '':
-                self.fOut = open(self.filenameOption, self.fileoptions)
+                if binary:
+                    self.fOut = open(self.filename, self.fileoptions)
+                else:
+                    self.fOut = open(self.filename, self.fileoptions, encoding='utf8', errors='ignore')
         else:
             self.fOut = self.STDOUT
 
@@ -1416,6 +1434,8 @@ class cLogfile():
             self.oOutput = None
         else:
             self.oOutput = cOutput('%s-%s-%s.log' % (os.path.splitext(os.path.basename(sys.argv[0]))[0], keyword, self.FormatTime()))
+        self.counter1 = 0
+        self.counter2 = 0
         self.Line('Start')
         self.Line('UTC', '%04d%02d%02d-%02d%02d%02d' % time.gmtime(time.time())[0:6])
         self.Line('Comment', comment)
@@ -1433,7 +1453,10 @@ class cLogfile():
 
     def Line(self, *line):
         if self.oOutput != None:
-            self.oOutput.Line(MakeCSVLine((self.FormatTime(), ) + line, DEFAULT_SEPARATOR, QUOTE))
+            self.counter1 += 1
+            csvline = MakeCSVLine((self.FormatTime(), ) + line, DEFAULT_SEPARATOR, QUOTE)
+            self.counter2 += len(csvline)
+            self.oOutput.Line(csvline)
 
     def LineError(self, *line):
         self.Line('Error', *line)
@@ -1441,7 +1464,7 @@ class cLogfile():
 
     def Close(self):
         if self.oOutput != None:
-            self.Line('Finish', '%d error(s)' % self.errors, '%d second(s)' % (time.time() - self.starttime))
+            self.Line('Finish', '%d error(s)' % self.errors, '%d second(s)' % (time.time() - self.starttime), self.counter1, self.counter2)
             self.oOutput.Close()
 
 def CalculateByteStatistics(dPrevalence=None, data=None):
@@ -1526,7 +1549,19 @@ def CalculateByteStatistics(dPrevalence=None, data=None):
             prevalence = float(dPrevalence[iter]) / float(sumValues)
             entropy += - prevalence * math.log(prevalence, 2)
             countUniqueBytes += 1
-    return sumValues, entropy, countUniqueBytes, countNullByte, countControlBytes, countWhitespaceBytes, countPrintableBytes, countHighBytes, countHexadecimalBytes, countBASE64Bytes, averageConsecutiveByteDifference, longestString, longestHEXString, longestBASE64String
+    if sumValues >= 256:
+        entropymax = 8.0
+        entropynormalized = entropy
+        entropystr = '%.02f' % entropy
+    else:
+        entropymax = math.log(sumValues, 2)
+        entropynormalized = entropy / entropymax * 8.0
+        entropystr = '%.02f (normalized %.02f max %.02f)' % (entropy, entropynormalized, entropymax)
+    return sumValues, entropy, entropymax, entropynormalized, entropystr, countUniqueBytes, countNullByte, countControlBytes, countWhitespaceBytes, countPrintableBytes, countHighBytes, countHexadecimalBytes, countBASE64Bytes, averageConsecutiveByteDifference, longestString, longestHEXString, longestBASE64String, dPrevalence
+
+def CalculateByteStatisticsNT(dPrevalence=None, data=None):
+    oNT = collections.namedtuple('bytestatistics', 'sumValues entropy entropymax entropynormalized entropystr countUniqueBytes countNullByte countControlBytes countWhitespaceBytes countPrintableBytes countHighBytes countHexadecimalBytes countBASE64Bytes averageConsecutiveByteDifference longestString longestHEXString longestBASE64String dPrevalence')
+    return oNT(*CalculateByteStatistics(dPrevalence, data))
 
 def Unpack(format, data):
     size = struct.calcsize(format)
@@ -1548,13 +1583,25 @@ class cStruct(object):
         self.data = data
         self.originaldata = data
 
-    def Unpack(self, format):
+    #a# extend z usage
+    def UnpackSub(self, format):
+        if format.endswith('z'):
+            format = format[:-1]
+            sz = True
+        else:
+            sz = False
         formatsize = struct.calcsize(format)
         if len(self.data) < formatsize:
             raise Exception('Not enough data')
         tounpack = self.data[:formatsize]
         self.data = self.data[formatsize:]
         result = struct.unpack(format, tounpack)
+        if sz:
+            result = result + (self.GetString0(), )
+        return result
+
+    def Unpack(self, format):
+        result = self.UnpackSub(format)
         if len(result) == 1:
             return result[0]
         else:
@@ -1562,12 +1609,7 @@ class cStruct(object):
 
     def UnpackNamedtuple(self, format, typename, field_names):
         namedTuple = collections.namedtuple(typename, field_names)
-        formatsize = struct.calcsize(format)
-        if len(self.data) < formatsize:
-            raise Exception('Not enough data')
-        tounpack = self.data[:formatsize]
-        self.data = self.data[formatsize:]
-        result = struct.unpack(format, tounpack)
+        result = self.UnpackSub(format)
         return namedTuple(*result)
 
     def Truncate(self, length):
@@ -1589,6 +1631,14 @@ class cStruct(object):
     def Length(self):
         return len(self.data)
 
+    def GetString0(self):
+        position = self.data.find(b'\x00')
+        if position == -1:
+            raise Exception('Missing NUL byte')
+        result = self.data[:position]
+        self.data = self.data[position + 1:]
+        return result
+
 def FindAll(data, sub):
     result = []
     start = 0
@@ -1599,18 +1649,49 @@ def FindAll(data, sub):
         result.append(position)
         start = position + 1
 
+def FormatTime(epoch=None):
+    if epoch == None:
+        epoch = time.time()
+    return '%04d%02d%02d-%02d%02d%02d' % time.localtime(epoch)[0:6]
+
 class cEnumeration(object):
-    def __init__(self, iterable, function=lambda x: x):
+    def __init__(self, iterable, function=lambda x: x, Cache=None):
         self.iterable = iterable
         self.function = function
-        self.namedTuple = collections.namedtuple('enum', 'item item_t index counter total first last left left_t right right_t')
+        self.namedTuple = collections.namedtuple('member', 'item item_t index counter remaining total first last left left_t right right_t cached cache_hits cache_misses Cache Redo redo_counter remaining_seconds eta')
+        self.flagRedo = False
+        self.oCache = Cache
+        self.cache_hits = 0
+        self.cache_misses = 0
+        self.timeStart = time.time()
 
     def __iter__(self):
         self.index = -1
         self.total = len(self.iterable)
+        if self.oCache != None and self.oCache.cachedFirst:
+            self.iterable = sorted(self.iterable, key=lambda x: not self.oCache.Exists(x))
         return self
 
+    def Redo(self, counter):
+        if self.nt.redo_counter < counter:
+            self.nt = self.namedTuple(self.nt.item, self.nt.item_t, self.nt.index, self.nt.counter, self.nt.remaining, self.nt.total, self.nt.first, self.nt.last, self.nt.left, self.nt.left_t, self.nt.right, self.nt.right_t, self.nt.cached, self.nt.cache_hits, self.nt.cache_misses, self.nt.Cache, self.nt.Redo, self.nt.redo_counter + 1, self.nt.remaining_seconds, self.nt.eta)
+            self.flagRedo = True
+            return True
+        else:
+            self.flagRedo = False
+            return False
+
+    def Cache(self, result):
+        if self.oCache == None:
+            return False
+        else:
+            return self.oCache.Cache(self.nt.item, result, self.nt.last)
+
     def __next__(self):
+        timeNow = time.time()
+        if self.flagRedo:
+            self.flagRedo = False
+            return self.nt
         if self.index < self.total - 1:
             self.index += 1
             first = self.index == 0
@@ -1631,7 +1712,21 @@ class cEnumeration(object):
             else:
                 self.right = self.iterable[self.index + 1]
                 self.right_t = self.function(self.right)
-            return self.namedTuple(self.item, self.item_t, self.index, self.index + 1, self.total, first, last, left, left_t, self.right, self.right_t)
+            if self.oCache == None:
+                cachedResult = None
+            else:
+                cachedResult = self.oCache.Retrieve(self.item)
+            if cachedResult == None:
+                self.cache_misses += 1
+            else:
+                self.cache_hits += 1
+            try:
+                remainingSeconds = (self.total - self.index - 1) / (self.cache_misses / (timeNow - self.timeStart))
+            except ZeroDivisionError:
+                remainingSeconds = 0
+            eta = FormatTime(time.time() + remainingSeconds)
+            self.nt = self.namedTuple(self.item, self.item_t, self.index, self.index + 1, self.total - self.index - 1, self.total, first, last, left, left_t, self.right, self.right_t, cachedResult, self.cache_hits, self.cache_misses, self.Cache, self.Redo, 0, remainingSeconds, eta)
+            return self.nt
         raise StopIteration
 
 class cMagicValue(object):
@@ -1710,6 +1805,55 @@ def GetDumpOption(options, default=None):
             return option
     return default
 
+def DoDump(data, options, oOutput, default='a'):
+    if hasattr(options, 'dump') and options.dump:
+        oOutput.WriteBinary(data)
+    else:
+        oOutput.Line(cDump(data).DumpOption(GetDumpOption(options, default)))
+
+class cStartsWithGetRemainder():
+
+    def __init__(self, strIn, strStart):
+        self.strIn = strIn
+        self.strStart = strStart
+        self.match = False
+        self.remainder = None
+        if self.strIn.startswith(self.strStart):
+            self.match = True
+            self.remainder = self.strIn[len(self.strStart):]
+
+class cWriteProcessedFile():
+
+    def __init__(self, mode, source, destination):
+        self.mode = mode # '' 'replace' 'bak' 'copytree'
+        self.source = source
+        self. destination =  destination
+
+    def PrepareNewName(self, filename):
+        if self.mode == '':
+            return ''
+        elif self.mode == 'replace':
+            return filename
+        elif self.mode == 'bak':
+            os.replace(filename, filename + '.bak')
+            return filename
+        elif self.mode == 'copytree':
+            oStartsWithGetRemainder = cStartsWithGetRemainder(filename.lower(), self.source.lower())
+            if oStartsWithGetRemainder.match:
+                newfilename = self.destination + oStartsWithGetRemainder.remainder
+                os.makedirs(os.path.dirname(newfilename), exist_ok=True)
+                return newfilename
+            return ''
+        else:
+            raise Exception('cWriteProcessedFile')
+
+    def WriteAccordingToMode(self, filename, data):
+        newfilename = self.PrepareNewName(filename)
+        if newfilename != '':
+            with open(newfilename, 'wb') as fOut:
+                fOut.write(data)
+        return newfilename
+
 def ProcessBinaryFile(filename, content, cutexpression, flag, oOutput, oLogfile, options, oParserFlag):
     if content == None:
         try:
@@ -1737,7 +1881,8 @@ def ProcessBinaryFile(filename, content, cutexpression, flag, oOutput, oLogfile,
         if flagoptions.length:
             oOutput.Line('%s len(data) = %d' % (filename, len(data)))
         oOutput.Line(cDump(data[0:0x100]).HexAsciiDump())
-        oOutput.CSVWriteRow([filename, CalculateByteStatistics(data=data)])
+        oOutput.CSVWriteRow([filename, CalculateByteStatisticsNT(data=data)])
+        DoDump(data[0:0x100], options, oOutput)
         # ----------------------------------------------
     except:
         oLogfile.LineError('Processing file %s %s' % (filename, repr(sys.exc_info()[1])))
@@ -1745,6 +1890,18 @@ def ProcessBinaryFile(filename, content, cutexpression, flag, oOutput, oLogfile,
             raise
 
 #    data = CutData(cBinaryFile(filename, C2BIP3(options.password), options.noextraction, options.literalfilenames).Data(), cutexpression)[0]
+
+def RemoveFilesFromPriorRuns(filenames, filenamedatabase):
+    jsonfilename = 'filenamedatabase-%s.json' % filenamedatabase
+    if not os.path.exists(jsonfilename):
+        return filenames, {}
+
+    dDatabase = json.load(open(jsonfilename, 'r'))
+    return [filename for filename in filenames if filename[0] not in dDatabase.keys()], dDatabase
+
+def AddFilesToPriorRunsDatabase(dDatabase, filenamedatabase):
+    jsonfilename = 'filenamedatabase-%s.json' % filenamedatabase
+    json.dump(dDatabase, open(jsonfilename, 'w'))
 
 def ProcessBinaryFiles(filenames, oLogfile, options, oParserFlag):
     oOutput = InstantiateCOutput(options)
@@ -1758,10 +1915,19 @@ def ProcessBinaryFiles(filenames, oLogfile, options, oParserFlag):
             index += 1
             ProcessBinaryFile(item['name'], item['content'], '', '', oOutput, oLogfile, options, oParserFlag)
     else:
+        if options.filenamedatabase != '':
+            filenames, dDatabaseFilenames = RemoveFilesFromPriorRuns(filenames, options.filenamedatabase)
+        else:
+            dDatabaseFilenames = {}
+
         for filename, cutexpression, flag in filenames:
             oOutput.Filename(filename, index, len(filenames))
             index += 1
+            dDatabaseFilenames[filename] = time.time()
             ProcessBinaryFile(filename, None, cutexpression, flag, oOutput, oLogfile, options, oParserFlag)
+
+        if options.filenamedatabase != '':
+            AddFilesToPriorRunsDatabase(dDatabaseFilenames, options.filenamedatabase)
 
 def Main():
     moredesc = '''
@@ -1785,6 +1951,10 @@ https://DidierStevens.com'''
     oParser.add_option('--logfile', type=str, default='', help='Create logfile with given keyword')
     oParser.add_option('--logcomment', type=str, default='', help='A string with comments to be included in the log file')
     oParser.add_option('--ignoreprocessingerrors', action='store_true', default=False, help='Ignore errors during file processing')
+    oParser.add_option('--filenamedatabase', type=str, default='', help='Use this to skip files that have been processed in prior runs')
+    oParser.add_option('--writemode', type=str, default='', help='Define writemode')
+    oParser.add_option('--writesource', type=str, default='', help='Part of the sourcepath to replace')
+    oParser.add_option('--writedestination', type=str, default='', help='Replacement for part of the sourcepath (--writesource)')
 
 #    oParser.add_option('-s', '--select', default='', help='select item nr for dumping')
 #    oParser.add_option('-d', '--dump', action='store_true', default=False, help='perform dump')

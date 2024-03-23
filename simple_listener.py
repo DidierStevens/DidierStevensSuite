@@ -2,8 +2,8 @@
 
 __description__ = 'TCP and UDP listener'
 __author__ = 'Didier Stevens'
-__version__ = '0.1.4'
-__date__ = '2023/04/09'
+__version__ = '0.1.5'
+__date__ = '2024/03/16'
 
 """
 Source code put in public domain by Didier Stevens, no Copyright
@@ -46,6 +46,9 @@ History:
   2023/01/19: added print lock; THP_ECHO_THIS; THP_ALLOW_LIST
   2023/03/16: man update for THP_ECHO_THIS
   2023/04/09: 0.1.4 added zip file support to ReadBinaryFile, added option --prompt
+  2024/03/08: 0.1.5 added IPv6 support
+  2024/03/15: continued IPv6 support
+  2024/03/16: continued IPv6 support; added nested THP_REFERENCE
 
 Todo:
   Add support for PyDivert
@@ -76,7 +79,9 @@ THP_DISCONNECT = 'disconnect'
 THP_SPLIT = 'split'
 THP_ECHO = 'echo'
 THP_TCP = 'TCP'
+THP_TCP6 = 'TCP6'
 THP_UDP = 'UDP'
+THP_UDP6 = 'UDP6'
 THP_DATA = 'data'
 THP_FILES = 'files'
 THP_CONTENT = 'content'
@@ -155,9 +160,11 @@ These Python scripts to execute are just passed on as arguments to simple-listen
 To open a port without a listener configuration, use option -p or -P.
 Use the same notation as in nmap to provide ports: integers (x) or ranges of integers (y-z).
 Like this: 4444,6000-6002
-This opens TCP ports 4444, 6000, 6001 and 6002.
-To open UDP ports, use prefix u:, like this: u:4444,u:6000-6002
-Prefix t: can be used to open TCP ports, but it's optional. For legacy reasons (simple_listener is derived from tcp-honeypot), integers without prefix (t: or u:) represent TCP ports.
+This opens IPv4 TCP ports 4444, 6000, 6001 and 6002.
+To open IPv4 UDP ports, use prefix u:, like this: u:4444,u:6000-6002
+To open IPv6 TCP ports, use prefix t6:, like this: t6:4444,t6:6000-6002
+To open IPv6 UDP ports, use prefix u6:, like this: u6:4444,u6:6000-6002
+Prefix t: can be used to open TCP ports, but it's optional. For legacy reasons (simple_listener is derived from tcp-honeypot), integers without prefix (t:, t6:, u: or u6:) represent TCP ports.
 The difference between -P (--ports) and -p (--extraports) is the following: with -P, only ports defined via this option are opened for listening. All ports defined via dictionary dListeners are ignored.
 With option -p, ports defined with dictionary dListeners are also opened for listening.
 
@@ -165,7 +172,7 @@ The keys in dictionary dListeners can be integers or strings.
 Integers represent port numbers.
 Strings represent templates, except when the string is THP_DATA ('data'). 'data' is a reserved keyword, explained later.
 
-The value in a dictionary associated with a port (integer) can be the configuration of a TCP listener, a UDP listener or both.
+The value in a dictionary associated with a port (integer) can be the configuration of a TCP listener, a UDP listener or both. This can be done for IPv4 and/or IPv6.
 
 Take the following example:
 
@@ -173,22 +180,24 @@ dListeners = {
     4444:   {THP_TCP: {THP_REPLY: b'Hello'}}
 }
 
-This dictionary defines a listener on TCP port 4444 that reads the data it receives, then sends back bytes b'Hello' and then closes the TCP connection.
+This dictionary defines a listener on IPv4 TCP port 4444 that reads the data it receives, then sends back bytes b'Hello' and then closes the TCP connection.
 
-This is a UDP listener example:
+This is a IPv4 UDP listener example:
 
 dListeners = {
     4444:   {THP_UDP: {THP_REPLY: b'Hello'}}
 }
 
-This dictionary defines a listener on UDP port 4444 that reads the data it receives, then sends back bytes b'Hello'.
+This dictionary defines a listener on IPv4 UDP port 4444 that reads the data it receives, then sends back bytes b'Hello'.
 
-And this is a TCP and UDP listener on the same port number:
+And this is a TCP and UDP listener for IPv4 and IPv6 on the same port number:
 
 dListeners = {
     4444:   {
              THP_TCP: {THP_REPLY: b'Hello TCP'},
+             THP_TCP6: {THP_REPLY: b'Hello TCP'},
              THP_UDP: {THP_REPLY: b'Hello UDP'}
+             THP_UDP6: {THP_REPLY: b'Hello UDP'}
             }
 }
 
@@ -681,7 +690,7 @@ Option -d can be used to dump the sent data to file.
 
 Option -r can be used to define the read buffer size.
 
-Option -a can be used to define the address to listen on.
+Option -a can be used to define the IPv4 and IPv6 address to listen on. IPv4 address and IPv6 address are separated by a comma (,). Default value is 0.0.0.0,::. This means 0.0.0.0 for IPv4 (all IPv4 interfaces) and :: for IPv6 (all IPv6 interfaces). Use :: for IPv6 (all IPv6 interfaces).
 
 By default, everything is logged to the console and to the log file.
 This is loglevel 1.
@@ -924,16 +933,18 @@ def ParseNumber(number):
         return int(number)
 
 def ParsePort(number):
-    protocol = THP_TCP
-    result, number = MyStartsWith(number, 't:')
-    if not result:
-        result, number = MyStartsWith(number, 'u:')
-        if result:
-            protocol = THP_UDP
-    reference = None
+    result = number.split(':', 1)
+    if len(result) == 2:
+        protocol = {'t': THP_TCP, 't6': THP_TCP6, 'u': THP_UDP, 'u6': THP_UDP6}[result[0]]
+        number = result[1]
+    else:
+        protocol = THP_TCP
+
     result = number.split('=', 1)
     if len(result) == 2:
         number, reference = result
+    else:
+        reference = None
     return protocol, ParseNumber(number), reference
 
 def MyRange(begin, end):
@@ -992,24 +1003,41 @@ def SplitIfRequested(dListener, data):
     else:
         return [data]
 
-def GetListener(port, protocol=THP_TCP):
+def ResolveReferences(dListener, reference, references):
+    global dListeners
+
+    if THP_REFERENCE in dListener:
+        dExtras = dListener.copy()
+        del dExtras[THP_REFERENCE]
+        if isinstance(dListener[THP_REFERENCE], str):
+            reference = dListener[THP_REFERENCE]
+        dListener = dListeners[dListener[THP_REFERENCE]]
+        references.append(reference)
+        dListener, references = ResolveReferences(dListener, reference, references)
+        for key, value in dExtras.items():
+            dListener[key] = value
+    return dListener, references
+
+def GetListener(port, protocol):
     global dListeners
 
     reference = ''
     if not isinstance(port, int):
         return None, reference
     dListener = dListeners[port]
-    if THP_TCP in dListener.keys() or THP_UDP in dListener.keys():
+    if THP_TCP in dListener.keys() or THP_TCP6 in dListener.keys() or THP_UDP in dListener.keys() or THP_UDP6 in dListener.keys():
         dListener = dListener.get(protocol, None)
         if dListener == None:
             return dListener, reference
+    elif protocol == THP_TCP6:
+        return None, reference
     elif protocol == THP_UDP:
         return None, reference
-    if THP_REFERENCE in dListener:
-        if isinstance(dListener[THP_REFERENCE], str):
-            reference = dListener[THP_REFERENCE]
-        dListener = dListeners[dListener[THP_REFERENCE]]
-    if THP_TCP in dListener.keys() or THP_UDP in dListener.keys():
+    elif protocol == THP_UDP6:
+        return None, reference
+    dListener, references = ResolveReferences(dListener, reference, [])
+    reference = ':'.join(references)
+    if THP_TCP in dListener.keys() or THP_TCP6 in dListener.keys() or THP_UDP in dListener.keys() or THP_UDP6 in dListener.keys():
         dListener = dListener.get(protocol, None)
     return dListener, reference
 
@@ -1040,6 +1068,36 @@ def ExportFile(filename):
 
     String2File(dListeners[THP_DATA][THP_FILES][filename][THP_CONTENT], filename)
 
+def SocknameToString(sockname):
+    address = sockname[0]
+    port = sockname[1]
+    if ':' in address:
+        hostaddress = '[%s]' % address
+    else:
+        hostaddress = address
+    return '%s:%d' % (hostaddress, port)
+
+class cListener():
+    def __init__(self, port, protocol, addresses):
+        self.port = port
+        self.protocol = protocol
+        self.dListener, self.reference = GetListener(port, protocol)
+        self.addresses = addresses.split(',')
+        if len(self.addresses) != 2:
+            raise Exception('cListener address error')
+
+    def IsDefined(self):
+        return self.dListener != None
+
+    def IsIPv6(self):
+        return self.protocol in [THP_TCP6, THP_UDP6]
+
+    def GetAddress(self):
+        if self.IsIPv6():
+            return self.addresses[1]
+        else:
+            return self.addresses[0]
+
 class cConnectionThread(threading.Thread):
     def __init__(self, oSocket, oOutput, options):
         threading.Thread.__init__(self)
@@ -1058,15 +1116,15 @@ class cConnectionThread(threading.Thread):
 
     def CheckAllowList(self, address=None):
         if address == None:
-            return THP_ALLOW_LIST in self.dListener
-        return address in self.dListener[THP_ALLOW_LIST]
+            return THP_ALLOW_LIST in self.oListener.dListener
+        return address in self.oListener.dListener[THP_ALLOW_LIST]
 
     def EchoThis(self, data):
         dVariables = {}
         message = None
-        if THP_ECHO_THIS in self.dListener:
-            delimiter = self.dListener[THP_ECHO_THIS][THP_ECHO_THIS_DELIMITER].encode('latin')
-            variable = self.dListener[THP_ECHO_THIS].get(THP_ECHO_THIS_VARIABLE, THP_ECHO_THIS_VARIABLE_DEFAULT).encode('latin')
+        if THP_ECHO_THIS in self.oListener.dListener:
+            delimiter = self.oListener.dListener[THP_ECHO_THIS][THP_ECHO_THIS_DELIMITER].encode('latin')
+            variable = self.oListener.dListener[THP_ECHO_THIS].get(THP_ECHO_THIS_VARIABLE, THP_ECHO_THIS_VARIABLE_DEFAULT).encode('latin')
             position1 = data.find(delimiter)
             if position1 != -1:
                 position2 = data.find(delimiter, position1 + 1)
@@ -1076,7 +1134,7 @@ class cConnectionThread(threading.Thread):
                 message = data[position1 + len(delimiter):position2]
         if message != None:
             persist = False
-            format = self.dListener[THP_ECHO_THIS].get(THP_ECHO_THIS_FORMAT, THP_ECHO_THIS_FORMAT_RAW)
+            format = self.oListener.dListener[THP_ECHO_THIS].get(THP_ECHO_THIS_FORMAT, THP_ECHO_THIS_FORMAT_RAW)
             if format == THP_ECHO_THIS_FORMAT_DYNAMIC:
                 if message[0:1] == b'P':
                     persist = True
@@ -1098,19 +1156,22 @@ class cConnectionThread(threading.Thread):
                 message = ast.literal_eval('"""' + message.decode() + '"""').encode('latin')
             dVariables[variable] = message
             if persist:
-                self.dListener[THP_ECHO_THIS_PERSIST] = message
-        elif THP_ECHO_THIS_PERSIST in self.dListener:
-            dVariables[variable] = self.dListener[THP_ECHO_THIS_PERSIST]
+                self.oListener.dListener[THP_ECHO_THIS_PERSIST] = message
+        elif THP_ECHO_THIS_PERSIST in self.oListener.dListener:
+            dVariables[variable] = self.oListener.dListener[THP_ECHO_THIS_PERSIST]
 
         return dVariables
 
     def RunTCP(self):
-        self.protocol = THP_TCP
         oSocketConnection, address = self.oSocket.accept()
-        self.connectionID = '%s:%d-%s:%d' % (address + self.oSocket.getsockname())
+        if oSocketConnection.family == socket.AF_INET6:
+            self.protocol = THP_TCP6
+        else:
+            self.protocol = THP_TCP
+        self.connectionID = '%s-%s' % (SocknameToString(address), SocknameToString(self.oSocket.getsockname()))
         oSocketConnection.settimeout(self.options.timeout)
-        self.oOutput.LineTimestamped('%s TCP connection' % self.connectionID)
-        self.dListener, dummy = GetListener(self.oSocket.getsockname()[1])
+        self.oOutput.LineTimestamped('%s %s connection' % (self.connectionID, self.protocol))
+        self.oListener = cListener(self.oSocket.getsockname()[1], self.protocol, self.options.address)
         if self.CheckAllowList():
             if self.CheckAllowList(address[0]):
                 self.oOutput.LineTimestamped('%s %s %s on allowlist' % (self.connectionID, self.protocol, address[0]))
@@ -1123,7 +1184,7 @@ class cConnectionThread(threading.Thread):
         previous = b''
         try:
             oSSLConnection = None
-            oSSLContext = self.dListener.get(THP_SSLCONTEXT, None)
+            oSSLContext = self.oListener.dListener.get(THP_SSLCONTEXT, None)
             oSSHConnection = None
             oSSHFile = None
             if oSSLContext != None:
@@ -1132,71 +1193,71 @@ class cConnectionThread(threading.Thread):
                     oSSLConnection.do_handshake()
                 except (ssl.SSLZeroReturnError, ssl.SSLError) as e:
                     if e.strerror.startswith('TLS/SSL connection has been closed (EOF)') or e.strerror.startswith('[SSL: SSLV3_ALERT_CERTIFICATE_UNKNOWN]'):
-                        self.oOutput.LineTimestamped('%s TCP SSL closed' % self.connectionID)
+                        self.oOutput.LineTimestamped('%s %s SSL closed' % (self.connectionID, self.protocol))
                         oSSLConnection.shutdown(socket.SHUT_RDWR)
                         oSSLConnection.close()
                         oSSLConnection = None
                     else:
-                        self.oOutput.LineTimestamped('%s TCP SSL error %s' % (self.connectionID, e.strerror))
+                        self.oOutput.LineTimestamped('%s %s SSL error %s' % (self.connectionID, self.protocol, e.strerror))
                         oSSLConnection.shutdown(socket.SHUT_RDWR)
                         oSSLConnection.close()
                         oSSLConnection = None
                 self.connection = oSSLConnection
-            elif self.dListener.get(THP_SSH, None) != None:
+            elif self.oListener.dListener.get(THP_SSH, None) != None:
                 if ModuleLoaded('paramiko'):
-                    if THP_KEYFILE in self.dListener[THP_SSH]:
-                        ExportFile(self.dListener[THP_SSH][THP_KEYFILE])
-                        oRSAKey = paramiko.RSAKey(filename=self.dListener[THP_SSH][THP_KEYFILE])
+                    if THP_KEYFILE in self.oListener.dListener[THP_SSH]:
+                        ExportFile(self.oListener.dListener[THP_SSH][THP_KEYFILE])
+                        oRSAKey = paramiko.RSAKey(filename=self.oListener.dListener[THP_SSH][THP_KEYFILE])
                     else:
                         oRSAKey = paramiko.RSAKey.generate(1024)
-                        self.oOutput.LineTimestamped('%s TCP SSH generated RSA key' % self.connectionID)
+                        self.oOutput.LineTimestamped('%s %s SSH generated RSA key' % (self.connectionID, self.protocol))
                     oTransport = paramiko.Transport(oSocketConnection)
-                    if THP_BANNER in self.dListener[THP_SSH]:
-                        oTransport.local_version = self.dListener[THP_SSH][THP_BANNER]
+                    if THP_BANNER in self.oListener.dListener[THP_SSH]:
+                        oTransport.local_version = self.oListener.dListener[THP_SSH][THP_BANNER]
                     oTransport.load_server_moduli()
                     oTransport.add_server_key(oRSAKey)
                     oSSHServer = cSSHServer(self.oOutput, self.connectionID)
                     try:
                         oTransport.start_server(server=oSSHServer)
                     except paramiko.SSHException:
-                        self.oOutput.LineTimestamped('%s TCP SSH negotiation failed' % self.connectionID)
+                        self.oOutput.LineTimestamped('%s %s SSH negotiation failed' % (self.connectionID, self.protocol))
                         raise
-                    self.oOutput.LineTimestamped('%s TCP SSH banner %s' % (self.connectionID, oTransport.remote_version))
+                    self.oOutput.LineTimestamped('%s %s SSH banner %s' % (self.connectionID, self.protocol, oTransport.remote_version))
                     oSSHConnection = oTransport.accept(20)
                     if oSSHConnection is None:
-                        self.oOutput.LineTimestamped('%s TCP SSH no channel' % self.connectionID)
+                        self.oOutput.LineTimestamped('%s %s SSH no channel' % (self.connectionID, self.protocol))
                         raise Exception('TCP SSH no channel')
-                    self.oOutput.LineTimestamped('%s TCP SSH authenticated' % self.connectionID)
+                    self.oOutput.LineTimestamped('%s %s %s authenticated' % (self.connectionID, self.protocol, self.protocol))
                     oSSHServer.oEvent.wait(10)
                     if not oSSHServer.oEvent.is_set():
-                        self.oOutput.LineTimestamped('%s TCP SSH no shell' % self.connectionID)
+                        self.oOutput.LineTimestamped('%s %s SSH no shell' % (self.connectionID, self.protocol))
                         raise Exception('TCP SSH no shell')
                     self.connection = oSSHConnection
                     oSSHFile = oSSHConnection.makefile('rU')
                 else:
-                    self.oOutput.LineTimestamped('%s TCP can not create SSH server, Python module paramiko missing' % self.connectionID)
+                    self.oOutput.LineTimestamped('%s %s can not create SSH server, Python module paramiko missing' % (self.connectionID, self.protocol))
                     self.connection = oSocketConnection
             else:
                 self.connection = oSocketConnection
             if self.connection == None:
                 return
-            if THP_ECHO in self.dListener and inspect.isclass(self.dListener[THP_ECHO]):
-                echoObject = self.dListener[THP_ECHO](self.oOutput)
+            if THP_ECHO in self.oListener.dListener and inspect.isclass(self.oListener.dListener[THP_ECHO]):
+                echoObject = self.oListener.dListener[THP_ECHO](self.oOutput)
             else:
                 echoObject = None
-            if THP_BANNER in self.dListener:
-                self.SendTCP(ReplaceAliases(self.dListener[THP_BANNER]))
-                self.oOutput.LineTimestamped('%s TCP send banner' % self.connectionID)
+            if THP_BANNER in self.oListener.dListener:
+                self.SendTCP(ReplaceAliases(self.oListener.dListener[THP_BANNER]))
+                self.oOutput.LineTimestamped('%s %s send banner' % (self.connectionID, self.protocol))
             stopConnection = False
-            for i in range(0, self.dListener.get(THP_LOOP, 1)):
+            for i in range(0, self.oListener.dListener.get(THP_LOOP, 1)):
                 if oSSHFile == None:
                     data = self.connection.recv(self.options.readbuffer)
-                    if THP_READALL in self.dListener:
+                    if THP_READALL in self.oListener.dListener:
                         self.connection.setblocking(0)
-                        if self.dListener[THP_READALL] == True:
+                        if self.oListener.dListener[THP_READALL] == True:
                             sleepextra = 0
                         else:
-                            sleepextra = self.dListener[THP_READALL]
+                            sleepextra = self.oListener.dListener[THP_READALL]
                         while True:
                             try:
                                 time.sleep(sleepextra)
@@ -1207,40 +1268,40 @@ class cConnectionThread(threading.Thread):
                             data += dataextra
                 else:
                     data = oSSHFile.readline()
-                self.LogData('TCP', 'data', data)
-                if THP_MINIMUM_DATA_LENGTH in self.dListener:
+                self.LogData('data', data)
+                if THP_MINIMUM_DATA_LENGTH in self.oListener.dListener:
                     previous += data
-                    if len(previous) < self.dListener[THP_MINIMUM_DATA_LENGTH]:
-                        self.oOutput.LineTimestamped('%s TCP data too short' % self.connectionID)
+                    if len(previous) < self.oListener.dListener[THP_MINIMUM_DATA_LENGTH]:
+                        self.oOutput.LineTimestamped('%s %s data too short' % (self.connectionID, self.protocol))
                         continue
                     data = previous
                     previous = b''
-                    self.LogData('TCP', 'joined data', data)
-                for splitdata in SplitIfRequested(self.dListener, data):
+                    self.LogData('joined data', data)
+                for splitdata in SplitIfRequested(self.oListener.dListener, data):
                     if splitdata != data:
-                        self.LogData('TCP', 'splitdata', splitdata)
-                    if THP_ECHO in self.dListener:
+                        self.LogData('splitdata', splitdata)
+                    if THP_ECHO in self.oListener.dListener:
                         if echoObject != None:
                             echodata = echoObject.Process(splitdata)
-                        elif callable(self.dListener[THP_ECHO]):
-                            echodata = self.dListener[THP_ECHO](splitdata)
+                        elif callable(self.oListener.dListener[THP_ECHO]):
+                            echodata = self.oListener.dListener[THP_ECHO](splitdata)
                         else:
                             echodata = splitdata
                         if echodata != None:
                             self.SendTCP(echodata)
-                            self.LogData('TCP', 'send echo', echodata)
-                    if THP_REPLY in self.dListener:
-                        self.SendTCP(ReplaceAliases(self.dListener[THP_REPLY], self.EchoThis(splitdata)), 'TCP send reply')
-                    if THP_MATCH in self.dListener:
+                            self.LogData('send echo', echodata)
+                    if THP_REPLY in self.oListener.dListener:
+                        self.SendTCP(ReplaceAliases(self.oListener.dListener[THP_REPLY], self.EchoThis(splitdata)), '%s send reply' % self.protocol)
+                    if THP_MATCH in self.oListener.dListener:
                         dKeys = {}
-                        for item in self.dListener[THP_MATCH].items():
+                        for item in self.oListener.dListener[THP_MATCH].items():
                             for key in item[1].keys():
                                 dKeys[key] = 1 + dKeys.get(key, 0)
                         if THP_REGEX in dKeys and THP_STARTSWITH in dKeys:
                             self.oOutput.LineTimestamped('THP_MATCH cannot contain both THP_REGEX and THP_STARTSWITH!')
                         elif THP_REGEX in dKeys:
                             matches = []
-                            for matchname, dMatch in self.dListener[THP_MATCH].items():
+                            for matchname, dMatch in self.oListener.dListener[THP_MATCH].items():
                                 if THP_REGEX in dMatch:
                                     oMatch = re.search(dMatch[THP_REGEX], splitdata, re.DOTALL)
                                     if oMatch != None:
@@ -1254,7 +1315,7 @@ class cConnectionThread(threading.Thread):
                                 break
                         elif THP_STARTSWITH in dKeys:
                             matches = []
-                            for matchname, dMatch in self.dListener[THP_MATCH].items():
+                            for matchname, dMatch in self.oListener.dListener[THP_MATCH].items():
                                 if THP_STARTSWITH in dMatch and splitdata.startswith(dMatch[THP_STARTSWITH]):
                                     matches.append([len(dMatch[THP_STARTSWITH]), dMatch, matchname])
                             dataToSend, messagesToLog, stopConnection = self.ProcessMatches(matches, splitdata)
@@ -1273,19 +1334,19 @@ class cConnectionThread(threading.Thread):
             if sys.version_info[0] == 2:
                 oSocketConnection.shutdown(socket.SHUT_RDWR)
                 oSocketConnection.close()
-            self.oOutput.LineTimestamped('%s TCP closed' % self.connectionID)
+            self.oOutput.LineTimestamped('%s %s closed' % (self.connectionID, self.protocol))
         except socket.timeout:
-            self.oOutput.LineTimestamped('%s TCP timeout' % self.connectionID)
+            self.oOutput.LineTimestamped('%s %s timeout' % (self.connectionID, self.protocol))
         except Exception as e:
             if hasattr(e, '__traceback__') and hasattr(e.__traceback__, 'tb_lineno'):
                 lineno = ' line %d' % e.__traceback__.tb_lineno
             else:
                 lineno = ''
-            self.oOutput.LineTimestamped("%s TCP exception%s '%s'" % (self.connectionID, lineno, str(e)))
+            self.oOutput.LineTimestamped("%s %s exception%s '%s'" % (self.connectionID, self.protocol, lineno, str(e)))
 
     def SendTCP(self, data, logmessage=''):
-        if THP_DELAY in self.dListener:
-            time.sleep(self.dListener[THP_DELAY])
+        if THP_DELAY in self.oListener.dListener:
+            time.sleep(self.oListener.dListener[THP_DELAY])
         self.connection.send(data)
         if logmessage != '':
             self.oOutput.LineTimestamped('%s %s len=%d md5=%s' % (self.connectionID, logmessage, len(data), hashlib.md5(data).hexdigest()))
@@ -1293,14 +1354,14 @@ class cConnectionThread(threading.Thread):
             if httpcontent != '':
                 self.oOutput.LineTimestamped('%s (%s) HTTP content len=%d md5=%s' % (self.connectionID, logmessage, len(httpcontent), hashlib.md5(httpcontent).hexdigest()))
         if self.options.dumpdata:
-            self.LogData('TCP', 'sent', data)
+            self.LogData('sent', data)
 
     def ProcessMatches(self, matches, datain):
         result = False
         data = None
         logs = []
         if matches == []:
-            for matchname, dMatch in self.dListener[THP_MATCH].items():
+            for matchname, dMatch in self.oListener.dListener[THP_MATCH].items():
                 if THP_ELSE in dMatch:
                     matches.append([0, dMatch, THP_ELSE])
         if matches != []:
@@ -1317,12 +1378,15 @@ class cConnectionThread(threading.Thread):
         return data, logs, result
 
     def RunUDP(self):
-        self.protocol = THP_UDP
+        if self.oSocket.family == socket.AF_INET6:
+            self.protocol = THP_UDP6
+        else:
+            self.protocol = THP_UDP
         data, address = self.oSocket.recvfrom(self.options.readbuffer)
-        self.connectionID = '%s:%d-%s:%d' % (address + self.oSocket.getsockname())
-        self.oOutput.LineTimestamped('%s UDP connection' % self.connectionID)
-        self.LogData('UDP', 'data', data)
-        self.dListener, dummy = GetListener(self.oSocket.getsockname()[1], self.protocol)
+        self.connectionID = '%s-%s' % (SocknameToString(address), SocknameToString(self.oSocket.getsockname()))
+        self.oOutput.LineTimestamped('%s %s connection' % (self.connectionID, self.protocol))
+        self.LogData('data', data)
+        self.oListener = cListener(self.oSocket.getsockname()[1], self.protocol, self.options.address)
         if self.CheckAllowList():
             if self.CheckAllowList(address[0]):
                 self.oOutput.LineTimestamped('%s %s %s on allowlist' % (self.connectionID, self.protocol, address[0]))
@@ -1330,36 +1394,36 @@ class cConnectionThread(threading.Thread):
                 self.oOutput.LineTimestamped('%s %s %s not on allowlist' % (self.connectionID, self.protocol, address[0]))
                 return
 
-        if THP_ECHO in self.dListener and inspect.isclass(self.dListener[THP_ECHO]):
-            echoObject = self.dListener[THP_ECHO](self.oOutput)
+        if THP_ECHO in self.oListener.dListener and inspect.isclass(self.oListener.dListener[THP_ECHO]):
+            echoObject = self.oListener.dListener[THP_ECHO](self.oOutput)
         else:
             echoObject = None
-        for splitdata in SplitIfRequested(self.dListener, data):
+        for splitdata in SplitIfRequested(self.oListener.dListener, data):
             if splitdata != data:
-                self.LogData('UDP', 'splitdata', splitdata)
-            if THP_ECHO in self.dListener:
+                self.LogData('splitdata', splitdata)
+            if THP_ECHO in self.oListener.dListener:
                 if echoObject != None:
                     echodata = echoObject.Process(splitdata)
-                elif callable(self.dListener[THP_ECHO]):
-                    echodata = self.dListener[THP_ECHO](splitdata)
+                elif callable(self.oListener.dListener[THP_ECHO]):
+                    echodata = self.oListener.dListener[THP_ECHO](splitdata)
                 else:
                     echodata = splitdata
                 if echodata != None:
                     self.SendUDP(echodata, address)
-                    self.LogData('UDP', 'send echo', echodata)
-            if THP_REPLY in self.dListener:
-                self.SendUDP(ReplaceAliases(self.dListener[THP_REPLY], self.EchoThis(splitdata)), address)
-                self.oOutput.LineTimestamped('%s UDP send reply' % self.connectionID)
-            if THP_MATCH in self.dListener:
+                    self.LogData('send echo', echodata)
+            if THP_REPLY in self.oListener.dListener:
+                self.SendUDP(ReplaceAliases(self.oListener.dListener[THP_REPLY], self.EchoThis(splitdata)), address)
+                self.oOutput.LineTimestamped('%s %s send reply' % (self.connectionID, self.protocol))
+            if THP_MATCH in self.oListener.dListener:
                 dKeys = {}
-                for item in self.dListener[THP_MATCH].items():
+                for item in self.oListener.dListener[THP_MATCH].items():
                     for key in item[1].keys():
                         dKeys[key] = 1 + dKeys.get(key, 0)
                 if THP_REGEX in dKeys and THP_STARTSWITH in dKeys:
                     self.oOutput.LineTimestamped('THP_MATCH cannot contain both THP_REGEX and THP_STARTSWITH!')
                 elif THP_REGEX in dKeys:
                     matches = []
-                    for matchname, dMatch in self.dListener[THP_MATCH].items():
+                    for matchname, dMatch in self.oListener.dListener[THP_MATCH].items():
                         if THP_REGEX in dMatch:
                             oMatch = re.search(dMatch[THP_REGEX], splitdata, re.DOTALL)
                             if oMatch != None:
@@ -1373,7 +1437,7 @@ class cConnectionThread(threading.Thread):
                         break
                 elif THP_STARTSWITH in dKeys:
                     matches = []
-                    for matchname, dMatch in self.dListener[THP_MATCH].items():
+                    for matchname, dMatch in self.oListener.dListener[THP_MATCH].items():
                         if THP_STARTSWITH in dMatch and splitdata.startswith(dMatch[THP_STARTSWITH]):
                             matches.append([len(dMatch[THP_STARTSWITH]), dMatch, matchname])
                     dataToSend, messagesToLog, stopConnection = self.ProcessMatches(matches, splitdata)
@@ -1385,17 +1449,17 @@ class cConnectionThread(threading.Thread):
                         break
 
     def SendUDP(self, data, address):
-        if THP_DELAY in self.dListener:
-            time.sleep(self.dListener[THP_DELAY])
+        if THP_DELAY in self.oListener.dListener:
+            time.sleep(self.oListener.dListener[THP_DELAY])
         self.oSocket.sendto(data, address)
         if self.options.dumpdata:
-            self.LogData('UDP', 'sent', data)
+            self.LogData('sent', data)
 
-    def LogData(self, protocol, name, data):
+    def LogData(self, name, data):
         if self.options.format == 'repr':
-            self.oOutput.LineTimestamped('%s %s %s %s' % (self.connectionID, protocol, name, repr(data)))
+            self.oOutput.LineTimestamped('%s %s %s %s' % (self.connectionID, self.protocol, name, repr(data)))
         else:
-            self.oOutput.LineTimestamped('%s %s %s' % (self.connectionID, protocol, name))
+            self.oOutput.LineTimestamped('%s %s %s' % (self.connectionID, self.protocol, name))
             if self.options.format == 'a':
                 self.oOutput.Line(HexAsciiDump(data))
             elif self.options.format == 'A':
@@ -1548,74 +1612,76 @@ def SimpleListener(arguments, options):
 
     sshLogToFile = False
     for port in dListeners.keys():
-        dListener, reference = GetListener(port, THP_TCP)
-        if dListener == None:
-            continue
+        for protocol in [THP_TCP, THP_TCP6]:
+            oListener = cListener(port, protocol, options.address)
+            if not oListener.IsDefined():
+                continue
 
-        if THP_SSL in dListener:
-            context = ssl.create_default_context(ssl.Purpose.CLIENT_AUTH)
+            if THP_SSL in oListener.dListener:
+                context = ssl.create_default_context(ssl.Purpose.CLIENT_AUTH)
+                try:
+                    ExportFile(oListener.dListener[THP_SSL][THP_CERTFILE])
+                    ExportFile(oListener.dListener[THP_SSL][THP_KEYFILE])
+                    context.load_cert_chain(certfile=oListener.dListener[THP_SSL][THP_CERTFILE], keyfile=oListener.dListener[THP_SSL][THP_KEYFILE])
+                    oListener.dListener[THP_SSLCONTEXT] = context
+                    oOutput.LineTimestamped('Created SSL context for %d' % port)
+                except IOError as e:
+                    if '[Errno 2]' in str(e):
+                        oOutput.LineTimestamped('Error reading certificate and/or key file: %s %s' % (oListener.dListener[THP_SSL][THP_CERTFILE], oListener.dListener[THP_SSL][THP_KEYFILE]))
+                    else:
+                          oOutput.LineTimestamped('Error creating SSL context: %s' % e)
+                    oOutput.LineTimestamped('SSL not enabled for %d' % port)
+
+            if THP_SSH in oListener.dListener and not sshLogToFile:
+                if ModuleLoaded('paramiko'):
+                    paramiko.util.log_to_file('%s_ssh_%s.log' % (rootname, FormatTime()))
+                    sshLogToFile = False
+
+            oSocket = socket.socket(socket.AF_INET6 if oListener.IsIPv6() else socket.AF_INET, socket.SOCK_STREAM)
+            oSocket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
             try:
-                ExportFile(dListener[THP_SSL][THP_CERTFILE])
-                ExportFile(dListener[THP_SSL][THP_KEYFILE])
-                context.load_cert_chain(certfile=dListener[THP_SSL][THP_CERTFILE], keyfile=dListener[THP_SSL][THP_KEYFILE])
-                dListener[THP_SSLCONTEXT] = context
-                oOutput.LineTimestamped('Created SSL context for %d' % port)
-            except IOError as e:
-                if '[Errno 2]' in str(e):
-                    oOutput.LineTimestamped('Error reading certificate and/or key file: %s %s' % (dListener[THP_SSL][THP_CERTFILE], dListener[THP_SSL][THP_KEYFILE]))
+                oSocket.bind((oListener.GetAddress(), port))
+            except socket.error as e:
+                errornumber = ParseErrorMessage(str(e))
+                if errornumber == 98: #[Errno 98] Address already in use
+                    oOutput.LineTimestamped('Port %d can not be used, it is already open' % port)
+                    continue
+                elif errornumber == 99 or errornumber == 10049: #[Errno 99] Cannot assign requested address [Errno 10049] The requested address is not valid in its context
+                    oOutput.LineTimestamped('Address %s can not be used (port %d)' % (oListener.GetAddress(), port))
+                    continue
+                elif errornumber == 10013: #[Errno 10013] An attempt was made to access a socket in a way forbidden by its access permissions
+                    oOutput.LineTimestamped('Port %d can not be used, access is forbidden' % port)
+                    continue
                 else:
-                      oOutput.LineTimestamped('Error creating SSL context: %s' % e)
-                oOutput.LineTimestamped('SSL not enabled for %d' % port)
-
-        if THP_SSH in dListener and not sshLogToFile:
-            if ModuleLoaded('paramiko'):
-                paramiko.util.log_to_file('%s_ssh_%s.log' % (rootname, FormatTime()))
-                sshLogToFile = False
-
-        oSocket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        oSocket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        try:
-            oSocket.bind((options.address, port))
-        except socket.error as e:
-            errornumber = ParseErrorMessage(str(e))
-            if errornumber == 98: #[Errno 98] Address already in use
-                oOutput.LineTimestamped('Port %d can not be used, it is already open' % port)
-                continue
-            elif errornumber == 99 or errornumber == 10049: #[Errno 99] Cannot assign requested address [Errno 10049] The requested address is not valid in its context
-                oOutput.LineTimestamped('Address %s can not be used (port %d)' % (options.address, port))
-                continue
-            elif errornumber == 10013: #[Errno 10013] An attempt was made to access a socket in a way forbidden by its access permissions
-                oOutput.LineTimestamped('Port %d can not be used, access is forbidden' % port)
-                continue
-            else:
-                raise e
-        try:
-            oSocket.listen(5)
-        except socket.error as e:
-            errornumber = ParseErrorMessage(str(e))
-            if errornumber == 98: #[Errno 98] Address already in use
-                oOutput.LineTimestamped('Port %d can not be used, it is already open' % port)
-                continue
-            elif errornumber == 99 or errornumber == 10049: #[Errno 99] Cannot assign requested address [Errno 10049] The requested address is not valid in its context
-                oOutput.LineTimestamped('Address %s can not be used (port %d)' % (options.address, port))
-                continue
-            elif errornumber == 10013: #[Errno 10013] An attempt was made to access a socket in a way forbidden by its access permissions
-                oOutput.LineTimestamped('Port %d can not be used, access is forbidden' % port)
-                continue
-            else:
-                raise e
-        oOutput.LineTimestamped('Listening on %s TCP %d%s' % (oSocket.getsockname() + (PrefixIfNeeded(reference), )))
-        sockets.append(oSocket)
+                    raise e
+            try:
+                oSocket.listen(5)
+            except socket.error as e:
+                errornumber = ParseErrorMessage(str(e))
+                if errornumber == 98: #[Errno 98] Address already in use
+                    oOutput.LineTimestamped('Port %d can not be used, it is already open' % port)
+                    continue
+                elif errornumber == 99 or errornumber == 10049: #[Errno 99] Cannot assign requested address [Errno 10049] The requested address is not valid in its context
+                    oOutput.LineTimestamped('Address %s can not be used (port %d)' % (oListener.GetAddress(), port))
+                    continue
+                elif errornumber == 10013: #[Errno 10013] An attempt was made to access a socket in a way forbidden by its access permissions
+                    oOutput.LineTimestamped('Port %d can not be used, access is forbidden' % port)
+                    continue
+                else:
+                    raise e
+            oOutput.LineTimestamped('Listening on %s %s %d%s' % (oSocket.getsockname()[0], protocol, oSocket.getsockname()[1], PrefixIfNeeded(oListener.reference)))
+            sockets.append(oSocket)
 
     for port in dListeners.keys():
-        dListener, reference = GetListener(port, THP_UDP)
-        if dListener == None:
-            continue
+        for protocol in [THP_UDP, THP_UDP6]:
+            oListener = cListener(port, protocol, options.address)
+            if not oListener.IsDefined():
+                continue
 
-        oSocket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        oSocket.bind((options.address, port))
-        oOutput.LineTimestamped('Listening on %s UDP %d%s' % (oSocket.getsockname() + (PrefixIfNeeded(reference) , )))
-        sockets.append(oSocket)
+            oSocket = socket.socket(socket.AF_INET6 if oListener.IsIPv6() else socket.AF_INET, socket.SOCK_DGRAM)
+            oSocket.bind((oListener.GetAddress(), port))
+            oOutput.LineTimestamped('Listening on %s %s %d%s' % (oSocket.getsockname()[0], protocol, oSocket.getsockname()[1], PrefixIfNeeded(oListener.reference)))
+            sockets.append(oSocket)
 
     if sockets == []:
         return
@@ -1652,7 +1718,7 @@ https://DidierStevens.com'''
     oParser.add_option('-m', '--man', action='store_true', default=False, help='Print manual')
     oParser.add_option('-t', '--timeout', type=int, default=10, help='Timeout value for sockets in seconds (default 10s)')
     oParser.add_option('-r', '--readbuffer', type=int, default=10240, help='Size read buffer in bytes (default 10240)')
-    oParser.add_option('-a', '--address', default='0.0.0.0', help='Address to listen on (default 0.0.0.0)')
+    oParser.add_option('-a', '--address', default='0.0.0.0,::', help='Address to listen on (default 0.0.0.0,::)')
     oParser.add_option('-P', '--ports', default='', help='Ports to listen on (overrides ports configured in the program)')
     oParser.add_option('-p', '--extraports', default='', help='Extra ports to listen on (default none)')
     oParser.add_option('-f', '--format', default='repr', help='Output format (default repr)')

@@ -4,8 +4,8 @@ from __future__ import print_function
 
 __description__ = "Template for text file processing"
 __author__ = 'Didier Stevens'
-__version__ = '0.0.7'
-__date__ = '2022/09/18'
+__version__ = '0.0.8'
+__date__ = '2023/04/10'
 
 """
 
@@ -31,8 +31,11 @@ History:
   2021/02/27: Changed encoding
   2021/09/19: 0.0.5 updated encoding option
   2022/05/11: added option --withfilename
-  2022/05/18: 0.0.6 changed --withfilename to separator	
+  2022/05/18: 0.0.6 changed --withfilename to separator
   2022/09/18: 0.0.7 added option --trim
+  2023/04/07: 0.0.8 added cRegexesSearch and option --filenamedatabase
+  2023/04/08: man filenamedatabase
+  2023/04/10: refactoring cRegexesSearch
 
 Todo:
 """
@@ -49,6 +52,8 @@ import re
 import fnmatch
 import collections
 from contextlib import contextmanager
+import json
+from types import SimpleNamespace
 
 def PrintManual():
     manual = '''
@@ -96,6 +101,9 @@ Options --search and --replace can be used to replace every occurence of option 
 Option --trim can be used to trim each line with a Python slice: begin:end.
 
 Option --withfilename prefixes each printed line with the filename containing that line.
+
+To keep track of files processed by this tool, use option --filenamedatabase. The value provided with this option, is used to create a JSON file containing all the files (using their filenames) that have already bene processed by this tool.
+Use this option to process only new files between subsequent program executions, and make sure that a file is processed only once.
 
 The lines are written to standard output, except when option -o is used. When option -o is used, the lines are written to the filename specified by option -o.
 Filenames used with option -o starting with # have special meaning.
@@ -691,6 +699,60 @@ def TextFile(filename, oLogfile, options):
         if fType != 1:
             fIn.close()
 
+class cRegexesSearch(object):
+
+    def __init__(self):
+        self.regex = []
+        self.regexname = []
+        self.compiledregex = []
+        self.fields = []
+
+    def Add(self, regexname, fields, regex, flags=0):
+        self.regexname.append(regexname)
+        self.regex.append(regex)
+        self.compiledregex.append(re.compile(regex, flags))
+        self.fields.append(fields)
+
+    def AddWildcard(self, regexname, wildcard, flags=0):
+        regex = ''
+        fields = ''
+        status = 0
+        for char in wildcard:
+            if status == 0:
+                if char == '*':
+                    regex += '(.*?)'
+                    status = 1
+                elif char in ['.', '+', '*', '?', '^', '$', '(', ')', '[', ']', '{', '}', '|', '\\']:
+                    regex += '\\x%02x' % ord(char)
+                else:
+                    regex += char
+            elif status == 1:
+                if char == ':':
+                    status = 2
+                    if fields != '':
+                        fields += ' '
+                else:
+                    raise
+            elif status == 2:
+                if char == ':':
+                    status = 0
+                else:
+                    fields += char
+        self.Add(regexname, fields.split(' '), regex, flags)
+
+    def Search(self, line):
+        for index in range(len(self.regex)):
+            oMatch = self.compiledregex[index].search(line)
+            if oMatch != None:
+                if oMatch.groups() == ():
+                    pass
+                else:
+                    sn = SimpleNamespace(regexname=self.regexname[index])
+                    for index2, value in enumerate(oMatch.groups()):
+                        sn.__setattr__(self.fields[index][index2], value)
+                    return sn
+        return None
+
 def ProcessTextFile(filename, oBeginGrep, oGrep, oEndGrep, context, oOutput, oLogfile, options):
     with TextFile(filename, oLogfile, options) as fIn:
         try:
@@ -747,7 +809,24 @@ def ParseContext(context):
         lines += ParseTerm(term)
     return sorted(set(lines))
 
+def RemoveFilesFromPriorRuns(filenames, filenamedatabase):
+    jsonfilename = 'filenamedatabase-%s.json' % filenamedatabase
+    if not os.path.exists(jsonfilename):
+        return filenames, {}
+
+    dDatabase = json.load(open(jsonfilename, 'r'))
+    return [filename for filename in filenames if filename not in dDatabase.keys()], dDatabase
+
+def AddFilesToPriorRunsDatabase(dDatabase, filenamedatabase):
+    jsonfilename = 'filenamedatabase-%s.json' % filenamedatabase
+    json.dump(dDatabase, open(jsonfilename, 'w'))
+
 def ProcessTextFiles(filenames, oLogfile, options):
+    if options.filenamedatabase != '':
+        filenames, dDatabaseFilenames = RemoveFilesFromPriorRuns(filenames, options.filenamedatabase)
+    else:
+        dDatabaseFilenames = {}
+
     oGrep = cGrep(options.grep, options.grepoptions)
     oBeginGrep = cGrep(options.begingrep, options.begingrepoptions)
     oEndGrep = cGrep(options.endgrep, options.endgrepoptions)
@@ -770,10 +849,14 @@ def ProcessTextFiles(filenames, oLogfile, options):
         else:
             end = int(end)
         options.trim = slice(begin, end)
-    
+
     for index, filename in enumerate(filenames):
         oOutput.Filename(filename, index, len(filenames))
+        dDatabaseFilenames[filename] = time.time()
         ProcessTextFile(filename, oBeginGrep, oGrep, oEndGrep, context, oOutput, oLogfile, options)
+
+    if options.filenamedatabase != '':
+        AddFilesToPriorRunsDatabase(dDatabaseFilenames, options.filenamedatabase)
 
     oOutput.Close()
 
@@ -810,6 +893,7 @@ https://DidierStevens.com'''
     oParser.add_option('--logcomment', type=str, default='', help='A string with comments to be included in the log file')
     oParser.add_option('--ignoreprocessingerrors', action='store_true', default=False, help='Ignore errors during file processing')
     oParser.add_option('--encoding', type=str, default='', help='Encoding for file open')
+    oParser.add_option('--filenamedatabase', type=str, default='', help='Use this to skip files that have bene processed in prior runs')
     (options, args) = oParser.parse_args()
 
     if options.man:
