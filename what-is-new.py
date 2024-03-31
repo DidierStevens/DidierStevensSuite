@@ -2,8 +2,8 @@
 
 __description__ = 'Tool to monitor new items'
 __author__ = 'Didier Stevens'
-__version__ = '0.0.3'
-__date__ = '2022/12/19'
+__version__ = '0.0.4'
+__date__ = '2024/04/24'
 
 """
 History:
@@ -19,6 +19,8 @@ History:
   2022/11/20: continued action
   2022/12/17: 0.0.3 MESSAGE2; option exportvanished
   2022/12/19: added --logsame
+  2023/05/03: 0.0.4 added --dumpformat
+  2024/04/24: updated man
 
 Todo:
   add subprocess.Popen as action option
@@ -76,7 +78,18 @@ By default, only new lines are added to the database, no lines are removed. If y
 Changes to the database can be written to a log file by using option -l or -L.
 With -l, the log file is written in the current directory and the name is what-is-new-DATABASE-DATE-TIME.log. So it's a different log file for each execution.
 With -L, the log file is written in the current directory and the name is what-is-new-DATABASE.log. So it's always the same log file for each execution.
+
 All the lines in a database can be dumped with option -d.
+They appear as ordered in the database.
+To change the order, use option -D --dumpformat.
+--dumpformat youngest:first orders the lines by first submission timestamp, from young to old.
+--dumpformat oldest:first orders the lines by first submission timestamp, from old to young.
+--dumpformat youngest:last orders the lines by last submission timestamp, from young to old.
+--dumpformat oldest:last orders the lines by last submission timestamp, from old to young.
+The number of dumped lines can be limited by adding a number to the dumpformat value, like this:
+--dumpformat youngest:first:number.
+For example, --dumpformat oldest:first:5 will dump the 5 oldest lines based on their first submission timestamp.
+
 The database can also be exported as a CSV file including timestamps (local time) using option -e.
 Example:
 Key;First;Last;Count
@@ -260,6 +273,40 @@ def ExecuteAction(options, fLog, newLines):
     if fLog != None:
         fLog.write('%s Action exicode: %d\n' % (NowUTCISO(), exitcode))
 
+def OrderKeys(dDatabase, dumpformat):
+    if dumpformat == '':
+        keys = list(dDatabase.keys())
+        maximum = None
+    else:
+        parameters = dumpformat.split(':')
+        if len(parameters) == 1 or len(parameters) > 3:
+            raise Exception('Unknown dumpformat: %s' % dumpformat)
+        else:
+            if len(parameters) == 2:
+                maximum = None
+            else:
+                maximum = int(parameters[2])
+            order = parameters[0]
+            field = parameters[1]
+
+        if field == 'first':
+            index = 0
+        elif field == 'last':
+            index = 1
+        else:
+            raise Exception('Unknown dumpformat: %s' % dumpformat)
+
+        if order == 'youngest':
+            reversed = True
+        elif order == 'oldest':
+            reversed = False
+        else:
+            raise Exception('Unknown dumpformat: %s' % dumpformat)
+
+        data = sorted([[value[index], key] for key, value in dDatabase.items()], reverse=reversed)
+        keys = [item[1] for item in data]
+    return keys[:maximum]
+
 def WhatIsNew(database, files, options):
     now = time.time()
     data = DeSerialize(database)
@@ -272,7 +319,7 @@ def WhatIsNew(database, files, options):
     else:
         fOut = None
     if options.dump:
-        for key in dDatabase.keys():
+        for key in OrderKeys(dDatabase, options.dumpformat):
             Print(key, fOut)
     elif options.export:
         Print(MakeCSVLine(('Key', 'First', 'Last', 'Count'), options.separator, QUOTE), fOut)
@@ -348,6 +395,7 @@ def Main():
     oParser.add_option('-o', '--output', help='output to file')
     oParser.add_option('-a', '--action', type=str, default='', help='action (command) to take when new items were found')
     oParser.add_option('-s', '--separator', default=';', help='separator character (default ;)')
+    oParser.add_option('-D', '--dumpformat', type=str, default='', help='order:count to use when dumping possible values: youngest, oldest (default None)')
     (options, args) = oParser.parse_args()
 
     if options.man:

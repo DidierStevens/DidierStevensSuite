@@ -2,13 +2,14 @@
 
 __description__ = 'telegram'
 __author__ = 'Didier Stevens'
-__version__ = '0.0.1'
-__date__ = '2022/11/20'
+__version__ = '0.0.2'
+__date__ = '2024/03/04'
 
 """
 History:
   2022/11/19: start
   2022/11/20: continue
+  2024/03/04: 0.0.2 added option -i
 
 """
 
@@ -33,6 +34,10 @@ def TelegramSendMessage(message, apiToken, chatID):
 def WhatIsNewTelegramSendMessage(args, options):
     if options.base64:
         message = binascii.a2b_base64(args[0]).decode('latin')
+    elif options.stdin != '':
+        message = sys.stdin.read()
+        if options.stdin != 'all':
+            message = '\n'.join(message.split('\n')[:int(options.stdin)])
     else:
         message = args[0]
     if options.prefix != '':
@@ -47,6 +52,7 @@ def Main():
     oParser.add_option('-a', '--apitoken', type=str, default='', help='API token')
     oParser.add_option('-c', '--chatid', type=str, default='', help='Chat ID')
     oParser.add_option('-b', '--base64', action='store_true', default=False, help='Message is BASE64 encoded')
+    oParser.add_option('-i', '--stdin', type=str, default='', help='Read message from stdin ("all" or number of lines)')
     oParser.add_option('-t', '--timestamp', action='store_true', default=False, help='Timestamp the message')
     oParser.add_option('-p', '--prefix', type=str, default='', help='Message prefix')
     (options, args) = oParser.parse_args()
@@ -56,7 +62,7 @@ def Main():
         PrintManual()
         return 1
 
-    if len(args) != 1:
+    if len(args) != 1 and not options.stdin:
         oParser.print_help()
         return 1
 
