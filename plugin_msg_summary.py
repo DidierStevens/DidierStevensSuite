@@ -2,8 +2,8 @@
 
 __description__ = 'MSG summary plugin for oledump.py'
 __author__ = 'Didier Stevens'
-__version__ = '0.0.2'
-__date__ = '2022/05/15'
+__version__ = '0.0.3'
+__date__ = '2024/05/15'
 
 """
 
@@ -15,6 +15,7 @@ History:
   2020/08/18: start
   2020/09/11: added body
   2022/05/15: 0.0.2 added URL extraction
+  2024/05/15: 0.0.3 added inline attachment detection and -J --jsonattachmentoutput
 
 Todo:
 """
@@ -41,6 +42,10 @@ class cMSG(cPluginParentOle):
         self.dAttachments = {}
         self.streamIndexCounter = 0
         self.dURLs = {}
+        self.subject = ''
+        self.date = ''
+        self.to = ''
+        self.from_ = ''
 
     def ExtractURLs(self, stream):
         result = []
@@ -58,15 +63,20 @@ class cMSG(cPluginParentOle):
             if not numberAttachment in self.dAttachments:
                 self.dAttachments[numberAttachment] = cAttachment(nameAttachment)
                 self.dAttachments[numberAttachment].number = numberAttachment
-            found, code = StartsWithGetRemainder(name[1], '__substg1.0_')
-            if found:
-                if code == '37010102':
-                    self.dAttachments[numberAttachment].data = stream
-                    self.dAttachments[numberAttachment].streamIndex = self.streamIndexCounter
-                elif code.startswith('3707'):
-                    self.dAttachments[numberAttachment].longfilename = stream.decode('utf16') if code.endswith('001F') else stream.decode()
-                elif code.startswith('370E'):
-                    self.dAttachments[numberAttachment].mimetag = stream.decode('utf16') if code.endswith('001F') else stream.decode()
+                self.dAttachments[numberAttachment].inline = False
+            if name[1] == '__properties_version1.0':
+                if b'\x03\x00\x14\x37\x06\x00\x00\x00\x04\x00\x00\x00\x00\x00\x00\x00' in stream: # quick & dirty trick to find PidTagAttachFlags with attRenderedInBody 0x00000004
+                    self.dAttachments[numberAttachment].inline = True
+            else:
+                found, code = StartsWithGetRemainder(name[1], '__substg1.0_')
+                if found:
+                    if code == '37010102':
+                        self.dAttachments[numberAttachment].data = stream
+                        self.dAttachments[numberAttachment].streamIndex = self.streamIndexCounter
+                    elif code.startswith('3707'):
+                        self.dAttachments[numberAttachment].longfilename = stream.decode('utf16') if code.endswith('001F') else stream.decode()
+                    elif code.startswith('370E'):
+                        self.dAttachments[numberAttachment].mimetag = stream.decode('utf16') if code.endswith('001F') else stream.decode()
 
         found, code = StartsWithGetRemainder(name[0], '__substg1.0_')
         if found:
@@ -97,14 +107,20 @@ class cMSG(cPluginParentOle):
     def PostProcess(self):
         oParser = optparse.OptionParser()
         oParser.add_option('-j', '--json', action='store_true', default=False, help='Produce JSON output')
+        oParser.add_option('-J', '--jsonattachmentoutput', action='store_true', default=False, help='Produce JSON output for attachments')
         oParser.add_option('-b', '--body', action='store_true', default=False, help='Print body')
         oParser.add_option('-H', '--header', action='store_true', default=False, help='Print header')
         (options, args) = oParser.parse_args(self.options.split(' '))
 
         sha256 = hashlib.sha256(self.data).hexdigest()
         if options.json:
-            jsondata = {'sha256': sha256, 'subject': self.subject, 'date': self.date, 'to': self.to, 'from': self.from_, 'attachments': [{'index': key, 'longfilename': value.longfilename, 'mimetag': value.mimetag, 'size': len(value.data), 'sha256': hashlib.sha256(value.data).hexdigest(), 'magichex': binascii.b2a_hex(value.data[:4]).decode()} for key, value in self.dAttachments.items()]}
+            jsondata = {'sha256': sha256, 'subject': self.subject, 'date': self.date, 'to': self.to, 'from': self.from_, 'attachments': [{'index': key, 'inline': value.inline, 'longfilename': value.longfilename, 'mimetag': value.mimetag, 'size': len(value.data), 'sha256': hashlib.sha256(value.data).hexdigest(), 'magichex': binascii.b2a_hex(value.data[:4]).decode()} for key, value in self.dAttachments.items()]}
             print(json.dumps(jsondata))
+        elif options.jsonattachmentoutput:
+            oMyJSONOutput = cMyJSONOutput()
+            for index in self.dAttachments.keys():
+                oMyJSONOutput.AddIdItem(index, IFF(self.dAttachments[index].inline, 'inline:', '') + self.dAttachments[index].longfilename, self.dAttachments[index].data)
+            print(oMyJSONOutput.GetJSON())
         else:
             print('Sample email: sha256 %s' % sha256)
             print('Header stream index: %d' % self.headerStreamIndex)
@@ -114,7 +130,7 @@ class cMSG(cPluginParentOle):
             print('From: %s' % self.from_)
             print('Body stream index: %d' % self.bodyStreamIndex)
             for index in self.dAttachments.keys():
-                print('Attachment %d (stream index %d): %s %s %d %s' % (index, self.dAttachments[index].streamIndex, self.dAttachments[index].longfilename, self.dAttachments[index].mimetag, len(self.dAttachments[index].data), hashlib.sha256(self.dAttachments[index].data).hexdigest()))
+                print('Attachment %d (stream index %d)%s: %s %s %d %s' % (index, self.dAttachments[index].streamIndex, IFF(self.dAttachments[index].inline, ', inline', ''), self.dAttachments[index].longfilename, self.dAttachments[index].mimetag, len(self.dAttachments[index].data), hashlib.sha256(self.dAttachments[index].data).hexdigest()))
             if len(self.dURLs) > 0:
                 print('URLs:')
                 for key, value in self.dURLs.items():

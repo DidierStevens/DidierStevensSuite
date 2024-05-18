@@ -2,8 +2,8 @@
 
 __description__ = 'Analyze OLE files (Compound Binary Files)'
 __author__ = 'Didier Stevens'
-__version__ = '0.0.75'
-__date__ = '2023/05/01'
+__version__ = '0.0.76'
+__date__ = '2024/05/15'
 
 """
 
@@ -124,6 +124,7 @@ History:
   2023/03/23: 0.0.73 updated cStruct
   2023/04/01: 0.0.74 added CalculateChosenHash
   2023/05/01: 0.0.75 bumping version for update to plugin(s), no changes to oledump.py
+  2024/05/15: 0.0.76 added cMyJSONOutput
 
 Todo:
 
@@ -1893,6 +1894,22 @@ def PrintUserdefinedProperties(ole, streamname):
         for userdefinedproperty in userdefinedproperties:
             print(' %s: %s' % (userdefinedproperty['property_name'], userdefinedproperty['value']))
 
+class cMyJSONOutput():
+
+    def __init__(self):
+        self.items = []
+        self.counter = 1
+
+    def AddIdItem(self, id, name, data):
+        self.items.append({'id': id, 'name': name, 'content': binascii.b2a_base64(data).strip(b'\n').decode()})
+
+    def AddItem(self, name, data):
+        self.AddIdItem(self.counter, name, data)
+        self.counter += 1
+
+    def GetJSON(self):
+        return json.dumps({'version': 2, 'id': 'didierstevens.com', 'type': 'content', 'fields': ['id', 'name', 'content'], 'items': self.items})
+
 def OLESub(ole, data, prefix, rules, options):
     global plugins
     global pluginsOle
@@ -1926,19 +1943,18 @@ def OLESub(ole, data, prefix, rules, options):
         return (returnCode, 0)
 
     if options.jsonoutput:
-        object = []
-        counter = 1
+        oMyJSONOutput = cMyJSONOutput()
         if options.vbadecompress:
+            counter = 1
             for orphan, fname, entry_type, entry_metadata, stream, sizeUnusedData in OLEGetStreams(ole, options.storages, options.unuseddata):
                 vbacode = SearchAndDecompress(stream, '')
                 if vbacode != '':
-                    object.append({'id': counter, 'name': PrintableName(fname), 'content': C2SIP3(binascii.b2a_base64(vbacode.encode())).strip('\n')})
+                    oMyJSONOutput.AddIdItem(counter, PrintableName(fname), vbacode.encode())
                 counter += 1
         else:
             for orphan, fname, entry_type, entry_metadata, stream, sizeUnusedData in OLEGetStreams(ole, options.storages, options.unuseddata):
-                object.append({'id': counter, 'name': PrintableName(fname), 'content': C2SIP3(binascii.b2a_base64(stream)).strip('\n')})
-                counter += 1
-        print(json.dumps({'version': 2, 'id': 'didierstevens.com', 'type': 'content', 'fields': ['id', 'name', 'content'], 'items': object}))
+                oMyJSONOutput.AddItem(PrintableName(fname), stream)
+        print(oMyJSONOutput.GetJSON())
         return (returnCode, 0)
 
     vbadirinfo = ParseVBADIR(ole)
