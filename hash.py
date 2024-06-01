@@ -2,8 +2,8 @@
 
 __description__ = 'This is essentialy a wrapper for the hashlib module'
 __author__ = 'Didier Stevens'
-__version__ = '0.0.11'
-__date__ = '2024/01/09'
+__version__ = '0.0.12'
+__date__ = '2024/05/28'
 
 """
 Source code put in public domain by Didier Stevens, no Copyright
@@ -28,6 +28,7 @@ History:
   2023/09/18: added option humanhash
   2024/01/09: 0.0.11 added option unvalidatedhashes
   2024/02/10: added sorted for unvalidatedhashes
+  2024/05/28: 0.0.12 added --jsoninput
 
 Todo:
 """
@@ -51,6 +52,7 @@ import fnmatch
 import zlib
 import functools
 import operator
+import json
 if sys.version_info[0] >= 3:
     from io import BytesIO as DataIO
 else:
@@ -149,6 +151,8 @@ The list of hash algorithms supported by the Python version this script is runni
 ''' + ' '.join(name for name in list(hashlib.algorithms_available) + list(dSpecialHashes.keys())) + r'''
 
 Hash checksum8 is the sum of all bytes inside the file, interpreted as unsigned, 8-bit integers.
+
+With option --jsoninput hash.py will consume JSON output (produced by oledump.py, for example) and hash all items in the JSON input.
 
 The Python hashlib module methods produce hexadecimal hash values with lowercase letters. To get uppercase letters with this tool, use option -u:
 
@@ -1218,16 +1222,19 @@ def Quote(value, separator, quote):
 def MakeCSVLine(row, separator, quote):
     return separator.join([Quote(value, separator, quote) for value in row])
 
-def HashSingle(filename, cutexpression, prefix, dFileHashes, skipHashes, validateHashes, options):
-    oBinaryFile = cBinaryFile(filename, C2BIP3(options.password), options.noextraction, options.literalfilenames)
-    data = oBinaryFile.read()
-    oBinaryFile.close()
+def HashSingle(filename, cutexpression, prefix, dFileHashes, skipHashes, validateHashes, options, data=None):
+    extracted = False
+    if data == None:
+        oBinaryFile = cBinaryFile(filename, C2BIP3(options.password), options.noextraction, options.literalfilenames)
+        data = oBinaryFile.read()
+        extracted = oBinaryFile.extracted
+        oBinaryFile.close()
     if cutexpression != '':
         data = CutData(data, cutexpression)[0]
     hashes, dHashes = GetHashObjects(options.algorithms)
     if hashes == []:
         return
-    if not options.quiet and not options.csv and oBinaryFile.extracted:
+    if not options.quiet and not options.csv and extracted:
         print('%sExtracted!' % (prefix))
     if options.block == 0:
         row = [filename]
@@ -1299,18 +1306,72 @@ def HashSingle(filename, cutexpression, prefix, dFileHashes, skipHashes, validat
             else:
                 print('%sSummary %s values: %d different blocks (%d blocks in total)' % (prefix, name, len(dBlockHashes[name]), countBlocks))
 
+def CheckJSON(stringJSON):
+    try:
+        object = json.loads(stringJSON)
+    except:
+        print('Error parsing JSON')
+        print(sys.exc_info()[1])
+        return None
+    if not isinstance(object, dict):
+        print('Error JSON is not a dictionary')
+        return None
+    if not 'version' in object:
+        print('Error JSON dictionary has no version')
+        return None
+    if object['version'] != 2:
+        print('Error JSON dictionary has wrong version')
+        return None
+    if not 'id' in object:
+        print('Error JSON dictionary has no id')
+        return None
+    if object['id'] != 'didierstevens.com':
+        print('Error JSON dictionary has wrong id')
+        return None
+    if not 'type' in object:
+        print('Error JSON dictionary has no type')
+        return None
+    if object['type'] != 'content':
+        print('Error JSON dictionary has wrong type')
+        return None
+    if not 'fields' in object:
+        print('Error JSON dictionary has no fields')
+        return None
+    if not 'name' in object['fields']:
+        print('Error JSON dictionary has no name field')
+        return None
+    if not 'content' in object['fields']:
+        print('Error JSON dictionary has no content field')
+        return None
+    if not 'items' in object:
+        print('Error JSON dictionary has no items')
+        return None
+    for item in object['items']:
+        item['content'] = binascii.a2b_base64(item['content'])
+    return object['items']
+
 def HashFiles(filenames, options):
     dFileHashes = {}
     skipHashes = ParseHashList(options.skip)
     validateHashes = ParseHashList(options.validate)
 
-    for filename, cutexpression in filenames:
-        if filename != '' and len(filenames) > 1 and not options.quiet and not options.csv:
-            print('File: %s' % filename)
-            prefix = ' '
-        else:
-            prefix = ''
-        HashSingle(filename, cutexpression, prefix, dFileHashes, skipHashes, validateHashes, options)
+    if options.jsoninput:
+        data = CheckJSON(sys.stdin.read())
+        for item in data:
+            if len(data) > 1 and not options.quiet and not options.csv:
+                print('Item: %s' % item['name'])
+                prefix = ' '
+            else:
+                prefix = ''
+            HashSingle(item['name'], '', prefix, dFileHashes, skipHashes, validateHashes, options, data=item['content'])
+    else:
+        for filename, cutexpression in filenames:
+            if filename != '' and len(filenames) > 1 and not options.quiet and not options.csv:
+                print('File: %s' % filename)
+                prefix = ' '
+            else:
+                prefix = ''
+            HashSingle(filename, cutexpression, prefix, dFileHashes, skipHashes, validateHashes, options)
 
     if options.compare:
         print('\nFile hash summary:')
@@ -1376,6 +1437,7 @@ https://DidierStevens.com'''
     oParser.add_option('-C', '--csv', action='store_true', default=False, help='Output CSV')
     oParser.add_option('-H', '--humanhash', action='store_true', default=False, help='Include human hash')
     oParser.add_option('-U', '--unvalidatedhashes', action='store_true', default=False, help='Display unvalidated hashes')
+    oParser.add_option('--jsoninput', action='store_true', default=False, help='consume json input')
     oParser.add_option('--password', default='infected', help='The ZIP password to be used (default infected)')
     oParser.add_option('--noextraction', action='store_true', default=False, help='Do not extract from archive file')
     oParser.add_option('--literalfilenames', action='store_true', default=False, help='Do not interpret filenames')

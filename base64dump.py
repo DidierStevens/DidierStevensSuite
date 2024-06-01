@@ -2,8 +2,8 @@
 
 __description__ = 'Extract base64 strings from file'
 __author__ = 'Didier Stevens'
-__version__ = '0.0.24'
-__date__ = '2022/10/13'
+__version__ = '0.0.25'
+__date__ = '2024/04/16'
 
 """
 
@@ -43,6 +43,7 @@ History:
   2022/07/15: 0.0.23 added option --jsoninput & --postprocess
   2022/07/17: continue
   2022/10/13: 0.0.24 update CalculateByteStatistics
+  2024/04/16: 0.0.25 added selection of original; ExtractLongestString; --sort
 
 Todo:
   add base64 url
@@ -128,7 +129,8 @@ a85 stands for ASCII85, it looks like this: BOu!rD]...
 
 zxle and zxbe encoding looks for 1 to 8 hexadecimal characters after the prefix 0x. If the number of hexadecimal characters is uneven, a 0 (digit zero) will be prefixed to have an even number of hexadecimal digits.
 
-Select a datastream for further analysis with option -s followed by the ID number of the datastream, L for the largest one, or a for all. For example -s 2:
+Select a datastream for further analysis with option -s followed by the ID number of the datastream, L for the largest one, or a for all.
+Output example for -s 2:
 
 Info:
  MD5: d611941e0d24cb6b59c7b6b2add4fd8f
@@ -144,6 +146,8 @@ Info:
  High bytes: 89045
 
 This displays information for the datastream, like the entropy of the datastream.
+
+Append o (original) to the ID number to select the unprocessed decoded data (when using option -P --postprocess). Like this: -s32o.
 
 The selected stream can be dumped (-d), hexdumped (-x), ASCII dumped (-a) or dump the strings (-S). Use the dump option (-d) to extract the stream and save it to disk (with file redirection >) or to pipe it (|) into the next command.
 If the dump needs to be processed by a string codec, like utf16, use option -t instead of -d and provide the codec:
@@ -237,6 +241,8 @@ rule Contains_PE_File
         for any i in (1..#a): (uint32(@a[i] + uint32(@a[i] + 0x3C)) == 0x00004550)
 }
 
+Dump options (-a, -x, -S, ...) can be used together with option -y: triggered rules will cause a dump of the data that was scanned.
+
 When looking for traces of Windows executable code (PE files, shellcode, ...) with YARA rules, one must take into account the fact that the executable code might have been encoded (for example via XOR and a key) to evade detection.
 To deal with this possibility, base64dump supports decoders. A decoder is a type of plugin, that will bruteforce a type of encoding on each datastream. For example, decoder_xor1 will encode each datastream via XOR and a key of 1 byte. So effectively, 256 different encodings of the datastream will be scanned by the YARA rules. 256 encodings because: XOR key 0x00, XOR key 0x01, XOR key 0x02, ..., XOR key 0xFF
 Here is an example:
@@ -268,13 +274,26 @@ In this example, the lambda expression will remove one character from the end of
 Option -P (postprocess) works just like option -p, but on the decoded data.
 If an error occurs in the postprocess function, the error AND the encoded data will be ignored.
 Built-in function UTF16_ASCII can be used to transform UTF16 to ASCII, and raise an error when the transformed string is not ASCII. This decoded data is then ignored.
-This built-in function UTF16_ASCII allows us to search for encoded PowerShell commands that are pure ASCII,.
+This built-in function UTF16_ASCII allows us to search for encoded PowerShell commands that are pure ASCII.
+This built-in function ExtractLongestString extracts the longest string (ASCII/UNICODE).
 
 With option -T (--headtail), output can be truncated to the first 10 lines and last 10 lines of output.
 
 With option --jsonoutput base64dump.py will output selected content as a JSON object that can be piped into other tools that support this JSON format.
 
 With option --jsoninput base64dump.py will consume JSON output (produced by oledump.py, for example) and scan all items in the JSON input.
+
+Option --sort can be used to sort base64dump's output (this option is ignored when option -y or -e all is used).
+By default, encoded strings are listed in the order they appear in the input data.
+Option --sort takes different flags that are separated by commas (,).
+
+Flag e: sort by encoded data
+Flag d: sort by decoded data
+Flag do: sort by decoded original data
+Flag l: sort by length
+Flag r: reversed sort.
+
+For example, --sort l,d will sort the output by length of the decoded data, from shortest to longest.
 
 Option -c (--cut) allows for the partial selection of a datastream. Use this option to "cut out" part of the datastream.
 The --cut option takes an argument to specify which section of bytes to select from the datastream. This argument is composed of 2 terms separated by a colon (:), like this:
@@ -796,6 +815,9 @@ def ExtractStringsUNICODE(data):
 def ExtractStrings(data):
     return ExtractStringsASCII(data) + ExtractStringsUNICODE(data)
 
+def ExtractLongestString(data):
+    return sorted([b''] + ExtractStrings(data), key=len)[-1]
+
 def DumpFunctionStrings(data):
     return ''.join([extractedstring + '\n' for extractedstring in ExtractStrings(data)])
 
@@ -839,9 +861,9 @@ def DecodeDataBase64(items, PreProcessFunction, PostProcessFunction):
             base64string = PreProcessFunction(base64string)
             if len(base64string) % 4 == 0:
                 try:
-                    decoded = binascii.a2b_base64(base64string)
-                    decoded = PostProcessFunction(decoded)
-                    yield (item, base64string, decoded)
+                    decodedOriginal = binascii.a2b_base64(base64string)
+                    decoded = PostProcessFunction(decodedOriginal)
+                    yield (item, base64string, decoded, decodedOriginal)
                 except:
                     continue
 
@@ -851,9 +873,9 @@ def DecodeDataBase85RFC1924(items, PreProcessFunction, PostProcessFunction):
         for base85string in re.findall(b'[ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!#$%&()*+\-;<=>?@^_`{|}~]+', data):
             base85string = PreProcessFunction(base85string)
             try:
-                decoded = base64.b85decode(base85string)
-                decoded = PostProcessFunction(decoded)
-                yield (item, base85string, decoded)
+                decodedOriginal = base64.b85decode(base85string)
+                decoded = PostProcessFunction(decodedOriginal)
+                yield (item, base85string, decoded, decodedOriginal)
             except:
                 continue
 
@@ -863,9 +885,9 @@ def DecodeDataAscii85(items, PreProcessFunction, PostProcessFunction):
         for ascii85string in re.findall(b'''[!"#$%&'()*+,./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\]^_`abcdefghijklmnopqrstuz-]+''', data):
             ascii85string = PreProcessFunction(ascii85string)
             try:
-                decoded = base64.a85decode(ascii85string)
-                decoded = PostProcessFunction(decoded)
-                yield (item, ascii85string, decoded)
+                decodedOriginal = base64.a85decode(ascii85string)
+                decoded = PostProcessFunction(decodedOriginal)
+                yield (item, ascii85string, decoded, decodedOriginal)
             except:
                 continue
 
@@ -876,9 +898,9 @@ def DecodeDataHex(items, PreProcessFunction, PostProcessFunction):
             hexstring = PreProcessFunction(hexstring)
             if len(hexstring) % 2 == 0:
                 try:
-                    decoded = binascii.a2b_hex(hexstring)
-                    decoded = PostProcessFunction(decoded)
-                    yield (item, hexstring, decoded)
+                    decodedOriginal = binascii.a2b_hex(hexstring)
+                    decoded = PostProcessFunction(decodedOriginal)
+                    yield (item, hexstring, decoded, decodedOriginal)
                 except:
                     continue
 
@@ -895,9 +917,9 @@ def DecodeDataBU(items, PreProcessFunction, PostProcessFunction):
         for bu in re.findall(br'(?:\\u[ABCDEFabcdef0123456789]{4})+', data):
             bu = PreProcessFunction(bu)
             try:
-                decoded = DecodeBU(bu)
-                decoded = PostProcessFunction(decoded)
-                yield (item, bu, decoded)
+                decodedOriginal = DecodeBU(bu)
+                decoded = PostProcessFunction(decodedOriginal)
+                yield (item, bu, decoded, decodedOriginal)
             except:
                 continue
 
@@ -907,9 +929,9 @@ def DecodeDataPU(items, PreProcessFunction, PostProcessFunction):
         for bu in re.findall(br'(?:%u[ABCDEFabcdef0123456789]{4})+', data):
             bu = PreProcessFunction(bu)
             try:
-                decoded = DecodeBU(bu)
-                decoded = PostProcessFunction(decoded)
-                yield (item, bu, decoded)
+                decodedOriginal = DecodeBU(bu)
+                decoded = PostProcessFunction(decodedOriginal)
+                yield (item, bu, decoded, decodedOriginal)
             except:
                 continue
 
@@ -926,9 +948,9 @@ def DecodeDataBX(items, PreProcessFunction, PostProcessFunction):
         for bx in re.findall(br'(?:\\x[ABCDEFabcdef0123456789]{2})+', data):
             bx = PreProcessFunction(bx)
             try:
-                decoded = DecodeBX(bx)
-                decoded = PostProcessFunction(decoded)
-                yield (item, bx, decoded)
+                decodedOriginal = DecodeBX(bx)
+                decoded = PostProcessFunction(decodedOriginal)
+                yield (item, bx, decoded, decodedOriginal)
             except:
                 continue
 
@@ -938,9 +960,9 @@ def DecodeDataAH(items, PreProcessFunction, PostProcessFunction):
         for ah in re.findall(br'(?:&H[ABCDEFabcdef0123456789]{2})+', data):
             ah = PreProcessFunction(ah)
             try:
-                decoded = DecodeBX(ah)
-                decoded = PostProcessFunction(decoded)
-                yield (item, ah, decoded)
+                decodedOriginal = DecodeBX(ah)
+                decoded = PostProcessFunction(decodedOriginal)
+                yield (item, ah, decoded, decodedOriginal)
             except:
                 continue
 
@@ -968,9 +990,9 @@ def DecodeDataZXLittleEndian(items, PreProcessFunction, PostProcessFunction):
         for zx in re.findall(br'(?:0x[ABCDEFabcdef0123456789]{1,8})+', data):
             zx = PreProcessFunction(zx)
             try:
-                decoded = DecodeZXLittleEndian(zx)
-                decoded = PostProcessFunction(decoded)
-                yield (item, zx, decoded)
+                decodedOriginal = DecodeZXLittleEndian(zx)
+                decoded = PostProcessFunction(decodedOriginal)
+                yield (item, zx, decoded, decodedOriginal)
             except:
                 continue
 
@@ -990,9 +1012,9 @@ def DecodeDataZXBigEndian(items, PreProcessFunction, PostProcessFunction):
         for zx in re.findall(br'(?:0x[ABCDEFabcdef0123456789]{1,8})+', data):
             zx = PreProcessFunction(zx)
             try:
-                decoded = DecodeZXBigEndian(zx)
-                decoded = PostProcessFunction(decoded)
-                yield (item, zx, decoded)
+                decodedOriginal = DecodeZXBigEndian(zx)
+                decoded = PostProcessFunction(decodedOriginal)
+                yield (item, zx, decoded, decodedOriginal)
             except:
                 continue
 
@@ -1035,9 +1057,9 @@ def DecodeDataZXC(items, PreProcessFunction, PostProcessFunction):
         for hexstring in re.findall(br'(?:0x[ABCDEFabcdef0123456789]{2},)+0x[ABCDEFabcdef0123456789]{2}', data):
             hexstring = PreProcessFunction(hexstring)
             try:
-                decoded = binascii.a2b_hex(hexstring.replace(b'0x', b'').replace(b',', b''))
-                decoded = PostProcessFunction(decoded)
-                yield (item, hexstring, decoded)
+                decodedOriginal = binascii.a2b_hex(hexstring.replace(b'0x', b'').replace(b',', b''))
+                decoded = PostProcessFunction(decodedOriginal)
+                yield (item, hexstring, decoded, decodedOriginal)
             except:
                 continue
 
@@ -1047,9 +1069,9 @@ def DecodeDataZXCN(items, PreProcessFunction, PostProcessFunction):
         for hexstring in re.findall(br'(?:0x[ABCDEFabcdef0123456789]{1,2},)+0x[ABCDEFabcdef0123456789]{1,2}', data):
             hexstring = PreProcessFunction(hexstring)
             try:
-                decoded = b''.join([binascii.a2b_hex(IFF(len(hexbyte) == 1, b'0' + hexbyte, hexbyte)) for hexbyte in hexstring.replace(b'0x', b'').split(b',')])
-                decoded = PostProcessFunction(decoded)
-                yield (item, hexstring, decoded)
+                decodedOriginal = b''.join([binascii.a2b_hex(IFF(len(hexbyte) == 1, b'0' + hexbyte, hexbyte)) for hexbyte in hexstring.replace(b'0x', b'').split(b',')])
+                decoded = PostProcessFunction(decodedOriginal)
+                yield (item, hexstring, decoded, decodedOriginal)
             except:
                 continue
 
@@ -1068,9 +1090,9 @@ def DecodeDataDecimal(items, PreProcessFunction, PostProcessFunction):
                 separator = bytes([sorted(dBytes.items(), key=operator.itemgetter(1), reverse=True)[0][0]])
                 for decimalstring in re.findall((br'(?:[0123456789]{1,3}\x%02x' % separator[0]) + br')+[0123456789]{1,3}', decimals):
                     try:
-                        decoded = bytes([int(decimal) for decimal in decimalstring.split(separator)])
-                        decoded = PostProcessFunction(decoded)
-                        yield (item, decimalstring, decoded)
+                        decodedOriginal = bytes([int(decimal) for decimal in decimalstring.split(separator)])
+                        decoded = PostProcessFunction(decodedOriginal)
+                        yield (item, decimalstring, decoded, decodedOriginal)
                     except:
                         continue
 
@@ -1103,9 +1125,9 @@ def DecodeDataNETBIOS(items, PreProcessFunction, PostProcessFunction):
             netbiosstring = PreProcessFunction(netbiosstring)
             if len(netbiosstring) % 2 == 0:
                 try:
-                    decoded = NETBIOSDecode(netbiosstring)
-                    decoded = PostProcessFunction(decoded)
-                    yield (item, netbiosstring, decoded)
+                    decodedOriginal = NETBIOSDecode(netbiosstring)
+                    decoded = PostProcessFunction(decodedOriginal)
+                    yield (item, netbiosstring, decoded, decodedOriginal)
                 except:
                     continue
 
@@ -1117,9 +1139,9 @@ def DecodeDataNETBIOSLowercase(items, PreProcessFunction, PostProcessFunction):
             netbiosstring = PreProcessFunction(netbiosstring)
             if len(netbiosstring) % 2 == 0:
                 try:
-                    decoded = NETBIOSDecode(netbiosstring.upper())
-                    decoded = PostProcessFunction(decoded)
-                    yield (item, netbiosstring, decoded)
+                    decodedOriginal = NETBIOSDecode(netbiosstring.upper())
+                    decoded = PostProcessFunction(decodedOriginal)
+                    yield (item, netbiosstring, decoded, decodedOriginal)
                 except:
                     continue
 
@@ -1285,6 +1307,30 @@ def ProduceJSONName(item):
     else:
         return repr(name)
 
+def Sort(data, options):
+    if options == '':
+        return data
+    flagLength = False
+    flagReverse = False
+    index = 1
+    for option in options.split(','):
+        if option == 'l':
+            flagLength = True
+        elif option == 'r':
+            flagReverse = True
+        elif option == 'e':
+            index = 1
+        elif option == 'd':
+            index = 2
+        elif option == 'do':
+            index = 3
+        else:
+            raise Exception('Unknown sort option: %s (%s)' % (option, options))
+    if flagLength:
+        return sorted(data, key=lambda items: len(items[index]), reverse=flagReverse)
+    else:
+        return sorted(data, key=lambda items: items[index], reverse=flagReverse)
+
 def BASE64Dump(filename, options):
     global decoders
     global dEncodings
@@ -1384,7 +1430,7 @@ def BASE64Dump(filename, options):
         if options.verbose:
             print(rulesVerbose)
         for encoding in dEncodings:
-            for item, encodeddata, decodeddata in dEncodings[encoding][1](data, PreProcessFunction, PostProcessFunction):
+            for item, encodeddata, decodeddata, decodeddataOriginal in dEncodings[encoding][1](data, PreProcessFunction, PostProcessFunction):
                 if options.number and len(decodeddata) < options.number:
                     continue
                 if options.unique and decodeddata in dDecodedData:
@@ -1413,11 +1459,13 @@ def BASE64Dump(filename, options):
                                     print('     %06x %s:' % (stringdata[0], stringdata[1]))
                                     print('      %s' % binascii.hexlify(C2BIP3(stringdata[2])))
                                     print('      %s' % repr(stringdata[2]))
+                            if DumpFunction != None:
+                                print(DumpFunction(oDecoder.Decode()))
 
     elif options.encoding == 'all':
         report = []
         for encoding in dEncodings:
-            for item, encodeddata, decodeddata in dEncodings[encoding][1](data, PreProcessFunction, PostProcessFunction):
+            for item, encodeddata, decodeddata, decodeddataOriginal in dEncodings[encoding][1](data, PreProcessFunction, PostProcessFunction):
                 if options.number and len(decodeddata) < options.number:
                     continue
                 if options.unique and decodeddata in dDecodedData:
@@ -1427,17 +1475,22 @@ def BASE64Dump(filename, options):
         for key, value in sorted(report):
             print(value)
     else:
-        decodedData = list(dEncodings[options.encoding][1](data, PreProcessFunction, PostProcessFunction))
+        decodedData = Sort(list(dEncodings[options.encoding][1](data, PreProcessFunction, PostProcessFunction)), options.sort)
         if options.select == 'L':
             largestSize = -1
             largestCounter = None
-            for index, (item, encodeddata, decodeddata) in enumerate(decodedData):
+            for index, (item, encodeddata, decodeddata, decodeddataOriginal) in enumerate(decodedData):
                 if len(encodeddata) > largestSize:
                     largestSize = len(encodeddata)
                     largestCounter = index + 1
             options.select = str(largestCounter)
         counter = 1
-        for item, encodeddata, decodeddata in decodedData:
+        if options.select.endswith('o'):
+            options.select = options.select[:-1]
+            selectOriginal = True
+        else:
+            selectOriginal = False
+        for item, encodeddata, decodeddata, decodeddataOriginal in decodedData:
             if options.number and len(decodeddata) < options.number:
                 continue
             if options.unique and decodeddata in dDecodedData:
@@ -1454,9 +1507,9 @@ def BASE64Dump(filename, options):
                     return
                 selectionCounter += 1
                 if options.jsonoutput:
-                    jsonObject.append({'id': counter, 'name': encodeddata[0:16].decode('latin'), 'content': binascii.b2a_base64(decodeddata).strip(b'\n').decode()})
+                    jsonObject.append({'id': counter, 'name': encodeddata[0:16].decode('latin'), 'content': binascii.b2a_base64(decodeddataOriginal if selectOriginal else decodeddata).strip(b'\n').decode()})
                 elif DumpFunction == None:
-                    filehash, magicPrintable, magicHex, fileSize, entropy, countUniqueBytes, countNullByte, countControlBytes, countWhitespaceBytes, countPrintableBytes, countHighBytes, countHexadecimalBytes, countBASE64Bytes, averageConsecutiveByteDifference, longestString, longestHEXString, longestBASE64String = CalculateFileMetaData(CutData(decodeddata, options.cut)[0])
+                    filehash, magicPrintable, magicHex, fileSize, entropy, countUniqueBytes, countNullByte, countControlBytes, countWhitespaceBytes, countPrintableBytes, countHighBytes, countHexadecimalBytes, countBASE64Bytes, averageConsecutiveByteDifference, longestString, longestHEXString, longestBASE64String = CalculateFileMetaData(CutData(decodeddataOriginal if selectOriginal else decodeddata, options.cut)[0])
                     print('Info decoded data:')
                     print(' %s: %s' % (CalculateChosenHash(b'')[1], filehash))
                     print(' %s: %d' % ('Filesize', fileSize))
@@ -1482,7 +1535,7 @@ def BASE64Dump(filename, options):
                     print(' %s: %f' % ('Entropy', entropy))
                     print(' %s: %d' % ('Unique bytes', countUniqueBytes))
                 else:
-                    StdoutWriteChunked(HeadTail(DumpFunction(DecodeFunction(decoders, options, CutData(decodeddata, options.cut)[0])), options.headtail))
+                    StdoutWriteChunked(HeadTail(DumpFunction(DecodeFunction(decoders, options, CutData(decodeddataOriginal if selectOriginal else decodeddata, options.cut)[0])), options.headtail))
             counter += 1
 
     if options.jsonoutput:
@@ -1542,6 +1595,7 @@ def Main():
     oParser.add_option('-T', '--headtail', action='store_true', default=False, help='do head & tail')
     oParser.add_option('-p', '--preprocess', type=str, default='', help='Python function to process encodings prior to decoding (like L4, lambda bytes: bytes[:-1], ...)')
     oParser.add_option('-P', '--postprocess', type=str, default='', help='Python function to post-process decodings')
+    oParser.add_option('--sort', type=str, default='', help='Sort output')
     (options, args) = oParser.parse_args()
 
     if options.man:

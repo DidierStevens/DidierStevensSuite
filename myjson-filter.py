@@ -4,8 +4,8 @@ from __future__ import print_function
 
 __description__ = 'myjson-filter'
 __author__ = 'Didier Stevens'
-__version__ = '0.0.5'
-__date__ = '2023/09/17'
+__version__ = '0.0.6'
+__date__ = '2024/04/14'
 
 """
 Source code put in the public domain by Didier Stevens, no Copyright
@@ -19,6 +19,7 @@ History:
   2022/04/09: 0.0.3 refactoring; added option -t
   2023/03/29: 0.0.4 added option -W
   2023/09/17: 0.0.5 added YARA support
+  2024/04/14: 0.0.6 added HASHEXT
 
 Todo:
 """
@@ -42,12 +43,14 @@ WRITE_VIR = 'vir'
 WRITE_HASH = 'hash'
 WRITE_HASHVIR = 'hashvir'
 WRITE_IDVIR = 'idvir'
+WRITE_HASHEXT = 'hashext'
 
 dValidWriteValues = {
   WRITE_VIR: 'filename is item name + extension vir',
   WRITE_HASH: 'filename is sha256 hash',
   WRITE_HASHVIR: 'filename is sha256 hash + extension vir',
-  WRITE_IDVIR: 'filename is item id + extension vir'
+  WRITE_IDVIR: 'filename is item id + extension vir',
+  WRITE_HASHEXT: 'filename is sha256 hash + provided extension',
 }
 
 def PrintManual():
@@ -166,6 +169,17 @@ def PrefixIfNeeded(string, prefix=' '):
 def CleanName(name):
     return ''.join([char if char.lower() in string.digits + string.ascii_letters + '.-_' else '_' for char in name])
 
+class cStartsWithGetRemainder():
+
+    def __init__(self, strIn, strStart):
+        self.strIn = strIn
+        self.strStart = strStart
+        self.match = False
+        self.remainder = None
+        if self.strIn.startswith(self.strStart):
+            self.match = True
+            self.remainder = self.strIn[len(self.strStart):]
+
 def WriteFiles(items, options):
     for item in items:
         if options.write == WRITE_VIR:
@@ -174,7 +188,10 @@ def WriteFiles(items, options):
             memberFilename = str(item['id']) + '.vir'
         else:
             memberFilename = hashlib.sha256(item['content']).hexdigest()
-            if options.write == WRITE_HASHVIR:
+            oStartsWithGetRemainder = cStartsWithGetRemainder(options.write, WRITE_HASHEXT)
+            if oStartsWithGetRemainder.match:
+                memberFilename += '.' + oStartsWithGetRemainder.remainder[1:]
+            elif options.write == WRITE_HASHVIR:
                 memberFilename += '.vir'
         print('Writing: %s' % memberFilename)
         with open(memberFilename, 'wb') as fWrite:
@@ -326,7 +343,7 @@ https://DidierStevens.com'''
         return
 
     if options.write != '':
-        if not options.write in dValidWriteValues:
+        if not options.write.split(':')[0] in dValidWriteValues:
             print('Invalid write option: %s' % options.write)
             print('Valid write options are:')
             for item in dValidWriteValues.items():
