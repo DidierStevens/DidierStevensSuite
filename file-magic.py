@@ -4,8 +4,8 @@ from __future__ import print_function
 
 __description__ = 'Essentialy a wrapper for file (libmagic)'
 __author__ = 'Didier Stevens'
-__version__ = '0.0.7'
-__date__ = '2023/09/18'
+__version__ = '0.0.8'
+__date__ = '2024/06/01'
 
 """
 Source code put in public domain by Didier Stevens, no Copyright
@@ -32,6 +32,7 @@ History:
   2022/12/18: updated man page
   2023/02/13: 0.0.6 added pyzipper
   2023/09/18: 0.0.7 bump for mso file-magic.def
+  2024/06/01: 0.0.8 updated MyJSON definition; added option -B
 
 Todo:
 """
@@ -53,6 +54,7 @@ import fnmatch
 import json
 import time
 import hashlib
+import shutil
 if sys.version_info[0] >= 3:
     from io import BytesIO as DataIO
 else:
@@ -140,6 +142,7 @@ On Windows, this requires VC Runtime 2015.
 file-magic.py can use optional magic definitions. These are contained in file file-magic.def in the same folder as file-magic.py.
 To restrict identification to these custom definitions, use option -C.
 
+Option -B (--bin) moves files into subdirectories (of the current directory) with the magic name.
 
 As stated at the beginning of this manual, this tool is very versatile when it comes to handling files. This will be explained now.
 
@@ -1372,6 +1375,13 @@ class cMyMagic():
             filemagic = self.oMagicCustom.from_buffer(data)
         return filemagic
 
+def RestrictCharacters(input, allowed='aA0', replacement='_'):
+    allowedCharacters = set()
+    for char in allowed:
+        allowedCharacters.add({'a': 'abcdefghijklmnopqrstuvwxyz', 'A': 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', '0': '0123456789'}[char])
+    allowedCharacters = ''.join(allowedCharacters)
+    return ''.join([char if char in allowedCharacters else replacement for char in input])
+
 def RegexMatch(filemagic, options):
     if options.regex == '':
         return filemagic
@@ -1425,6 +1435,12 @@ def FileMagicSingle(filename, content, cutexpression, oOutput, oLogfile, outputf
                     line = filename
                 elif options.csv:
                     line = MakeCSVLine([filename, line], DEFAULT_SEPARATOR, QUOTE)
+                elif options.bin:
+                    magictype = line.split(',')[0].strip()
+                    magictypeSanitized = RestrictCharacters(magictype)
+                    os.makedirs(magictypeSanitized, exist_ok=True)
+                    shutil.move(filename, magictypeSanitized)
+                    line = filename + ' -> ' + magictypeSanitized
                 elif outputfilename and not options.type:
                     line = filename + '\t' + line
                 oOutput.Line(line)
@@ -1437,7 +1453,7 @@ def ProduceJSON(items):
     for item in items:
         item['content'] = binascii.b2a_base64(item['content']).decode().strip('\n')
 
-    return json.dumps({'version': 2, 'id': 'didierstevens.com', 'type': 'content', 'fields': ['id', 'name', 'content'], 'items': items})
+    return json.dumps({'version': 2, 'id': 'didierstevens.com', 'type': 'content', 'fields': ['id', 'name', 'content', 'magic'], 'items': items})
 
 def FileMagic(filenames, oLogfile, options):
     oOutput = InstantiateCOutput(options)
@@ -1483,6 +1499,7 @@ https://DidierStevens.com'''
     oParser.add_option('-c', '--csv', action='store_true', default=False, help='Output CSV')
     oParser.add_option('-b', '--buffersize', type=int, default=1024*1024, help='Maximum size of data to read from file expressed in bytes (default 1MB)')
     oParser.add_option('-C', '--custom', action='store_true', default=False, help='Use only custom definitions')
+    oParser.add_option('-B', '--bin', action='store_true', default=False, help='Move to bins')
     oParser.add_option('--password', default='infected', help='The ZIP password to be used (default infected)')
     oParser.add_option('--noextraction', action='store_true', default=False, help='Do not extract from archive file')
     oParser.add_option('--literalfilenames', action='store_true', default=False, help='Do not interpret filenames')
