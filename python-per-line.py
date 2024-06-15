@@ -2,8 +2,8 @@
 
 __description__ = "Program to evaluate a Python expression for each line in the provided text file(s)"
 __author__ = 'Didier Stevens'
-__version__ = '0.0.11'
-__date__ = '2023/04/08'
+__version__ = '0.0.12'
+__date__ = '2024/06/15'
 
 """
 
@@ -33,6 +33,7 @@ History:
   2022/12/03: 0.0.9 added lineNumber
   2023/03/25: 0.0.10 added options --regex --split --join and Reverse* functions
   2023/04/08: 0.0.11 added option --group
+  2024/06/15: 0.0.12 added cEnumeration; cStartsWithGetRemainder
 
 Todo:
 """
@@ -149,6 +150,8 @@ With separator ;: -j ";"
 Use option -R for regular expression matching. Only lines that match the regular expression will be processed, and the result of the regex match is available in variable oMatch.
 
 Option -n is used when you just want to invoke a single Python function taking one argument (i.e. the line of text). Then you just have to provide the name of the Python function, and not a Python expression where this Python function is called with line as argument.
+
+Like option -n, option -O is used to invoke a single Python function taking one argument, but this time the argument is an object in stead of a string. The object has several properties: item is the line (string), left is the previous line, right is the next line, index is equal to the line counter - 1.
 
 Option -g is used to group all selected lines into Python variable "lines". The provided expression is not evaluated per line, but evaluated after each file has been read an its lines have been stored into Python variable "lines".
 
@@ -583,6 +586,97 @@ def OutputResult(result, oOutput, options):
         else:
             oOutput.Line(item, options.join)
 
+def FormatTime(epoch=None):
+    if epoch == None:
+        epoch = time.time()
+    return '%04d%02d%02d-%02d%02d%02d' % time.localtime(epoch)[0:6]
+
+class cEnumeration(object):
+    def __init__(self, iterable, function=lambda x: x, Cache=None):
+        self.iterable = iterable
+        self.function = function
+        self.namedTuple = collections.namedtuple('member', 'item item_t index counter remaining total first last left left_t right right_t cached cache_hits cache_misses Cache Redo redo_counter remaining_seconds eta')
+        self.flagRedo = False
+        self.oCache = Cache
+        self.cache_hits = 0
+        self.cache_misses = 0
+        self.timeStart = time.time()
+
+    def __iter__(self):
+        self.index = -1
+        self.total = len(self.iterable)
+        if self.oCache != None and self.oCache.cachedFirst:
+            self.iterable = sorted(self.iterable, key=lambda x: not self.oCache.Exists(x))
+        return self
+
+    def Redo(self, counter):
+        if self.nt.redo_counter < counter:
+            self.nt = self.namedTuple(self.nt.item, self.nt.item_t, self.nt.index, self.nt.counter, self.nt.remaining, self.nt.total, self.nt.first, self.nt.last, self.nt.left, self.nt.left_t, self.nt.right, self.nt.right_t, self.nt.cached, self.nt.cache_hits, self.nt.cache_misses, self.nt.Cache, self.nt.Redo, self.nt.redo_counter + 1, self.nt.remaining_seconds, self.nt.eta)
+            self.flagRedo = True
+            return True
+        else:
+            self.flagRedo = False
+            return False
+
+    def Cache(self, result):
+        if self.oCache == None:
+            return False
+        else:
+            return self.oCache.Cache(self.nt.item, result, self.nt.last)
+
+    def __next__(self):
+        timeNow = time.time()
+        if self.flagRedo:
+            self.flagRedo = False
+            return self.nt
+        if self.index < self.total - 1:
+            self.index += 1
+            first = self.index == 0
+            last = self.index == self.total - 1
+            if first:
+                left = None
+                left_t = None
+                self.item = self.iterable[self.index]
+                self.item_t = self.function(self.item)
+            else:
+                left = self.item
+                left_t = self.item_t
+                self.item = self.right
+                self.item_t = self.right_t
+            if last:
+                self.right = None
+                self.right_t = None
+            else:
+                self.right = self.iterable[self.index + 1]
+                self.right_t = self.function(self.right)
+            if self.oCache == None:
+                cachedResult = None
+            else:
+                cachedResult = self.oCache.Retrieve(self.item)
+            if cachedResult == None:
+                self.cache_misses += 1
+            else:
+                self.cache_hits += 1
+            try:
+                remainingSeconds = (self.total - self.index - 1) / (self.cache_misses / (timeNow - self.timeStart))
+            except ZeroDivisionError:
+                remainingSeconds = 0
+            eta = FormatTime(time.time() + remainingSeconds)
+            self.nt = self.namedTuple(self.item, self.item_t, self.index, self.index + 1, self.total - self.index - 1, self.total, first, last, left, left_t, self.right, self.right_t, cachedResult, self.cache_hits, self.cache_misses, self.Cache, self.Redo, 0, remainingSeconds, eta)
+            return self.nt
+        raise StopIteration
+
+class cStartsWithGetRemainder():
+
+    def __init__(self, strIn, strStart):
+        self.strIn = strIn
+        self.strStart = strStart
+        self.match = False
+        self.remainder = None
+        if self.strIn.startswith(self.strStart):
+            self.match = True
+            self.remainder = self.strIn[len(self.strStart):]
+
 def PythonPerLineSingle(expression, filename, oBeginGrep, oGrep, oEndGrep, oOutput, options):
     if filename == '':
         if options.encoding != '':
@@ -613,6 +707,20 @@ def PythonPerLineSingle(expression, filename, oBeginGrep, oGrep, oEndGrep, oOutp
             if not options.ignore:
                 raise
         OutputResult(result, oOutput, options)
+    elif options.object:
+        expressionToEvaluate = expression + '(oLine)'
+        for oLine in cEnumeration(list(ProcessFile(fIn, oBeginGrep, oGrep, oEndGrep, options.split, False))):
+            if oRE != None:
+                oMatch = oRE.search(oLine.item)
+                if oMatch == None:
+                    continue
+            try:
+                result = eval(expressionToEvaluate)
+            except:
+                result = []
+                if not options.ignore:
+                    raise
+            OutputResult(result, oOutput, options)
     else:
         for line in ProcessFile(fIn, oBeginGrep, oGrep, oEndGrep, options.split, False):
             lineNumber += 1
@@ -702,6 +810,7 @@ https://DidierStevens.com'''
     oParser = optparse.OptionParser(usage='usage: %prog [options] expression [[@]file ...]\n' + __description__ + moredesc, version='%prog ' + __version__)
     oParser.add_option('-m', '--man', action='store_true', default=False, help='Print manual')
     oParser.add_option('-n', '--name', action='store_true', default=False, help='The expression is the name of a Python function to apply on each selected line')
+    oParser.add_option('-O', '--object', action='store_true', default=False, help='The expression is a Python function that receives a line object per selected line')
     oParser.add_option('-o', '--output', type=str, default='', help='Output to file (# supported)')
     oParser.add_option('-s', '--script', type=str, default='', help='Script with definitions to include')
     oParser.add_option('-e', '--execute', default='', help='Commands to execute')
