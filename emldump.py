@@ -2,8 +2,8 @@
 
 __description__ = 'EML dump utility'
 __author__ = 'Didier Stevens'
-__version__ = '0.0.13'
-__date__ = '2023/09/18'
+__version__ = '0.0.14'
+__date__ = '2024/06/18'
 
 """
 
@@ -32,6 +32,7 @@ History:
   2020/11/21: 0.0.11 Python 3 support; updated cutting; updated yara; added selection warning
   2023/08/29: 0.0.12 bug fixes; added option -F
   2023/09/18: 0.0.13 added option --jsonoutput
+  2024/06/18: 0.0.14: changed encoding from utf8 to utf-8-sig
 
 Todo:
 """
@@ -833,7 +834,7 @@ def EMLDump(emlfilename, options):
     if options.fix:
         data = Deobfuscate(data)
 
-    data = data.decode(encoding='utf8', errors='ignore')
+    data = data.decode(encoding='utf-8-sig', errors='ignore')
 
     global decoders
     decoders = []
