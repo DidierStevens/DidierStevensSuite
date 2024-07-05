@@ -2,8 +2,8 @@
 
 __description__ = 'This is essentialy a wrapper for the hashlib module'
 __author__ = 'Didier Stevens'
-__version__ = '0.0.12'
-__date__ = '2024/05/28'
+__version__ = '0.0.13'
+__date__ = '2024/07/03'
 
 """
 Source code put in public domain by Didier Stevens, no Copyright
@@ -29,6 +29,7 @@ History:
   2024/01/09: 0.0.11 added option unvalidatedhashes
   2024/02/10: added sorted for unvalidatedhashes
   2024/05/28: 0.0.12 added --jsoninput
+  2024/07/03: 0.0.13 map fix
 
 Todo:
 """
@@ -970,7 +971,7 @@ def File2Strings(filename):
     except:
         return None
     try:
-        return map(lambda line:line.rstrip('\n'), f.readlines())
+        return list(map(lambda line:line.rstrip('\n'), f.readlines()))
     except:
         return None
     finally:

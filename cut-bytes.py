@@ -2,8 +2,8 @@
 
 __description__ = 'Cut a section of bytes out of a file'
 __author__ = 'Didier Stevens'
-__version__ = '0.0.16'
-__date__ = '2023/02/13'
+__version__ = '0.0.17'
+__date__ = '2024/06/26'
 
 """
 
@@ -36,6 +36,7 @@ History:
   2022/04/11: 0.0.14 added data for prefix and suffix
   2022/06/27: 0.0.15 Python 3 fix
   2023/02/13: 0.0.16 added options -P and -S; added pyzipper
+  2024/06/26: 0.0.17 added support for files to prefix and suffix options
 
 Todo:
 """
@@ -950,17 +951,21 @@ def CutBytes(expression, filename, options):
 
         if options.prefix != '':
             fch, prefix = FilenameCheckHash(options.prefix, False, data)
-            if fch != FCH_DATA:
-                raise Exception('Error %s parsing prefix: %s' % (prefix, options.prefix))
-            else:
+            if fch == FCH_DATA:
                 data = prefix + data
+            elif fch == FCH_FILENAME:
+                data = cBinaryFile(prefix, C2BIP3(options.password), options.noextraction, options.literalfilenames).Data() + data
+            else:
+                raise Exception('Error %s parsing prefix: %s' % (prefix, options.prefix))
 
         if options.suffix != '':
             fch, suffix = FilenameCheckHash(options.suffix, False, data)
-            if fch != FCH_DATA:
-                raise Exception('Error %s parsing suffix: %s' % (suffix, options.suffix))
-            else:
+            if fch == FCH_DATA:
                 data = data + suffix
+            elif fch == FCH_FILENAME:
+                data = data + cBinaryFile(suffix, C2BIP3(options.password), options.noextraction, options.literalfilenames).Data()
+            else:
+                raise Exception('Error %s parsing suffix: %s' % (suffix, options.suffix))
 
         if options.script != '':
             LoadScriptIfExists(options.script)
