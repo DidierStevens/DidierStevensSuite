@@ -2,8 +2,8 @@
 
 __description__ = 'Analyze OLE files (Compound Binary Files)'
 __author__ = 'Didier Stevens'
-__version__ = '0.0.76'
-__date__ = '2024/05/15'
+__version__ = '0.0.77'
+__date__ = '2024/07/11'
 
 """
 
@@ -125,6 +125,7 @@ History:
   2023/04/01: 0.0.74 added CalculateChosenHash
   2023/05/01: 0.0.75 bumping version for update to plugin(s), no changes to oledump.py
   2024/05/15: 0.0.76 added cMyJSONOutput
+  2024/07/11: 0.0.77 bumping version for update to plugin(s), no changes to oledump.py
 
 Todo:
 
