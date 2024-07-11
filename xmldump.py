@@ -2,8 +2,8 @@
 
 __description__ = 'This is essentially a wrapper for xml.etree.ElementTree'
 __author__ = 'Didier Stevens'
-__version__ = '0.0.7'
-__date__ = '2020/06/07'
+__version__ = '0.0.8'
+__date__ = '2024/07/11'
 
 """
 
@@ -22,6 +22,7 @@ History:
   2020/04/16: 0.0.5 added celltext; option --encoding
   2020/04/16: 0.0.6 updated man page
   2020/06/07: 0.0.7 added option -j
+  2024/07/11: 0.0.8 added officeprotection
 
 Todo:
 """
@@ -55,6 +56,7 @@ The first argument to the tool is a command, which can be:
  attributes
  pretty
  celltext
+ officeprotection
 
 Command text will extract all text from the elements in the XML file.
 Example:
@@ -213,6 +215,15 @@ A2,HALT(),1
 Option -j can be used with celltext to pass JSON output from zipdump to xmldump, and have shared strings references resolved.
 Option -j takes the id number of the XML file to convert to CSV.
 
+Command officeprotection will extract all protection hashes from the elements in the XML file.
+Example:
+zipdump.py -s 4 -d test.xlsx | xmldump.py officeprotection
+
+It can also be used with option -j to process all XML files inside an Office document:
+Example:
+zipdump.py --jsonoutput test.xlsx | xmldump.py -j all officeprotection
+
+
 By default, output is printed to the console (stdout). It can be directed to a file using option -o.
 '''
     for line in manual.split('\n'):
@@ -278,6 +289,7 @@ def MakeCSVLine(row, separator, quote):
 class cOutput():
     def __init__(self, filename=None):
         self.filename = filename
+        self.separatingline = False
         if self.filename and self.filename != '':
             self.f = open(self.filename, 'w')
         else:
@@ -299,6 +311,15 @@ class cOutput():
             self.f.close()
             self.f = None
 
+    def StartSeparatingLine(self):
+        self.separatingline = False
+
+    def SeparatingLine(self, line):
+        if self.separatingline:
+            self.Line(line)
+        else:
+            self.separatingline = True
+
 def ExpandFilenameArguments(filenames):
     return list(collections.OrderedDict.fromkeys(sum(map(glob.glob, sum(map(ProcessAt, filenames), [])), [])))
 
@@ -315,6 +336,12 @@ class cOutputResult():
 
     def Close(self):
         self.oOutput.Close()
+
+    def StartSeparatingLine(self):
+        self.oOutput.StartSeparatingLine()
+
+    def SeparatingLine(self, line):
+        self.oOutput.SeparatingLine(line)
 
 def ProcessFile(fIn, fullread):
     if fullread:
@@ -458,7 +485,38 @@ def ExtractCellText(data, oOutput, options):
                     formula = dSharedStrings.get(int(value), '')
         oOutput.Line(MakeCSVLine([reference, formula, value], DEFAULT_SEPARATOR, QUOTE))
 
-dCommands = {'text': ExtractText, 'wordtext': ExtractWordText, 'elementtext': ExtractElementText, 'attributes': ExtractElementAttributes, 'pretty': PrettyPrint, 'celltext': ExtractCellText}
+def OfficeProtectionSub(data, oOutput, options, name=''):
+    root, dXMLNS = AnalyzeXMLNS(data)
+    for element in root.iter():
+        if 'algorithmName' in element.attrib and 'hashValue' in element.attrib and 'saltValue' in element.attrib and 'spinCount' in element.attrib and element.attrib['algorithmName'] == 'SHA-512':
+            oOutput.SeparatingLine('')
+            if name != '':
+                oOutput.Line(name)
+            oOutput.Line(TransformTag(element.tag, dXMLNS, options.includeuri))
+            hashcathash = '$office$2016$0$%s$%s$%s' % (element.attrib['spinCount'], element.attrib['saltValue'], element.attrib['hashValue'])
+            oOutput.Line(hashcathash)
+            oOutput.Line('hashcat straigth mode: hashcat.exe -a 0 -m 25300 %s yourwordlist.txt' % hashcathash)
+        elif 'workbookAlgorithmName' in element.attrib and 'workbookHashValue' in element.attrib and 'workbookSaltValue' in element.attrib and 'workbookSpinCount' in element.attrib and element.attrib['workbookAlgorithmName'] == 'SHA-512':
+            oOutput.SeparatingLine('')
+            if name != '':
+                oOutput.Line(name)
+            oOutput.Line(TransformTag(element.tag, dXMLNS, options.includeuri))
+            hashcathash = '$office$2016$0$%s$%s$%s' % (element.attrib['workbookSpinCount'], element.attrib['workbookSaltValue'], element.attrib['workbookHashValue'])
+            oOutput.Line(hashcathash)
+            oOutput.Line('hashcat straigth mode: hashcat.exe -a 0 -m 25300 %s yourwordlist.txt' % hashcathash)
+
+def OfficeProtection(data, oOutput, options):
+    if options.jsoninput != '':
+        items = CheckJSON(data)
+        if items == None:
+            return
+        for item in items:
+            if  item['name'].endswith('.xml'):
+                OfficeProtectionSub(item['content'].decode(), oOutput, options, item['name'])
+    else:
+        OfficeProtectionSub(data, oOutput, options)
+
+dCommands = {'text': ExtractText, 'wordtext': ExtractWordText, 'elementtext': ExtractElementText, 'attributes': ExtractElementAttributes, 'pretty': PrettyPrint, 'celltext': ExtractCellText, 'officeprotection': OfficeProtection}
 
 def ProcessTextFileSingle(command, filenames, oOutput, options):
     for filename in filenames:
