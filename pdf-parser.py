@@ -1585,7 +1585,16 @@ def Main():
                 oPDFParseDictionary = cPDFParseDictionary(object.ContainsStream(), options.nocanonicalizedoutput)
                 numberOfObjects = int(oPDFParseDictionary.Get('/N')[0])
                 offsetFirstObject = int(oPDFParseDictionary.Get('/First')[0])
-                indexes = list(map(int, C2SIP3(object.Stream())[:offsetFirstObject].strip().split(' ')))
+                data_indexes = C2SIP3(object.Stream())[:offsetFirstObject].strip().split(' ')
+                # Some indexes might be associated with newline b'12 0\n10 55\n17 169\n19'
+                final_indexes = []
+                for d in data_indexes:
+                    if '\n' in d:
+                        s = d.split('\n')
+                        final_indexes.extend(s)
+                    else:
+                        final_indexes.append(d)
+                indexes = list(map(int, final_indexes))
                 if len(indexes) % 2 != 0 or len(indexes) / 2 != numberOfObjects:
                     raise Exception('Error in index of /ObjStm stream')
                 streamObject = C2SIP3(object.Stream()[offsetFirstObject:])
