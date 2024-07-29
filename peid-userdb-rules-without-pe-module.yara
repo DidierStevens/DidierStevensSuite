@@ -1517,7 +1517,8 @@ rule PEiD_00137_Armadillo_v1_60a_
         $a
 }
 
-rule PEiD_00138_Armadillo_v1_71_
+// This signature is a false positive
+/*rule PEiD_00138_Armadillo_v1_71_
 {
     meta:
         description = "[Armadillo v1.71]"
@@ -1526,7 +1527,7 @@ rule PEiD_00138_Armadillo_v1_71_
         $a = {55 8B EC 6A FF 68 ?? ?? ?? ?? 68 ?? ?? ?? ?? 64 A1}
     condition:
         $a
-}
+}*/
 
 rule PEiD_00139_Armadillo_v1_72___v1_73_
 {
@@ -1682,6 +1683,7 @@ rule PEiD_00152_Armadillo_v1_9x_
         $a
 }
 
+/* false positive - https://www.zscaler.com/blogs/research/your-windows-8-packed
 rule PEiD_00153_Armadillo_v1_xx___v2_xx_
 {
     meta:
@@ -1692,6 +1694,7 @@ rule PEiD_00153_Armadillo_v1_xx___v2_xx_
     condition:
         $a
 }
+*/
 
 rule PEiD_00154_Armadillo_v2_00_
 {
@@ -7306,7 +7309,7 @@ rule PEiD_00663_ExeTools_v2_1_Encruptor_by_DISMEMBER_
 rule PEiD_00664_EXE______________Liuli_
 {
     meta:
-        description = "[EXEÎÄ¼þºÏ²¢Æ÷ -> Liuli]"
+        description = "[EXEæ–‡ä»¶åˆå¹¶å™¨ -> Liuli]"
         ep_only = "false"
     strings:
         $a = {E8 53 03 00 00 8B F0 56 56 E8 98 03 00 00 8B C8}
@@ -7713,7 +7716,7 @@ rule PEiD_00700_EZIP_v1_0_
 rule PEiD_00701_E___________________
 {
     meta:
-        description = "[EÓÎµØ´ø -> ÔÂºÚ·ç¸ß]"
+        description = "[Eæ¸¸åœ°å¸¦ -> æœˆé»‘é£Žé«˜]"
         ep_only = "true"
     strings:
         $a = {55 8B EC B8 ?? ?? ?? ?? E8 ?? ?? ?? ?? 53 56 57 0F 31 8B D8 0F 31 8B D0 2B D3 C1 EA 10 B8 ?? ?? ?? ?? 0F 6E C0 B8 ?? ?? ?? ?? 0F 6E C8 0F F5 C1 0F 7E C0 0F 77 03 C2 ?? ?? ?? ?? ?? FF E0}
@@ -8329,7 +8332,7 @@ rule PEiD_00756_FreePascal_2_0_0_Win32_____Berczi_Gabor__Pierre_Muller___Peter_V
 rule PEiD_00757_FreePascal_2_0_0_Win32_____B_rczi_G_bor__Pierre_Muller___Peter_Vreman__
 {
     meta:
-        description = "[FreePascal 2.0.0 Win32 -> (Bérczi Gábor, Pierre Muller & Peter Vreman)]"
+        description = "[FreePascal 2.0.0 Win32 -> (Bé–žczi Gé†”or, Pierre Muller & Peter Vreman)]"
         ep_only = "true"
     strings:
         $a = {C6 05 00 80 40 00 01 E8 74 00 00 00 C6 05 00 80 40 00 00 E8 68 00 00 00 50 E8 00 00 00 00 FF 25 D8 A1 40 00 90 90 90 90 90 90 90 90 90 90 90 90 55 89 E5 83 EC 04 89 5D FC E8 92 00 00 00 E8 ED 00 00 00 89 C3 B9 ?? 70 40 00 89 DA B8 00 00 00 00 E8 0A 01 00 00 E8 C5 01 00 00 89 D8 E8 3E 02 00 00 E8 B9 01 00 00 E8 54 02 00 00 8B 5D FC C9 C3 8D 76 00 00 00 00 00 00 00 00 00 00 00 00 00 55 89 E5 C6 05 10 80 40 00 00 E8 D1 03 00 00 6A 00 64 FF 35 00 00 00 00 89 E0 A3 ?? 70 40 00 55 31 ED 89 E0 A3 20 80 40 00 66 8C D5 89 2D 30 80 40 00 E8 B9 03 00 00 31 ED E8 72 FF FF FF 5D E8 BC 03 00 00 C9 C3 00 00 00 00 00 00 00 00 00 00 55 89 E5 83 EC 08 E8 15 04 00 00 A1 ?? 70 40 00 89 45 F8 B8 01 00 00 00 89 45 FC 3B 45 F8 7F 2A FF 4D FC 90 FF 45 FC 8B 45 FC 83 3C C5 ?? 70 40 00 00 74 09 8B 04 C5 ?? 70 40}
@@ -16304,7 +16307,7 @@ rule PEiD_01481_PCrypt_v3_51_
 rule PEiD_01482_PcShare____________v4_0_____________
 {
     meta:
-        description = "[PcShare ÎÄ¼þÀ¦°óÆ÷ v4.0 -> ÎÞ¿É·ÇÒé]"
+        description = "[PcShare æ–‡ä»¶æ†ç»‘å™¨ v4.0 -> æ— å¯éžè®®]"
         ep_only = "true"
     strings:
         $a = {55 8B EC 6A FF 68 90 34 40 00 68 B6 28 40 00 64 A1}
@@ -22409,7 +22412,7 @@ rule PEiD_02036_SDProtect____Randy_Li_
 rule PEiD_02037_SDProtect________________Randy_Li_
 {
     meta:
-        description = "[SDProtect(Èí¼þ±£»¤Éñ) -> Randy Li]"
+        description = "[SDProtect(è½¯ä»¶ä¿æŠ¤ç¥ž) -> Randy Li]"
         ep_only = "false"
     strings:
         $a = {55 8B EC 6A FF 68 ?? ?? ?? ?? 68 88 88 88 08 64 A1 00 00 00 00 50 64 89 25 00 00 00 00 58 64 A3 00 00 00 00 58 58 58 58 8B E8 ?? ?? ?? ?? ?? ?? ?? 00 00 00 ?? ?? ?? ?? 00 00 00}
@@ -27062,7 +27065,7 @@ rule PEiD_02459_Upx_Lock_1_0___1_2____CyberDoom___Team_X___BoB___BobSoft_
 rule PEiD_02460_UPX_SCRAMBLER_3_06_____OnT_oL_
 {
     meta:
-        description = "[UPX-SCRAMBLER 3.06 -> ©OnT®oL]"
+        description = "[UPX-SCRAMBLER 3.06 -> ãŽ¡nTç•‚L]"
         ep_only = "true"
     strings:
         $a = {E8 00 00 00 00 59 83 C1 07 51 C3 C3 BE ?? ?? ?? ?? 83 EC 04 89 34 24 B9 80 00 00 00 81 36 ?? ?? ?? ?? 50 B8 04 00 00 00 50 03 34 24 58 58 83 E9 03 E2 E9 EB D6}
@@ -39140,7 +39143,7 @@ rule PEiD_03557_Zurenava_DOS_Extender_v0_45__v0_49_
 rule PEiD_03558_______EXE______________________________
 {
     meta:
-        description = "[²Ø¾¨¸óEXEÎÄ¼þÀ¦°ó»ú »áÔ±×¨°æ -> ³Â¾­èº]"
+        description = "[è—é²¸é˜EXEæ–‡ä»¶æ†ç»‘æœº ä¼šå‘˜ä¸“ç‰ˆ -> é™ˆç»éŸ¬]"
         ep_only = "true"
     strings:
         $a = {55 8B EC 83 C4 E4 53 56 57 33 C0 89 45 E4 89 45}
@@ -39151,7 +39154,7 @@ rule PEiD_03558_______EXE______________________________
 rule PEiD_03559_____EXE___________v1_0_________
 {
     meta:
-        description = "[½ÌÖ÷EXEÎÄ¼þÀ¦°óÆ÷ v1.0 -> ½ÌÖ÷]"
+        description = "[æ•™ä¸»EXEæ–‡ä»¶æ†ç»‘å™¨ v1.0 -> æ•™ä¸»]"
         ep_only = "true"
     strings:
         $a = {55 8B EC 6A FF 68 08 4B 40 00 68 36 3A 40 00 64 A1}
@@ -39162,7 +39165,7 @@ rule PEiD_03559_____EXE___________v1_0_________
 rule PEiD_03560____v1_0____Li_Jianjun_
 {
     meta:
-        description = "[Éþ v1.0 -> Li-Jianjun]"
+        description = "[ç»³ v1.0 -> Li-Jianjun]"
         ep_only = "true"
     strings:
         $a = {60 E8 00 00 00 00 5D 81 ED 0A 4A 44 00 BB 04 4A 44}
@@ -39173,7 +39176,7 @@ rule PEiD_03560____v1_0____Li_Jianjun_
 rule PEiD_03561____________v1_0_________
 {
     meta:
-        description = "[ÎÄ¼þÀ¦°óÆ÷ v1.0 -> ÐíÔÆ]"
+        description = "[æ–‡ä»¶æ†ç»‘å™¨ v1.0 -> è®¸äº‘]"
         ep_only = "true"
     strings:
         $a = {64 A1 00 00 00 00 55 89 E5 6A FF 68 1C 30 40 00}
@@ -39184,7 +39187,7 @@ rule PEiD_03561____________v1_0_________
 rule PEiD_03562_____EXE__________yy66_
 {
     meta:
-        description = "[ÐÄÆæEXEºÏ²¢Æ÷ -> yy66]"
+        description = "[å¿ƒå¥‡EXEåˆå¹¶å™¨ -> yy66]"
         ep_only = "true"
     strings:
         $a = {68 78 18 40 00 E8 F0 FF FF FF 00 00 00 00 00 00 30}
@@ -39195,7 +39198,7 @@ rule PEiD_03562_____EXE__________yy66_
 rule PEiD_03563__________2_2b____Shoooo_
 {
     meta:
-        description = "[Ü¥±±Ñ¹Ëõ 2.2b -> Shoooo]"
+        description = "[å €åŒ—åŽ‹ç¼© 2.2b -> Shoooo]"
         ep_only = "true"
     strings:
         $a = {68 ?? ?? ?? ?? E8 01 00 00 00 C3 C3 11 55 07 8B EC B8 14 80 0E 03 E8 D1 09 00 0A 57 33 D2 FF 75 18 B9 E8 1F DE 16 81 C0 8D BD EE 7F FB F8}
@@ -39206,7 +39209,7 @@ rule PEiD_03563__________2_2b____Shoooo_
 rule PEiD_03564__________2_2b_Anti____xiaohui_
 {
     meta:
-        description = "[Ü¥±±Ñ¹Ëõ 2.2b Anti -> xiaohui]"
+        description = "[å €åŒ—åŽ‹ç¼© 2.2b Anti -> xiaohui]"
         ep_only = "true"
     strings:
         $a = {EB F4 11 55 07 8B EC B8 14 80 0E 03 E8 D1 09 00 0A 57 33 D2 FF 75 18 B9 E8 1F DE 16 81 C0 8D BD EE 7F FB F8}
