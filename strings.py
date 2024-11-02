@@ -4,8 +4,8 @@ from __future__ import print_function
 
 __description__ = 'Strings command in Python'
 __author__ = 'Didier Stevens'
-__version__ = '0.0.9'
-__date__ = '2024/03/17'
+__version__ = '0.0.10'
+__date__ = '2024/11/01'
 
 """
 Source code put in the public domain by Didier Stevens, no Copyright
@@ -34,6 +34,7 @@ History:
   2021/01/05: 0.0.7 added : to option -P
   2022/07/30: 0.0.8 added option -N and goodware fix
   2024/03/17: 0.0.9 added option -V
+  2024/11/01: 0.0.10 added pyzipper support
 
 Todo:
 """
@@ -41,7 +42,6 @@ Todo:
 import optparse
 import sys
 import os
-import zipfile
 import binascii
 import random
 import gzip
@@ -65,6 +65,10 @@ if sys.version_info[0] >= 3:
     from io import StringIO
 else:
     from cStringIO import StringIO
+try:
+    import pyzipper as zipfile
+except ImportError:
+    import zipfile
 
 def PrintManual():
     manual = r'''
@@ -648,6 +652,12 @@ def FilenameCheckHash(filename, literalfilename):
     else:
         return FCH_FILENAME, filename
 
+def CreateZipFileObject(arg1, arg2):
+    if 'AESZipFile' in dir(zipfile):
+        return zipfile.AESZipFile(arg1, arg2)
+    else:
+        return zipfile.ZipFile(arg1, arg2)
+
 def AnalyzeFileError(filename):
     PrintError('Error opening file %s' % filename)
     PrintError(sys.exc_info()[1])
@@ -685,7 +695,7 @@ class cBinaryFile:
             elif fch == FCH_DATA:
                 self.fIn = DataIO(data)
             elif not self.noextraction and self.filename.lower().endswith('.zip'):
-                self.oZipfile = zipfile.ZipFile(self.filename, 'r')
+                self.oZipfile = CreateZipFileObject(self.filename, 'r')
                 if len(self.oZipfile.infolist()) == 1:
                     self.fIn = self.oZipfile.open(self.oZipfile.infolist()[0], 'r', self.zippassword)
                     self.extracted = True
