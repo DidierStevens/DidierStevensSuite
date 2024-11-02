@@ -2,8 +2,8 @@
 
 __description__ = 'pdf-parser, use it to parse a PDF document'
 __author__ = 'Didier Stevens'
-__version__ = '0.7.9'
-__date__ = '2024/03/21'
+__version__ = '0.7.10'
+__date__ = '2024/10/26'
 __minimum_python_version__ = (2, 5, 1)
 __maximum_python_version__ = (3, 11, 1)
 
@@ -75,6 +75,8 @@ History:
   2022/11/09: V0.7.7 added support for environment variable DSS_DEFAULT_HASH_ALGORITHMS
   2023/01/03: V0.7.8 added unreferenced objects to statistics
   2024/03/21: V0.7.9 added option jsonoutput; added verbose YARA rules
+  2024/10/25: V0.7.10 /ObjStm fix (x9090 PR)
+  2024/10/26: added pyzipper support
 
 Todo:
   - handle printf todo
@@ -88,7 +90,6 @@ import zlib
 import binascii
 import hashlib
 import sys
-import zipfile
 import time
 import os
 import textwrap
@@ -107,6 +108,10 @@ try:
     import yara
 except:
     pass
+try:
+    import pyzipper as zipfile
+except ImportError:
+    import zipfile
 
 CHAR_WHITESPACE = 1
 CHAR_DELIMITER = 2
@@ -202,6 +207,12 @@ def CopyWithoutWhiteSpace(content):
 def Obj2Str(content):
     return ''.join(map(lambda x: repr(x[1])[1:-1], CopyWithoutWhiteSpace(content)))
 
+def CreateZipFileObject(arg1, arg2):
+    if 'AESZipFile' in dir(zipfile):
+        return zipfile.AESZipFile(arg1, arg2)
+    else:
+        return zipfile.ZipFile(arg1, arg2)
+
 class cPDFDocument:
     def __init__(self, file):
         self.file = file
@@ -219,7 +230,7 @@ class cPDFDocument:
                 sys.exit()
         elif file.lower().endswith('.zip'):
             try:
-                self.zipfile = zipfile.ZipFile(file, 'r')
+                self.zipfile = CreateZipFileObject(file, 'r')
                 self.infile = self.zipfile.open(self.zipfile.infolist()[0], 'r', C2BIP3('infected'))
             except:
                 print('Error opening file %s' % file)
@@ -1585,7 +1596,7 @@ def Main():
                 oPDFParseDictionary = cPDFParseDictionary(object.ContainsStream(), options.nocanonicalizedoutput)
                 numberOfObjects = int(oPDFParseDictionary.Get('/N')[0])
                 offsetFirstObject = int(oPDFParseDictionary.Get('/First')[0])
-                indexes = list(map(int, C2SIP3(object.Stream())[:offsetFirstObject].strip().split(' ')))
+                indexes = list(map(int, C2SIP3(object.Stream())[:offsetFirstObject].strip().replace('\n', ' ').split(' ')))
                 if len(indexes) % 2 != 0 or len(indexes) / 2 != numberOfObjects:
                     raise Exception('Error in index of /ObjStm stream')
                 streamObject = C2SIP3(object.Stream()[offsetFirstObject:])

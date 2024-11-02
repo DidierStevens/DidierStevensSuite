@@ -2,8 +2,8 @@
 
 __description__ = 'Tool to test a PDF file'
 __author__ = 'Didier Stevens'
-__version__ = '0.2.8'
-__date__ = '2020/11/21'
+__version__ = '0.2.9'
+__date__ = '2024/10/26'
 
 """
 
@@ -57,6 +57,7 @@ History:
   2019/09/30: V0.2.6 color bugfix, thanks to Leo
   2019/11/05: V0.2.7 fixed plugin path when compiled with pyinstaller
   2020/11/21: V0.2.8 added data argument to PDFiD function
+  2024/10/26: V0.2.9 added pyzipper support
 
 Todo:
   - update XML example (entropy, EOF)
@@ -73,7 +74,6 @@ import operator
 import os.path
 import sys
 import json
-import zipfile
 import collections
 import glob
 import fnmatch
@@ -89,6 +89,10 @@ if sys.version_info[0] >= 3:
     from io import BytesIO as DataIO
 else:
     from cStringIO import StringIO as DataIO
+try:
+    import pyzipper as zipfile
+except ImportError:
+    import zipfile
 
 #Convert 2 Bytes If Python 3
 def C2BIP3(string):
@@ -96,6 +100,12 @@ def C2BIP3(string):
         return bytes([ord(x) for x in string])
     else:
         return string
+
+def CreateZipFileObject(arg1, arg2):
+    if 'AESZipFile' in dir(zipfile):
+        return zipfile.AESZipFile(arg1, arg2)
+    else:
+        return zipfile.ZipFile(arg1, arg2)
 
 class cBinaryFile:
     def __init__(self, file, data=None):
@@ -116,7 +126,7 @@ class cBinaryFile:
                 sys.exit()
         elif file.lower().endswith('.zip'):
             try:
-                self.zipfile = zipfile.ZipFile(file, 'r')
+                self.zipfile = CreateZipFileObject(file, 'r')
                 self.infile = self.zipfile.open(self.zipfile.infolist()[0], 'r', C2BIP3('infected'))
             except:
                 print('Error opening file %s' % file)
@@ -251,7 +261,7 @@ class cEntropy:
             self.streamBucket[byte] -= 1
 
     def calc(self):
-        self.nonStreamBucket = map(operator.sub, self.allBucket, self.streamBucket)
+        self.nonStreamBucket = list(map(operator.sub, self.allBucket, self.streamBucket))
         allCount = sum(self.allBucket)
         streamCount = sum(self.streamBucket)
         nonStreamCount = sum(self.nonStreamBucket)
