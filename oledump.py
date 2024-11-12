@@ -126,6 +126,7 @@ History:
   2023/05/01: 0.0.75 bumping version for update to plugin(s), no changes to oledump.py
   2024/05/15: 0.0.76 added cMyJSONOutput
   2024/07/11: 0.0.77 bumping version for update to plugin(s), no changes to oledump.py
+  2024/11/13: 0.0.78 updating def PrintManual to be compatible with Python 3.12+
 
 Todo:
 
@@ -185,7 +186,7 @@ ACTIVEMIME_MAGIC = b'ActiveMime'
 REGEX_STANDARD = b'[\x09\x20-\x7E]'
 
 def PrintManual():
-    manual = '''
+    manual = r'''
 Manual:
 
 oledump is a tool to analyze OLE files (officially: Compound File Binary Format, CFBF). Many file formats are in fact OLE files, like Microsoft Office files, MSI files, ... Even the new Microsoft Office Open XML (OOXML) format uses OLE files for VBA macros.
