@@ -2,8 +2,8 @@
 
 __description__ = 'Extract base64 strings from file'
 __author__ = 'Didier Stevens'
-__version__ = '0.0.25'
-__date__ = '2024/04/16'
+__version__ = '0.0.26'
+__date__ = '2024/11/19'
 
 """
 
@@ -44,6 +44,7 @@ History:
   2022/07/17: continue
   2022/10/13: 0.0.24 update CalculateByteStatistics
   2024/04/16: 0.0.25 added selection of original; ExtractLongestString; --sort
+  2024/11/19: 0.0.26 bugfix ExtractStrings
 
 Todo:
   add base64 url
@@ -534,7 +535,9 @@ def CalculateByteStatistics(dPrevalence=None, data=None):
         dPrevalence = {iter: 0 for iter in range(0x100)}
         sumDifferences = 0.0
         previous = None
-        if len(data) > 1:
+        if len(data) == 1:
+            dPrevalence[data[0]] += 1
+        elif len(data) > 1:
             lengthString = 0
             lengthBASE64String = 0
             lengthHEXString = 0
@@ -604,10 +607,21 @@ def CalculateByteStatistics(dPrevalence=None, data=None):
             prevalence = float(dPrevalence[iter]) / float(sumValues)
             entropy += - prevalence * math.log(prevalence, 2)
             countUniqueBytes += 1
-    return sumValues, entropy, countUniqueBytes, countNullByte, countControlBytes, countWhitespaceBytes, countPrintableBytes, countHighBytes, countHexadecimalBytes, countBASE64Bytes, averageConsecutiveByteDifference, longestString, longestHEXString, longestBASE64String
+    if sumValues >= 256:
+        entropymax = 8.0
+        entropynormalized = entropy
+        entropystr = '%.02f' % entropy
+    else:
+        entropymax = math.log(sumValues, 2)
+        if entropymax == 0.0:
+            entropynormalized = entropy
+        else:
+            entropynormalized = entropy / entropymax * 8.0
+        entropystr = '%.02f (normalized %.02f max %.02f)' % (entropy, entropynormalized, entropymax)
+    return sumValues, entropy, entropymax, entropynormalized, entropystr, countUniqueBytes, countNullByte, countControlBytes, countWhitespaceBytes, countPrintableBytes, countHighBytes, countHexadecimalBytes, countBASE64Bytes, averageConsecutiveByteDifference, longestString, longestHEXString, longestBASE64String, dPrevalence
 
 def CalculateFileMetaData(data):
-    fileSize, entropy, countUniqueBytes, countNullByte, countControlBytes, countWhitespaceBytes, countPrintableBytes, countHighBytes, countHexadecimalBytes, countBASE64Bytes, averageConsecutiveByteDifference, longestString, longestHEXString, longestBASE64String = CalculateByteStatistics(data=data)
+    fileSize, entropy, entropymax, entropynormalized, entropystr, countUniqueBytes, countNullByte, countControlBytes, countWhitespaceBytes, countPrintableBytes, countHighBytes, countHexadecimalBytes, countBASE64Bytes, averageConsecutiveByteDifference, longestString, longestHEXString, longestBASE64String, dPrevalence = CalculateByteStatistics(data=data)
     magicPrintable, magicHex = Magic(data[0:4])
     return CalculateChosenHash(data)[0], magicPrintable, magicHex, fileSize, entropy, countUniqueBytes, countNullByte, countControlBytes, countWhitespaceBytes, countPrintableBytes, countHighBytes, countHexadecimalBytes, countBASE64Bytes, averageConsecutiveByteDifference, longestString, longestHEXString, longestBASE64String
 
@@ -813,7 +827,7 @@ def ExtractStringsUNICODE(data):
     return [foundunicodestring.replace(b'\x00', b'') for foundunicodestring, dummy in re.findall(regex % 4, data)]
 
 def ExtractStrings(data):
-    return ExtractStringsASCII(data) + ExtractStringsUNICODE(data)
+    return [string.decode('latin') for string in (ExtractStringsASCII(data) + ExtractStringsUNICODE(data))]
 
 def ExtractLongestString(data):
     return sorted([b''] + ExtractStrings(data), key=len)[-1]
@@ -1524,7 +1538,7 @@ def BASE64Dump(filename, options):
                     print(' %s: %s' % ('High bytes', countHighBytes))
                     print(' %s: %s' % ('Hexadecimal bytes', countHexadecimalBytes))
                     print(' %s: %s' % ('BASE64 bytes', countBASE64Bytes))
-                    print(' %s: %f' % ('ACBD', averageConsecutiveByteDifference))
+                    print(' %s: %s' % ('ACBD', 'N/A' if averageConsecutiveByteDifference == None else '%f' % averageConsecutiveByteDifference))
                     print(' %s: %s' % ('Longest printable byte sequence', longestString))
                     print(' %s: %s' % ('Longest hexadecimal byte sequence', longestHEXString))
                     print(' %s: %s' % ('Longest BASE64 byte sequence', longestBASE64String))
