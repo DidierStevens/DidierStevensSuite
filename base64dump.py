@@ -2,8 +2,8 @@
 
 __description__ = 'Extract base64 strings from file'
 __author__ = 'Didier Stevens'
-__version__ = '0.0.26'
-__date__ = '2024/11/19'
+__version__ = '0.0.27'
+__date__ = '2024/11/24'
 
 """
 
@@ -45,6 +45,7 @@ History:
   2022/10/13: 0.0.24 update CalculateByteStatistics
   2024/04/16: 0.0.25 added selection of original; ExtractLongestString; --sort
   2024/11/19: 0.0.26 bugfix ExtractStrings
+  2024/11/24: 0.0.27 added select option A
 
 Todo:
   add base64 url
@@ -130,7 +131,7 @@ a85 stands for ASCII85, it looks like this: BOu!rD]...
 
 zxle and zxbe encoding looks for 1 to 8 hexadecimal characters after the prefix 0x. If the number of hexadecimal characters is uneven, a 0 (digit zero) will be prefixed to have an even number of hexadecimal digits.
 
-Select a datastream for further analysis with option -s followed by the ID number of the datastream, L for the largest one, or a for all.
+Select a datastream for further analysis with option -s followed by the ID number of the datastream, L for the largest one, a for all or A for all with line terminator.
 Output example for -s 2:
 
 Info:
@@ -1515,7 +1516,7 @@ def BASE64Dump(filename, options):
                     jsonObject.append({'id': counter, 'name': encodeddata[0:16].decode('latin'), 'content': binascii.b2a_base64(decodeddata).strip(b'\n').decode()})
                 else:
                     print('%2d: %7d %-16s %-16s %s%s' % (counter, len(encodeddata), encodeddata[0:16].decode('latin'), AsciiDump(decodeddata[0:16]), CalculateChosenHash(decodeddata)[0], PrefixIfNeeded(ProduceJSONName(item))))
-            elif ('%s' % counter) == options.select or options.select == 'a':
+            elif ('%s' % counter) == options.select or options.select == 'a' or options.select == 'A':
                 if len(decoders) > 1:
                     print('Error: provide only one decoder when using option select')
                     return
@@ -1550,6 +1551,10 @@ def BASE64Dump(filename, options):
                     print(' %s: %d' % ('Unique bytes', countUniqueBytes))
                 else:
                     StdoutWriteChunked(HeadTail(DumpFunction(DecodeFunction(decoders, options, CutData(decodeddataOriginal if selectOriginal else decodeddata, options.cut)[0])), options.headtail))
+                    if options.select == 'A' and options.dump:
+                        if sys.platform == 'win32':
+                            StdoutWriteChunked(b'\r')
+                        StdoutWriteChunked(b'\n')
             counter += 1
 
     if options.jsonoutput:
