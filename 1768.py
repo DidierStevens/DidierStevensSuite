@@ -4,8 +4,8 @@ from __future__ import print_function
 
 __description__ = 'Analyze Cobalt Strike beacons'
 __author__ = 'Didier Stevens'
-__version__ = '0.0.21'
-__date__ = '2024/01/21'
+__version__ = '0.0.22'
+__date__ = '2024/11/29'
 
 """
 Source code put in the public domain by Didier Stevens, no Copyright
@@ -64,6 +64,7 @@ History:
   2023/10/15: added runtime config parsing
   2024/01/18: 0.0.21 FindAlternativeRuntimeConfig1
   2024/01/21: fix jsonoutput bug for missing config; added option experimental
+  2024/11/29: 0.0.22 bug fix oMinidumpFile.memory_info
 
 Todo:
 
@@ -2410,28 +2411,29 @@ def RuntimeAnalysis(datamdmp, dConfigs, oOutput, options):
     listData = []
     oMinidumpFile = MinidumpFile.parse_bytes(datamdmp)
     oget_buffered_reader = oMinidumpFile.get_reader().get_buffered_reader()
-    for info in oMinidumpFile.memory_info.infos:
-#        print(info.Protect, info.BaseAddress, info.RegionSize, info.Type)
-        try:
-            oget_buffered_reader.move(info.BaseAddress)
-        except Exception as e:
-            if e.args[0].endswith(' is not in process memory space'):
-#                print('Error: %s' % e.args[0])
-                continue
-            else:
-                raise e
-        try:
-            bytesSegment = oget_buffered_reader.read(info.RegionSize)
-            listData.append([['segment', info], bytesSegment])
-        except OverflowError:
-#            print('OverflowError') #a# handle overflow
-            pass
-        except Exception as e:
-            if e.args[0] == 'Would read over segment boundaries!':
-#                print('Error: %s' % e.args[0])
+    if oMinidumpFile.memory_info != None:
+        for info in oMinidumpFile.memory_info.infos:
+#            print(info.Protect, info.BaseAddress, info.RegionSize, info.Type)
+            try:
+                oget_buffered_reader.move(info.BaseAddress)
+            except Exception as e:
+                if e.args[0].endswith(' is not in process memory space'):
+#                    print('Error: %s' % e.args[0])
+                    continue
+                else:
+                    raise e
+            try:
+                bytesSegment = oget_buffered_reader.read(info.RegionSize)
+                listData.append([['segment', info], bytesSegment])
+            except OverflowError:
+#                print('OverflowError') #a# handle overflow
                 pass
-            else:
-                raise e
+            except Exception as e:
+                if e.args[0] == 'Would read over segment boundaries!':
+#                    print('Error: %s' % e.args[0])
+                    pass
+                else:
+                    raise e
     listData = sorted(listData, reverse=True, key=lambda item: len(item[1]))
     listData = [[dataInfo[1].BaseAddress, data] for dataInfo, data in listData]
     publickey = b'\x30\x81\x9F\x30\x0D\x06\x09\x2A\x86\x48\x86\xF7\x0D\x01\x01\x01\x05\x00\x03\x81\x8D\x00\x30\x81\x89\x02\x81'
