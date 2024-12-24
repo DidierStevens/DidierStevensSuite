@@ -2,8 +2,8 @@
 
 __description__ = 'MSG summary plugin for oledump.py'
 __author__ = 'Didier Stevens'
-__version__ = '0.0.3'
-__date__ = '2024/05/15'
+__version__ = '0.0.4'
+__date__ = '2024/10/27'
 
 """
 
@@ -16,6 +16,7 @@ History:
   2020/09/11: added body
   2022/05/15: 0.0.2 added URL extraction
   2024/05/15: 0.0.3 added inline attachment detection and -J --jsonattachmentoutput
+  2024/10/27: 0.0.4 bugfix
 
 Todo:
 """
@@ -65,6 +66,9 @@ class cMSG(cPluginParentOle):
                 self.dAttachments[numberAttachment].number = numberAttachment
                 self.dAttachments[numberAttachment].inline = False
                 self.dAttachments[numberAttachment].hidden = False
+                self.dAttachments[numberAttachment].longfilename = ''
+                self.dAttachments[numberAttachment].mimetag = ''
+                self.dAttachments[numberAttachment].data = b''
             if name[1] == '__properties_version1.0':
                 if b'\x03\x00\x14\x37\x06\x00\x00\x00\x04\x00\x00\x00\x00\x00\x00\x00' in stream: # quick & dirty trick to find PidTagAttachFlags with attRenderedInBody 0x00000004
                     self.dAttachments[numberAttachment].inline = True
@@ -131,7 +135,10 @@ class cMSG(cPluginParentOle):
             print(oMyJSONOutput.GetJSON())
         else:
             print('Sample email: sha256 %s' % sha256)
-            print('Header stream index: %d' % self.headerStreamIndex)
+            try:
+                print('Header stream index: %d' % self.headerStreamIndex)
+            except AttributeError:
+                pass
             print('Subject: %s' % self.subject)
             print('Date: %s' % self.date)
             print('To: %s' % self.to)
