@@ -4,8 +4,8 @@ from __future__ import print_function
 
 __description__ = 'Cobalt Strike: RSA decrypt metadata'
 __author__ = 'Didier Stevens'
-__version__ = '0.0.4'
-__date__ = '2021/12/16'
+__version__ = '0.0.5'
+__date__ = '2025/02/09'
 
 """
 Source code put in the public domain by Didier Stevens, no Copyright
@@ -20,6 +20,8 @@ History:
   2021/11/11: 0.0.3 refactoring: cCSInstructions, cOutput
   2021/11/15: bugfix decoding
   2021/12/16: 0.0.4 bugfix
+  2022/10/23: 0.0.5 added option -V
+  2025/02/09: added warning when file 1768.json is missing
 
 Todo:
 
@@ -710,6 +712,18 @@ class cCSInstructions(object):
                 raise Exception('Unknown instruction opcode: %d' % opcode)
         return data
 
+def GeneratePEM(hexkey, header):
+    result = []
+    result.append('-----BEGIN %s-----' % header)
+    if hexkey.endswith('0000000000'):
+        hexkey = hexkey.rstrip('00')
+    base64 = binascii.b2a_base64(binascii.a2b_hex(hexkey)).decode().rstrip('\n').rstrip('\r')
+    while len(base64) > 0:
+        result.append(base64[:64])
+        base64 = base64[64:]
+    result.append('-----END %s-----' % header)
+    return '\n'.join(result)
+
 def DecryptMetadata(arg, options):
     oOutput = InstantiateCOutput(options)
 
@@ -732,11 +746,23 @@ def DecryptMetadata(arg, options):
             DecodeMetadata(decrypted, oOutput)
     else:
         jsonData = GetJSONData()
+        if jsonData == {}:
+            print('File 1768.json is missing')
+            return
         for publicKey, dPrivatekey in jsonData['dLookupValues']['7'].items():
             privateKey = dPrivatekey['verbose']
             decrypted = RSADecrypt(privateKey, arg)
             if decrypted != None:
                 DecodeMetadata(decrypted, oOutput)
+                if options.verbose:
+                    oOutput.Line('Public key:')
+                    oOutput.Line(publicKey)
+                    oOutput.Line(GeneratePEM(publicKey, 'RSA PUBLIC KEY'))
+                    oOutput.Line('Private key:')
+                    oOutput.Line(privateKey)
+                    oOutput.Line(GeneratePEM(privateKey, 'RSA PRIVATE KEY'))
+                    oOutput.Line('Decrypted data:')
+                    oOutput.Line(binascii.b2a_hex(decrypted).decode())
                 break
 
 def Main():
@@ -751,6 +777,7 @@ https://DidierStevens.com'''
     oParser.add_option('-p', '--private', default='', help='Private key (hexadecimal)')
     oParser.add_option('-f', '--file', default='', help='File with private key')
     oParser.add_option('-t', '--transform', type=str, default='7:Metadata,3', help='Transformation instructions')
+    oParser.add_option('-V', '--verbose', action='store_true', default=False, help='Verbose mode')
     (options, args) = oParser.parse_args()
 
     if options.man:

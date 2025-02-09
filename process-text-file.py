@@ -4,8 +4,8 @@ from __future__ import print_function
 
 __description__ = "Template for text file processing"
 __author__ = 'Didier Stevens'
-__version__ = '0.0.8'
-__date__ = '2023/04/10'
+__version__ = '0.0.9'
+__date__ = '2025/01/18'
 
 """
 
@@ -36,6 +36,9 @@ History:
   2023/04/07: 0.0.8 added cRegexesSearch and option --filenamedatabase
   2023/04/08: man filenamedatabase
   2023/04/10: refactoring cRegexesSearch
+  2024/08/09: 0.0.9 added cStartsWithGetRemainder
+  2025/01/18: added \t support for option withfilename
+  2025/01/24: added option hasheader
 
 Todo:
 """
@@ -101,6 +104,8 @@ Options --search and --replace can be used to replace every occurence of option 
 Option --trim can be used to trim each line with a Python slice: begin:end.
 
 Option --withfilename prefixes each printed line with the filename containing that line.
+
+Option --hasheader makes that the first line of the first file is processed, and for all other files, the first line is ignored.
 
 To keep track of files processed by this tool, use option --filenamedatabase. The value provided with this option, is used to create a JSON file containing all the files (using their filenames) that have already bene processed by this tool.
 Use this option to process only new files between subsequent program executions, and make sure that a file is processed only once.
@@ -521,7 +526,7 @@ def FinalProcessing(line, options):
         line = line[options.trim]
     return line
 
-def ProcessFileWithoutContext(fIn, oBeginGrep, oGrep, oEndGrep, options, fullread):
+def ProcessFileWithoutContext(fIn, oBeginGrep, oGrep, oEndGrep, options, fullread, dState):
     if fIn[0] == None:
         return
 
@@ -531,10 +536,18 @@ def ProcessFileWithoutContext(fIn, oBeginGrep, oGrep, oEndGrep, options, fullrea
     if fullread:
         yield fIn[0].read()
     else:
+        firstline = True
         for line in fIn[0]:
             if fIn[1] == 2:
                 line = line.decode(*ParseOptionEncoding('i', options.encoding))
             line = line.rstrip('\n\r')
+            if firstline and options.hasheader:
+                firstline = False
+                if not 'header' in dState:
+                    line = FinalProcessing(line, options)
+                    dState['header'] = line
+                    yield line
+                continue
             if not begin:
                 begin, line = oBeginGrep.Grep(line)
             if not begin:
@@ -555,7 +568,7 @@ def ProcessFileWithoutContext(fIn, oBeginGrep, oGrep, oEndGrep, options, fullrea
             line = FinalProcessing(line, options)
             yield line
 
-def ProcessFileWithContext(fIn, oBeginGrep, oGrep, oEndGrep, context, options, fullread):
+def ProcessFileWithContext(fIn, oBeginGrep, oGrep, oEndGrep, context, options, fullread, dState):
     if fIn[0] == None:
         return
 
@@ -575,11 +588,19 @@ def ProcessFileWithContext(fIn, oBeginGrep, oGrep, oEndGrep, context, options, f
     if fullread:
         yield fIn[0].read()
     else:
+        firstline = True
         for line in fIn[0]:
             lineCounter += 1
             if fIn[1] == 2:
                 line = line.decode(*ParseOptionEncoding('i', options.encoding))
             line = line.rstrip('\n\r')
+            if firstline and options.hasheader:
+                firstline = False
+                if not 'header' in dState:
+                    line = FinalProcessing(line, options)
+                    dState['header'] = line
+                    yield line
+                continue
             if not begin:
                 begin, line = oBeginGrep.Grep(line)
             if not begin:
@@ -613,11 +634,11 @@ def ProcessFileWithContext(fIn, oBeginGrep, oGrep, oEndGrep, context, options, f
                     yield lineValue
                     break
 
-def ProcessFile(fIn, oBeginGrep, oGrep, oEndGrep, context, options, fullread):
+def ProcessFile(fIn, oBeginGrep, oGrep, oEndGrep, context, options, fullread, dState):
     if oGrep != None and context != []:
-        return ProcessFileWithContext(fIn, oBeginGrep, oGrep, oEndGrep, context, options, fullread)
+        return ProcessFileWithContext(fIn, oBeginGrep, oGrep, oEndGrep, context, options, fullread, dState)
     else:
-        return ProcessFileWithoutContext(fIn, oBeginGrep, oGrep, oEndGrep, options, fullread)
+        return ProcessFileWithoutContext(fIn, oBeginGrep, oGrep, oEndGrep, options, fullread, dState)
 
 def AnalyzeFileError(filename):
     PrintError('Error opening file %s' % filename)
@@ -753,15 +774,30 @@ class cRegexesSearch(object):
                     return sn
         return None
 
-def ProcessTextFile(filename, oBeginGrep, oGrep, oEndGrep, context, oOutput, oLogfile, options):
+class cStartsWithGetRemainder():
+
+    def __init__(self, strIn, strStart):
+        self.strIn = strIn
+        self.strStart = strStart
+        self.match = False
+        self.remainder = None
+        if self.strIn.startswith(self.strStart):
+            self.match = True
+            self.remainder = self.strIn[len(self.strStart):]
+
+def ProcessTextFile(filename, oBeginGrep, oGrep, oEndGrep, context, dResults, oOutput, oLogfile, options, dState):
     with TextFile(filename, oLogfile, options) as fIn:
         try:
-            for line in ProcessFile(fIn, oBeginGrep, oGrep, oEndGrep, context, options, False):
+            for line in ProcessFile(fIn, oBeginGrep, oGrep, oEndGrep, context, options, False, dState):
+                if options.withfilename != '':
+                    if options.hasheader and not 'withfilename' in dState:
+                        dState['withfilename'] = True
+                        line = 'ProcessingFilename' + options.withfilename + line
+                    else:
+                        line = filename + options.withfilename + line
                 # ----- Put your line processing code here -----
                 result = line
 
-                if options.withfilename != '':
-                    result = filename + options.withfilename + result
                 oOutput.Line(result)
                 # ----------------------------------------------
         except:
@@ -850,10 +886,12 @@ def ProcessTextFiles(filenames, oLogfile, options):
             end = int(end)
         options.trim = slice(begin, end)
 
+    dResults = {}
+    dState = {}
     for index, filename in enumerate(filenames):
         oOutput.Filename(filename, index, len(filenames))
         dDatabaseFilenames[filename] = time.time()
-        ProcessTextFile(filename, oBeginGrep, oGrep, oEndGrep, context, oOutput, oLogfile, options)
+        ProcessTextFile(filename, oBeginGrep, oGrep, oEndGrep, context, dResults, oOutput, oLogfile, options, dState)
 
     if options.filenamedatabase != '':
         AddFilesToPriorRunsDatabase(dDatabaseFilenames, options.filenamedatabase)
@@ -894,12 +932,16 @@ https://DidierStevens.com'''
     oParser.add_option('--ignoreprocessingerrors', action='store_true', default=False, help='Ignore errors during file processing')
     oParser.add_option('--encoding', type=str, default='', help='Encoding for file open')
     oParser.add_option('--filenamedatabase', type=str, default='', help='Use this to skip files that have bene processed in prior runs')
+    oParser.add_option('--hasheader', action='store_true', default=False, help='Files have a header')
     (options, args) = oParser.parse_args()
 
     if options.man:
         oParser.print_help()
         PrintManual()
         return
+
+    if options.withfilename == '\\t':
+        options.withfilename = '\t'
 
     oLogfile = cLogfile(options.logfile, options.logcomment)
 
