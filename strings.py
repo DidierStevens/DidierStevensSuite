@@ -4,8 +4,8 @@ from __future__ import print_function
 
 __description__ = 'Strings command in Python'
 __author__ = 'Didier Stevens'
-__version__ = '0.0.10'
-__date__ = '2024/11/01'
+__version__ = '0.0.11'
+__date__ = '2024/12/26'
 
 """
 Source code put in the public domain by Didier Stevens, no Copyright
@@ -35,6 +35,7 @@ History:
   2022/07/30: 0.0.8 added option -N and goodware fix
   2024/03/17: 0.0.9 added option -V
   2024/11/01: 0.0.10 added pyzipper support
+  2024/12/26: 0.0.11 added @ support for option search
 
 Todo:
 """
@@ -119,7 +120,7 @@ Option -N selects C strings: strings that end with a NUL byte (0x00) for ASCII a
 
 Use option -f to prefix each string with the name of the file it was found it.
 
-To search for strings, use option -s. This search is case-insensitive, use option -c to make it case-ssensitive.
+To search for strings, use option -s. This search is case-insensitive, use option -c to make it case-ssensitive. @file is supported.
 
 To display statistics, use option -a.
 Use option -V (verbose) for extra statistics.
@@ -1494,12 +1495,31 @@ def TrimIfRequired(string, maxLength):
     else:
         return string[0:maxLength]
 
-def StringsSub(extractedString, filename, oOutput, dUnique, oExtraSensical, options):
-    if options.casesensitive:
-        Case = lambda x: x
-    else:
-        Case = lambda x: x.lower()
-    if options.search == '' or Case(C2BIP3(options.search)) in Case(extractedString):
+class cStringMatch():
+
+    def __init__(self, options):
+        if options.casesensitive:
+            self.Case = lambda x: x
+        else:
+            self.Case = lambda x: x.lower()
+        if options.search == '':
+            self.searches = []
+        elif options.search.startswith('@'):
+            self.searches = File2Strings(options.search[1:])
+        else:
+            self.searches = [options.search]
+        self.searches = [C2BIP3(self.Case(search)) for search in self.searches]
+
+    def Match(self, str):
+        if self.searches == []:
+            return True
+        for search in self.searches:
+            if search in self.Case(str):
+                return True
+        return False
+
+def StringsSub(extractedString, filename, oOutput, dUnique, oExtraSensical, oStringMatch, options):
+    if oStringMatch.Match(extractedString):
         doPrint = True
         if options.sensical:
             doPrint = doPrint and oExtraSensical.Test(extractedString)
@@ -1604,6 +1624,7 @@ def ProcessBinaryFiles(filenames, oLogfile, options):
     index = 0
 
     oExtraSensical = None
+    oStringMatch = cStringMatch(options)
     if options.sensical:
         import reextra
         oExtraSensical = reextra.cExtraSensical(True)
@@ -1628,7 +1649,7 @@ def ProcessBinaryFiles(filenames, oLogfile, options):
                 selectedStrings.extend([[string, item['name']] for string in result])
             else:
                 for extractedString in result:
-                    StringsSub(extractedString, item['name'], oOutput, dUnique, oExtraSensical, options)
+                    StringsSub(extractedString, item['name'], oOutput, dUnique, oExtraSensical, oStringMatch, options)
     else:
         for filename, cutexpression in filenames:
             oOutput.Filename(filename, index, len(filenames))
@@ -1638,14 +1659,14 @@ def ProcessBinaryFiles(filenames, oLogfile, options):
                 selectedStrings.extend([[string, filename] for string in result])
             else:
                 for extractedString in result:
-                    StringsSub(extractedString, filename, oOutput, dUnique, oExtraSensical, options)
+                    StringsSub(extractedString, filename, oOutput, dUnique, oExtraSensical, oStringMatch, options)
 
     if options.length or options.stats:
         selectedStrings = sorted(selectedStrings, key=lambda x: len(x[0]))
 
         if options.length:
             for extractedString in selectedStrings:
-                StringsSub(extractedString[0], extractedString[1], oOutput, dUnique, oExtraSensical, options)
+                StringsSub(extractedString[0], extractedString[1], oOutput, dUnique, oExtraSensical, oStringMatch, options)
         else:
             numberOfStrings = len(selectedStrings)
             oOutput.Line('Number of strings: %d' % numberOfStrings)
