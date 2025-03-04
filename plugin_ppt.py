@@ -2,8 +2,8 @@
 
 __description__ = 'PowerPoint plugin for oledump.py'
 __author__ = 'Didier Stevens'
-__version__ = '0.0.2'
-__date__ = '2022/04/26'
+__version__ = '0.0.3'
+__date__ = '2025/03/04'
 
 """
 
@@ -15,6 +15,7 @@ History:
   2014/11/15: start
   2018/08/11: second start, fix zip.decompress with FlateDecode
   2022/04/26: 0.0.2 Python 3 fixes
+  2025/03/04: 0.0.3 bugfix xbird0x
 
 Todo:
 """
@@ -323,7 +324,7 @@ class cPPT(cPluginParent):
             0xF145: 'RT_TimeSubEffectContainer'
         }
 
-        if self.streamname == ['PowerPoint Document']:
+        if self.streamname[-1] == 'PowerPoint Document':
             self.ran = True
             stream = self.stream
 
