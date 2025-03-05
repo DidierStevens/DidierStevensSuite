@@ -2,8 +2,8 @@
 
 __description__ = 'This is essentially a wrapper for xml.etree.ElementTree'
 __author__ = 'Didier Stevens'
-__version__ = '0.0.9'
-__date__ = '2024/07/11'
+__version__ = '0.0.10'
+__date__ = '2025/03/05'
 
 """
 
@@ -24,6 +24,7 @@ History:
   2020/06/07: 0.0.7 added option -j
   2024/07/11: 0.0.8 added officeprotection
   2024/07/11: 0.0.9 added option -j support to command pretty
+  2025/03/05: 0.0.10 bugfix xambroz
 
 Todo:
 """
@@ -33384,10 +33385,13 @@ https://DidierStevens.com'''
         print('List of valid commands: %s' % ' '.join(dCommands.keys()))
         return
 
-    if len(args) == 1:
-        ProcessTextFile(command, [''], options)
-    else:
-        ProcessTextFile(command, ExpandFilenameArguments(args), options)
+    try:
+        if len(args) == 1:
+            ProcessTextFile(command, [''], options)
+        else:
+            ProcessTextFile(command, ExpandFilenameArguments(args), options)
+    except BrokenPipeError:
+        pass
 
 if __name__ == '__main__':
     Main()

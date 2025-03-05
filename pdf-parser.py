@@ -2,10 +2,10 @@
 
 __description__ = 'pdf-parser, use it to parse a PDF document'
 __author__ = 'Didier Stevens'
-__version__ = '0.7.10'
-__date__ = '2024/10/26'
+__version__ = '0.7.11'
+__date__ = '2025/03/04'
 __minimum_python_version__ = (2, 5, 1)
-__maximum_python_version__ = (3, 11, 1)
+__maximum_python_version__ = (3, 12, 2)
 
 """
 Source code put in public domain by Didier Stevens, no Copyright
@@ -77,6 +77,7 @@ History:
   2024/03/21: V0.7.9 added option jsonoutput; added verbose YARA rules
   2024/10/25: V0.7.10 /ObjStm fix (x9090 PR)
   2024/10/26: added pyzipper support
+  2025/03/04: V0.7.11 regex string fix Python 3.12 xambroz
 
 Todo:
   - handle printf todo
@@ -1163,7 +1164,7 @@ def PrintGenerateObject(object, options, newId=None):
         if options.filter:
             decompressed = object.Stream(True, options.overridingfilters)
             if decompressed == 'No filters' or decompressed.startswith('Unsupported filter: '):
-                print('    oPDF.stream(%d, %d, %s, %s)' % (objectId, object.version, repr(object.Stream(False, options.overridingfilters).rstrip()), repr(re.sub('/Length\s+\d+', '/Length %d', FormatOutput(dataPrecedingStream, True)).strip())))
+                print('    oPDF.stream(%d, %d, %s, %s)' % (objectId, object.version, repr(object.Stream(False, options.overridingfilters).rstrip()), repr(re.sub(r'/Length\s+\d+', '/Length %d', FormatOutput(dataPrecedingStream, True)).strip())))
             else:
                 dictionary = FormatOutput(dataPrecedingStream, True)
                 dictionary = re.sub(r'/Length\s+\d+', '', dictionary)
@@ -1174,7 +1175,7 @@ def PrintGenerateObject(object, options, newId=None):
                 dictionary = dictionary.strip()
                 print("    oPDF.stream2(%d, %d, %s, %s, 'f')" % (objectId, object.version, repr(decompressed.rstrip()), repr(dictionary)))
         else:
-            print('    oPDF.stream(%d, %d, %s, %s)' % (objectId, object.version, repr(object.Stream(False, options.overridingfilters).rstrip()), repr(re.sub('/Length\s+\d+', '/Length %d', FormatOutput(dataPrecedingStream, True)).strip())))
+            print('    oPDF.stream(%d, %d, %s, %s)' % (objectId, object.version, repr(object.Stream(False, options.overridingfilters).rstrip()), repr(re.sub(r'/Length\s+\d+', '/Length %d', FormatOutput(dataPrecedingStream, True)).strip())))
     else:
         print('    oPDF.indirectobject(%d, %d, %s)' % (objectId, object.version, repr(FormatOutput(object.content, True).strip())))
 
@@ -1651,7 +1652,7 @@ def Main():
                     if object.type == PDF_ELEMENT_COMMENT and selectComment:
                         if options.generate:
                             comment = object.comment[1:].rstrip()
-                            if re.match('PDF-\d\.\d', comment):
+                            if re.match(r'PDF-\d\.\d', comment):
                                 print("    oPDF.header('%s')" % comment[4:])
                             elif comment != '%EOF':
                                 print('    oPDF.comment(%s)' % repr(comment))

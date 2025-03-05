@@ -4,8 +4,8 @@ from __future__ import print_function
 
 __description__ = 'Analyze Cobalt Strike beacons'
 __author__ = 'Didier Stevens'
-__version__ = '0.0.22'
-__date__ = '2024/11/29'
+__version__ = '0.0.23'
+__date__ = '2025/03/05'
 
 """
 Source code put in the public domain by Didier Stevens, no Copyright
@@ -65,6 +65,7 @@ History:
   2024/01/18: 0.0.21 FindAlternativeRuntimeConfig1
   2024/01/21: fix jsonoutput bug for missing config; added option experimental
   2024/11/29: 0.0.22 bug fix oMinidumpFile.memory_info
+  2025/03/05: 0.0.23 version bump for 1768.json
 
 Todo:
 

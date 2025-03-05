@@ -2,8 +2,8 @@
 
 __description__ = 'Tool to test a PDF file'
 __author__ = 'Didier Stevens'
-__version__ = '0.2.9'
-__date__ = '2024/10/26'
+__version__ = '0.2.10'
+__date__ = '2025/03/05'
 
 """
 
@@ -58,6 +58,7 @@ History:
   2019/11/05: V0.2.7 fixed plugin path when compiled with pyinstaller
   2020/11/21: V0.2.8 added data argument to PDFiD function
   2024/10/26: V0.2.9 added pyzipper support
+  2025/03/05: V0.2.10 bugfix dfrias
 
 Todo:
   - update XML example (entropy, EOF)
@@ -502,15 +503,15 @@ def PDFiD(file, allNames=False, extraData=False, disarm=False, force=False, data
         byte = oBinaryFile.byte()
         while byte != None:
             char = chr(byte)
-            charUpper = char.upper()
-            if charUpper >= 'A' and charUpper <= 'Z' or charUpper >= '0' and charUpper <= '9':
+            charLower = char.lower()
+            if charLower >= 'a' and charLower <= 'z' or charLower >= '0' and charLower <= '9':
                 word += char
                 wordExact.append(char)
             elif slash == '/' and char == '#':
                 d1 = oBinaryFile.byte()
                 if d1 != None:
                     d2 = oBinaryFile.byte()
-                    if d2 != None and (chr(d1) >= '0' and chr(d1) <= '9' or chr(d1).upper() >= 'A' and chr(d1).upper() <= 'F') and (chr(d2) >= '0' and chr(d2) <= '9' or chr(d2).upper() >= 'A' and chr(d2).upper() <= 'F'):
+                    if d2 != None and (chr(d1) >= '0' and chr(d1) <= '9' or chr(d1).lower() >= 'a' and chr(d1).lower() <= 'f') and (chr(d2) >= '0' and chr(d2) <= '9' or chr(d2).lower() >= 'a' and chr(d2).lower() <= 'f'):
                         word += chr(int(chr(d1) + chr(d2), 16))
                         wordExact.append(int(chr(d1) + chr(d2), 16))
                         hexcode = True
