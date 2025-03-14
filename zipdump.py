@@ -2,8 +2,8 @@
 
 __description__ = 'ZIP dump utility'
 __author__ = 'Didier Stevens'
-__version__ = '0.0.30'
-__date__ = '2024/02/20'
+__version__ = '0.0.31'
+__date__ = '2025/03/14'
 
 """
 
@@ -72,6 +72,8 @@ History:
   2023/09/18: 0.0.29 added DOSTIME & DOSDATE parsing
   2023/12/18: 0.0.30 added option stats and cPKEND
   2024/02/20: added alphanumhashvir
+  2025/03/12: 0.0.31 bugfix File2Strings
+  2025/03/14: added alphanumpathhashvir
 
 Todo:
 """
@@ -114,7 +116,7 @@ else:
 QUOTE = '"'
 
 def PrintManual():
-    manual = '''
+    manual = r'''
 Manual:
 
 zipdump is a tool to analyze ZIP files.
@@ -572,6 +574,7 @@ WRITE_HASH        = 'hash'
 WRITE_HASHVIR     = 'hashvir'
 WRITE_ZIPHASHVIR  = 'ziphashvir'
 WRITE_ALPHANUMHASHVIR = 'alphanumhashvir'
+WRITE_ALPHANUMPATHHASHVIR = 'alphanumpathhashvir'
 
 BRUTEFORCE_PREFIX = '#b#'
 BRUTEFORCE_PARAMETER_MINIMUM = 'minimum'
@@ -583,7 +586,7 @@ BRUTEFORCE_PARAMETER_CHARSETS_VALUE_UPPERCASE = 'u'
 BRUTEFORCE_PARAMETER_CHARSETS_VALUE_DIGITS = 'd'
 BRUTEFORCE_PARAMETER_CHARSETS_VALUE_SPECIAL = 's'
 
-validWriteValues = [WRITE_VIR, WRITE_ALPHANUMVIR, WRITE_HASH, WRITE_HASHVIR, WRITE_ZIPHASHVIR, WRITE_ALPHANUMHASHVIR]
+validWriteValues = [WRITE_VIR, WRITE_ALPHANUMVIR, WRITE_HASH, WRITE_HASHVIR, WRITE_ZIPHASHVIR, WRITE_ALPHANUMHASHVIR, WRITE_ALPHANUMPATHHASHVIR]
 
 #Convert 2 Bytes If Python 3
 def C2BIP3(string):
@@ -659,9 +662,9 @@ def IFF(expression, valueTrue, valueFalse):
 def File2Strings(filename):
     try:
          if os.path.splitext(filename)[1].lower() == '.gz':
-             f = gzip.GzipFile(filename, 'rb')
+             f = gzip.open(filename, 'rt', encoding='latin')
          else:
-             f = open(filename, 'r')
+             f = open(filename, 'r', encoding='latin')
     except:
         return None
     try:
@@ -5381,6 +5384,8 @@ def ZIPDump(zipfilename, options, data=None):
                         memberFilename = ''.join([char if char in (string.ascii_lowercase + string.ascii_uppercase + string.digits) else '_' for char in os.path.basename(oZipInfo.filename)]) + '.vir'
                     elif options.write == WRITE_ALPHANUMHASHVIR:
                         memberFilename = ''.join([char if char in (string.ascii_lowercase + string.ascii_uppercase + string.digits) else '_' for char in os.path.basename(oZipInfo.filename)]) + '.' + hashlib.sha256(data).hexdigest() + '.vir'
+                    elif options.write == WRITE_ALPHANUMPATHHASHVIR:
+                        memberFilename = ''.join([char if char in (string.ascii_lowercase + string.ascii_uppercase + string.digits) else '_' for char in oZipInfo.filename]) + '.' + hashlib.sha256(data).hexdigest() + '.vir'
                     else:
                         memberFilename = hashlib.sha256(data).hexdigest()
                         if options.write in [WRITE_HASHVIR, WRITE_ZIPHASHVIR]:
