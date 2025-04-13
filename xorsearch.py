@@ -2,10 +2,10 @@
 
 from __future__ import print_function
 
-__description__ = 'Bruteforce a file for encodings and search'
+__description__ = 'XORsearch in Python'
 __author__ = 'Didier Stevens'
-__version__ = '0.0.1'
-__date__ = '2020/08/16'
+__version__ = '0.0.2'
+__date__ = '2025/04/13'
 
 """
 Source code put in the public domain by Didier Stevens, no Copyright
@@ -13,16 +13,18 @@ https://DidierStevens.com
 Use at your own risk
 
 History:
-  2020/08/16: start
+  2020/08/16: 0.0.1 start
+  2024/09/23: 0.0.2 rewrite
+  2025/04/04: continue
+  2025/04/13: man
 
 Todo:
-
+  Document flag arguments in man page
 """
 
 import optparse
 import sys
 import os
-import zipfile
 import binascii
 import random
 import gzip
@@ -36,6 +38,12 @@ import math
 import fnmatch
 import json
 import time
+import csv
+try:
+    import pyzipper as zipfile
+except ImportError:
+    import zipfile
+import hashlib
 if sys.version_info[0] >= 3:
     from io import BytesIO as DataIO
 else:
@@ -44,18 +52,50 @@ if sys.version_info[0] >= 3:
     from io import StringIO
 else:
     from cStringIO import StringIO
+try:
+    import yara
+except:
+    pass
 
 def PrintManual():
     manual = r'''
 Manual:
 
-This tool is a work in progress. It will have many of the features of XORsearch.exe (a binary program written in C), and some new features.
+This tool is a Python implementation of XORsearch.exe. It has mostly the same features as XORsearch.exe, but not all features. And it does have features that XORsearch.exe does not have, like JSON and YARA support.
 
-For the moment, it only tries all XOR encodings with a one-byte key, and can only detect printable results (-t printable).
+Provide one or more files as input.
+
+Use option -Y to apply YARA rules. # notation is supported:
+#h#hex: provide YARA rule encoded in hexadecimal
+#b#base64: provide YARA rule encoded in base64
+#q#rule: provide rule and replace ' with "
+#s#string: generate rule to search for string
+#x#hexstring: generate rule to search for hexadecimal string
+#r#regex: generate rule to search for regex
+
+Use option --yarastrings and --yarastringsraw to display the strings found by the YARA rules.
+
+Use option -P to provide a Python function expression that takes 1 argument: the encoded data. This function should return True to select the encoded data.
+Built-in functions:
+IsPrintable
+IsPrintableOrWhitespace
+
+Use option -s to provide a Python script file to load.
+
+When encoded data is selected, options -d, -x, -X, -a, -A, -b and -B can be used to dump it.
+
+Use option -j to process JSON input produced by other tools, like oledump.py, zipdump.py, ...
+
+Use option -J to produce JSON output.
+
+Output can be redirected with option -o.
+
+
+
 
 It reads one or more files or stdin and TBC. This tool is very versatile when it comes to handling files, later full details will be provided.
 
-This Python script was developed with Python 3.8.
+This Python script was developed with Python 2.7 and tested with Python 2.7 and 3.5.
 
 TBC
 
@@ -105,6 +145,14 @@ tool.py C:\Windows\*.exe C:\Windows\*.dll
 To prevent the tool from processing file arguments with wildcard characters or special initial characters (@ and #) differently, but to process them as normal files, use option --literalfilenames.
 
 The content of folders can be processed too: use option --recursedir and provide folder names as argument. Wildcards and here files (for folder names) can be used too.
+
+To exclude some files (for example, when using --recursedir on a comple disk) use option --excludefilenames. It takes a comma-separated list of filenames to exclude. Using @, a text file with filenames to execlude can be provided.
+Example: --excludefilenames @toexclude.txt
+
+Filenames to be excluded can be defined with or without path. Without a path (like pagefile.sys), only the filename is considered for comparison, not the folder. With a path (like c:\windows\system32\memory.dmp), the complete filename is compared.
+
+To keep track of files processed by this tool, use option --filenamedatabase. The value provided with this option, is used to create a JSON file containing all the files (using their filenames) that have already been processed by this tool.
+Use this option to process only new files between subsequent program executions, and make sure that a file is processed only once.
 
 File arguments that start with character # have special meaning. These are not processed as actual files on disk (except when option --literalfilenames is used), but as file arguments that specify how to "generate" the file content.
 
@@ -236,6 +284,8 @@ In this example, zipdump is used to produce JSON data with the content of each f
 With option --ignoreprocessingerrors, the tool will continue processing the next file when an error occurs while processing the current file. Files that can not be opened will always be skipped to move to the next file.
 
 Option --logfile direct the tool to create a logfile, and option --logcomment can be used to add a comment to the log file. The log file will contain metadata and a list of processed files, it does not contain processing results.
+The name of the logfile is generated from the provided option value (keyword): TOOLNAME-KEYWORD-TIMESTAMP.log.
+Unless that option value is prefixed with #n#, like #n#FILENAME, then FILENAME is taken as the literal filename for the logfile.
 It is best to use this option when option --ignoreprocessingerrors is used, to have a record of file processing errors.
 
 The lines are written to standard output, except when option -o is used. When option -o is used, the lines are written to the filename specified by option -o.
@@ -244,6 +294,7 @@ Filenames used with option -o starting with # have special meaning.
 #g# will write output to a file with a filename generated by the tool like this: toolname-date-time.txt.
 #g#KEYWORD will write output to a file with a filename generated by the tool like this: toolname-KEYWORD-date-time.txt.
 Use #p#filename to display execution progress.
+Use #P#filename to display execution progress every 60 seconds.
 To process several files while creating seperate output files for each input file, use -o #s#%f%.result *.
 This will create output files with the name of the inputfile and extension .result.
 There are several variables available when creating separate output files:
@@ -533,7 +584,7 @@ def Interpret(expression):
             if bytes == None:
                 print('Error: argument should be a byte sequence: %s' % arguments[1][1])
                 return None
-            decoded += number * bytes
+            decoded += number * bytes.decode('latin')
         elif functionname == FUNCTIONNAME_RANDOM:
             if CheckFunction(functionname, arguments, 1):
                 return None
@@ -625,6 +676,12 @@ def AnalyzeFileError(filename):
     except:
         pass
 
+def CreateZipFileObject(arg1, arg2):
+    if 'AESZipFile' in dir(zipfile):
+        return zipfile.AESZipFile(arg1, arg2)
+    else:
+        return zipfile.ZipFile(arg1, arg2)
+
 class cBinaryFile:
     def __init__(self, filename, zippassword='infected', noextraction=False, literalfilename=False):
         self.filename = filename
@@ -649,7 +706,7 @@ class cBinaryFile:
             elif fch == FCH_DATA:
                 self.fIn = DataIO(data)
             elif not self.noextraction and self.filename.lower().endswith('.zip'):
-                self.oZipfile = zipfile.ZipFile(self.filename, 'r')
+                self.oZipfile = CreateZipFileObject(self.filename, 'r')
                 if len(self.oZipfile.infolist()) == 1:
                     self.fIn = self.oZipfile.open(self.oZipfile.infolist()[0], 'r', self.zippassword)
                     self.extracted = True
@@ -683,7 +740,7 @@ class cBinaryFile:
             return fRead.read(size)
 
     def Data(self):
-        data = self.fIn.read()
+        data = self.read()
         self.close()
         return data
 
@@ -698,7 +755,7 @@ def File2Strings(filename):
     except:
         return None
     try:
-        return map(lambda line:line.rstrip('\n'), f.readlines())
+        return list(map(lambda line:line.rstrip('\n'), f.readlines()))
     except:
         return None
     finally:
@@ -735,7 +792,7 @@ def Glob(filename):
         return filenames
 
 class cExpandFilenameArguments():
-    def __init__(self, filenames, literalfilenames=False, recursedir=False, checkfilenames=False, expressionprefix=None, flagprefix=None):
+    def __init__(self, filenames, literalfilenames=False, recursedir=False, excludefilenames='', checkfilenames=False, expressionprefix=None, flagprefix=None):
         self.containsUnixShellStyleWildcards = False
         self.warning = False
         self.message = ''
@@ -787,6 +844,8 @@ class cExpandFilenameArguments():
                 return
         if self.filenameexpressionsflags == [] and (expression != '' or flag != ''):
             self.filenameexpressionsflags = [['', expression, flag]]
+        if excludefilenames != '':
+            self.ExcludeFilenames(excludefilenames)
         if checkfilenames:
             self.CheckIfFilesAreValid()
 
@@ -827,6 +886,31 @@ class cExpandFilenameArguments():
             return [filename for filename, expression, flag in self.filenameexpressionsflags]
         else:
             return self.filenameexpressionsflags
+
+    def ExcludeFilenames(self, excludefilenames):
+        keep = []
+        exclude = []
+        filenamesToExclude = []
+        basenamesToExclude = []
+
+        filenames = [filename.lower() for filename in sum([ProcessAt(filename) for filename in excludefilenames.split(',')], [])]
+        for filename in filenames:
+            if '/' in filename or '\\' in filename:
+                filenamesToExclude.append(filename)
+            else:
+                basenamesToExclude.append(filename)
+        for filename, expression, flag in self.filenameexpressionsflags:
+            dummy, basename = os.path.split(filename)
+            if filename.lower() in filenamesToExclude:
+                exclude.append(filename)
+            elif basename.lower() in basenamesToExclude:
+                exclude.append(filename)
+            else:
+                keep.append([filename, expression, flag])
+        self.filenameexpressionsflags = keep
+        if len(exclude) > 0:
+            self.warning = True
+            self.message += 'The following files are excluded: ' + ' '.join(exclude) + '\n'
 
 def CheckJSON(stringJSON):
     try:
@@ -925,9 +1009,9 @@ def ParseCutTerm(argument):
     else:
         if argument.startswith("[u'"):
             # convert ascii to unicode 16 byte sequence
-            searchtext = oMatch.group(1).decode('unicode_escape').encode('utf16')[2:]
+            searchtext = oMatch.group(1).encode('utf16')[2:]
         else:
-            searchtext = oMatch.group(1)
+            searchtext = oMatch.group(1).encode('latin')
         return CUTTERM_FIND, (searchtext, int(Replace(oMatch.group(2), {None: '1'})), ParseInteger(Replace(oMatch.group(3), {None: '0'}))), argument[len(oMatch.group(0)):]
 
 def ParseCutArgument(argument):
@@ -1079,15 +1163,33 @@ class cDump():
         return oDumpStream.Content()
 
     def Base64Dump(self, nowhitespace=False):
-        encoded = binascii.b2a_base64(self.data)
+        encoded = binascii.b2a_base64(self.data).decode().strip()
         if nowhitespace:
             return encoded
-        encoded = encoded.strip()
         oDumpStream = self.cDumpStream(self.prefix)
         length = 64
         for i in range(0, len(encoded), length):
             oDumpStream.Addline(encoded[0+i:length+i])
         return oDumpStream.Content()
+
+    def HexDumpNoWS(self):
+        return self.data.hex()
+
+    def DumpOption(self, option):
+        if option == 'a':
+            return self.HexAsciiDump()
+        elif option == 'A':
+            return self.HexAsciiDump(rle=True)
+        elif option == 'x':
+            return self.HexDump()
+        elif option == 'X':
+            return self.HexDumpNoWS()
+        elif option == 'b':
+            return self.Base64Dump()
+        elif option == 'B':
+            return self.Base64Dump(nowhitespace=True)
+        else:
+            raise Exception('DumpOption: unknown option %' % option)
 
     class cDumpStream():
         def __init__(self, prefix=''):
@@ -1117,7 +1219,10 @@ def IfWIN32SetBinary(io):
 #Fix for http://bugs.python.org/issue11395
 def StdoutWriteChunked(data):
     if sys.version_info[0] > 2:
-        sys.stdout.buffer.write(data)
+        if isinstance(data, str):
+            sys.stdout.write(data)
+        else:
+            sys.stdout.buffer.write(data)
     else:
         while data != '':
             sys.stdout.write(data[0:10000])
@@ -1149,25 +1254,51 @@ class cOutput():
         self.starttime = time.time()
         self.filenameOption = filenameOption
         self.separateFiles = False
-        self.progress = False
+        self.progress = ''
         self.console = False
         self.head = False
         self.headCounter = 0
         self.tail = False
         self.tailQueue = []
+        self.STDOUT = 'STDOUT'
         self.fOut = None
+        self.oCsvWriter = None
         self.rootFilenames = {}
         self.binary = binary
         if self.binary:
             self.fileoptions = 'wb'
         else:
             self.fileoptions = 'w'
+        self.dReplacements = {}
+
+    def Replace(self, line):
+        for key, value in self.dReplacements.items():
+            line = line.replace(key, value)
+        return line
+
+    def Open(self, binary=False):
+        if self.fOut != None:
+            return
+
+        if binary:
+            self.fileoptions = 'wb'
+        else:
+            self.fileoptions = 'w'
+
         if self.filenameOption:
             if self.ParseHash(self.filenameOption):
                 if not self.separateFiles and self.filename != '':
-                    self.fOut = open(self.filename, self.fileoptions)
+                    if binary:
+                        self.fOut = open(self.filename, self.fileoptions)
+                    else:
+                        self.fOut = open(self.filename, self.fileoptions, encoding='utf8', errors='ignore')
             elif self.filenameOption != '':
-                self.fOut = open(self.filenameOption, self.fileoptions)
+                if binary:
+                    self.fOut = open(self.filenameOption, self.fileoptions)
+                else:
+                    self.fOut = open(self.filenameOption, self.fileoptions, encoding='utf8', errors='ignore')
+        else:
+            self.fOut = self.STDOUT
 
     def ParseHash(self, option):
         if option.startswith('#'):
@@ -1179,7 +1310,9 @@ class cOutput():
                     if switch == 's':
                         self.separateFiles = True
                     elif switch == 'p':
-                        self.progress = True
+                        self.progress = switch
+                    elif switch == 'P':
+                        self.progress = switch
                     elif switch == 'c':
                         self.console = True
                     elif switch == 'l':
@@ -1218,14 +1351,16 @@ class cOutput():
             iter += 1
 
     def LineSub(self, line, eol):
-        if self.fOut == None or self.console:
+        line = self.Replace(line)
+        self.Open()
+        if self.fOut == self.STDOUT or self.console:
             try:
                 print(line, end=eol)
             except UnicodeEncodeError:
                 encoding = sys.stdout.encoding
                 print(line.encode(encoding, errors='backslashreplace').decode(encoding), end=eol)
 #            sys.stdout.flush()
-        if self.fOut != None:
+        if self.fOut != self.STDOUT:
             self.fOut.write(line + '\n')
             self.fOut.flush()
 
@@ -1245,22 +1380,41 @@ class cOutput():
         self.Line('%s: %s' % (self.FormatTime(), line))
 
     def WriteBinary(self, data):
-        if self.fOut != None:
+        self.Open(True)
+        if self.fOut != self.STDOUT:
             self.fOut.write(data)
             self.fOut.flush()
         else:
             IfWIN32SetBinary(sys.stdout)
             StdoutWriteChunked(data)
 
+    def CSVWriteRow(self, row):
+        if self.oCsvWriter == None:
+            self.StringIOCSV = StringIO()
+#            self.oCsvWriter = csv.writer(self.fOut)
+            self.oCsvWriter = csv.writer(self.StringIOCSV, delimiter='\t')
+        self.oCsvWriter.writerow(row)
+        self.Line(self.StringIOCSV.getvalue().rstrip('\r\n'))
+        self.StringIOCSV.truncate(0)
+        self.StringIOCSV.seek(0)
+
     def Filename(self, filename, index, total):
         self.separateFilename = filename
-        if self.progress:
+        if self.progress != '':
+            printprogress = True
             if index == 0:
-                eta = ''
+                eta = 'start '
+                self.progressinterval = time.time()
             else:
                 seconds = int(float((time.time() - self.starttime) / float(index)) * float(total - index))
                 eta = 'estimation %d seconds left, finished %s ' % (seconds, self.FormatTime(time.time() + seconds))
-            PrintError('%d/%d %s%s' % (index + 1, total, eta, self.separateFilename))
+                if self.progress == 'P':
+                    if time.time() - self.progressinterval >= 60:
+                        self.progressinterval = time.time()
+                    else:
+                        printprogress = False
+            if printprogress:
+                PrintError('[*] %d/%d %s%s' % (index + 1, total, eta, self.separateFilename))
         if self.separateFiles and self.filename != '':
             oFilenameVariables = cVariables()
             oFilenameVariables.SetVariable('f', self.separateFilename)
@@ -1285,7 +1439,7 @@ class cOutput():
         self.headCounter = 0
         self.tailQueue = []
 
-        if self.fOut != None:
+        if self.fOut != self.STDOUT:
             self.fOut.close()
             self.fOut = None
 
@@ -1313,8 +1467,12 @@ class cLogfile():
         self.errors = 0
         if keyword == '':
             self.oOutput = None
+        elif keyword.startswith('#n#'):
+            self.oOutput = cOutput(keyword[3:])
         else:
             self.oOutput = cOutput('%s-%s-%s.log' % (os.path.splitext(os.path.basename(sys.argv[0]))[0], keyword, self.FormatTime()))
+        self.counter1 = 0
+        self.counter2 = 0
         self.Line('Start')
         self.Line('UTC', '%04d%02d%02d-%02d%02d%02d' % time.gmtime(time.time())[0:6])
         self.Line('Comment', comment)
@@ -1332,7 +1490,10 @@ class cLogfile():
 
     def Line(self, *line):
         if self.oOutput != None:
-            self.oOutput.Line(MakeCSVLine((self.FormatTime(), ) + line, DEFAULT_SEPARATOR, QUOTE))
+            self.counter1 += 1
+            csvline = MakeCSVLine((self.FormatTime(), ) + line, DEFAULT_SEPARATOR, QUOTE)
+            self.counter2 += len(csvline)
+            self.oOutput.Line(csvline)
 
     def LineError(self, *line):
         self.Line('Error', *line)
@@ -1340,23 +1501,54 @@ class cLogfile():
 
     def Close(self):
         if self.oOutput != None:
-            self.Line('Finish', '%d error(s)' % self.errors, '%d second(s)' % (time.time() - self.starttime))
+            self.Line('Finish', '%d error(s)' % self.errors, '%d second(s)' % (time.time() - self.starttime), self.counter1, self.counter2)
             self.oOutput.Close()
 
 def CalculateByteStatistics(dPrevalence=None, data=None):
+    longestString = 0
+    longestBASE64String = 0
+    longestHEXString = 0
+    base64digits = b'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789+/'
+    hexdigits = b'abcdefABCDEF0123456789'
     averageConsecutiveByteDifference = None
     if dPrevalence == None:
         dPrevalence = {iter: 0 for iter in range(0x100)}
         sumDifferences = 0.0
         previous = None
         if len(data) > 1:
+            lengthString = 0
+            lengthBASE64String = 0
+            lengthHEXString = 0
             for byte in data:
                 byte = C2IIP2(byte)
                 dPrevalence[byte] += 1
                 if previous != None:
                     sumDifferences += abs(byte - previous)
+                    if byte >= 0x20 and byte < 0x7F:
+                        lengthString += 1
+                    else:
+                        longestString = max(longestString, lengthString)
+                        lengthString = 0
+                    if byte in base64digits:
+                        lengthBASE64String += 1
+                    else:
+                        longestBASE64String = max(longestBASE64String, lengthBASE64String)
+                        lengthBASE64String = 0
+                    if byte in hexdigits:
+                        lengthHEXString += 1
+                    else:
+                        longestHEXString = max(longestHEXString, lengthHEXString)
+                        lengthHEXString = 0
+                else:
+                    if byte >= 0x20 and byte < 0x7F:
+                        lengthString = 1
+                    if byte in hexdigits:
+                        lengthHEXString = 1
                 previous = byte
             averageConsecutiveByteDifference = sumDifferences /float(len(data)-1)
+            longestString = max(longestString, lengthString)
+            longestBASE64String = max(longestBASE64String, lengthBASE64String)
+            longestHEXString = max(longestHEXString, lengthHEXString)
     sumValues = sum(dPrevalence.values())
     countNullByte = dPrevalence[0]
     countControlBytes = 0
@@ -1394,30 +1586,407 @@ def CalculateByteStatistics(dPrevalence=None, data=None):
             prevalence = float(dPrevalence[iter]) / float(sumValues)
             entropy += - prevalence * math.log(prevalence, 2)
             countUniqueBytes += 1
-    return sumValues, entropy, countUniqueBytes, countNullByte, countControlBytes, countWhitespaceBytes, countPrintableBytes, countHighBytes, countHexadecimalBytes, countBASE64Bytes, averageConsecutiveByteDifference
+    if sumValues >= 256:
+        entropymax = 8.0
+        entropynormalized = entropy
+        entropystr = '%.02f' % entropy
+    else:
+        entropymax = math.log(sumValues, 2)
+        entropynormalized = entropy / entropymax * 8.0
+        entropystr = '%.02f (normalized %.02f max %.02f)' % (entropy, entropynormalized, entropymax)
+    return sumValues, entropy, entropymax, entropynormalized, entropystr, countUniqueBytes, countNullByte, countControlBytes, countWhitespaceBytes, countPrintableBytes, countHighBytes, countHexadecimalBytes, countBASE64Bytes, averageConsecutiveByteDifference, longestString, longestHEXString, longestBASE64String, dPrevalence
+
+def CalculateByteStatisticsNT(dPrevalence=None, data=None):
+    oNT = collections.namedtuple('bytestatistics', 'sumValues entropy entropymax entropynormalized entropystr countUniqueBytes countNullByte countControlBytes countWhitespaceBytes countPrintableBytes countHighBytes countHexadecimalBytes countBASE64Bytes averageConsecutiveByteDifference longestString longestHEXString longestBASE64String dPrevalence')
+    return oNT(*CalculateByteStatistics(dPrevalence, data))
+
+def Unpack(format, data):
+    size = struct.calcsize(format)
+    result = list(struct.unpack(format, data[:size]))
+    result.append(data[size:])
+    return result
 
 def InstantiateCOutput(options):
     filenameOption = None
     if options.output != '':
         filenameOption = options.output
-    return cOutput(filenameOption)
+    binary = False
+    if hasattr(options, 'dump'):
+        binary = options.dump
+    return cOutput(filenameOption, binary)
 
-def ContentCheckIsPrintable(data):
+class cStruct(object):
+    def __init__(self, data):
+        self.data = data
+        self.originaldata = data
+
+    #a# extend z usage
+    def UnpackSub(self, format):
+        if format.endswith('z'):
+            format = format[:-1]
+            sz = True
+        else:
+            sz = False
+        formatsize = struct.calcsize(format)
+        if len(self.data) < formatsize:
+            raise Exception('Not enough data')
+        tounpack = self.data[:formatsize]
+        self.data = self.data[formatsize:]
+        result = struct.unpack(format, tounpack)
+        if sz:
+            result = result + (self.GetString0(), )
+        return result
+
+    def Unpack(self, format):
+        result = self.UnpackSub(format)
+        if len(result) == 1:
+            return result[0]
+        else:
+            return result
+
+    def UnpackNamedtuple(self, format, typename, field_names):
+        namedTuple = collections.namedtuple(typename, field_names)
+        result = self.UnpackSub(format)
+        return namedTuple(*result)
+
+    def Truncate(self, length):
+        self.data = self.data[:length]
+
+    def GetBytes(self, length=None):
+        if length == None:
+            length = len(self.data)
+        result = self.data[:length]
+        if len(result) < length:
+            raise Exception('Not enough data')
+        self.data = self.data[length:]
+        return result
+
+    def GetString(self, format):
+        stringLength = self.Unpack(format)
+        return self.GetBytes(stringLength)
+
+    def Length(self):
+        return len(self.data)
+
+    def GetString0(self):
+        position = self.data.find(b'\x00')
+        if position == -1:
+            raise Exception('Missing NUL byte')
+        result = self.data[:position]
+        self.data = self.data[position + 1:]
+        return result
+
+def FindAll(data, sub):
+    result = []
+    start = 0
+    while True:
+        position = data.find(sub, start)
+        if position == -1:
+            return result
+        result.append(position)
+        start = position + 1
+
+def FormatTime(epoch=None):
+    if epoch == None:
+        epoch = time.time()
+    return '%04d%02d%02d-%02d%02d%02d' % time.localtime(epoch)[0:6]
+
+class cEnumeration(object):
+    def __init__(self, iterable, function=lambda x: x, Cache=None):
+        self.iterable = iterable
+        self.function = function
+        self.namedTuple = collections.namedtuple('member', 'item item_t index counter remaining total first last left left_t right right_t cached cache_hits cache_misses Cache Redo redo_counter remaining_seconds eta')
+        self.flagRedo = False
+        self.oCache = Cache
+        self.cache_hits = 0
+        self.cache_misses = 0
+        self.timeStart = time.time()
+
+    def __iter__(self):
+        self.index = -1
+        self.total = len(self.iterable)
+        if self.oCache != None and self.oCache.cachedFirst:
+            self.iterable = sorted(self.iterable, key=lambda x: not self.oCache.Exists(x))
+        return self
+
+    def Redo(self, counter):
+        if self.nt.redo_counter < counter:
+            self.nt = self.namedTuple(self.nt.item, self.nt.item_t, self.nt.index, self.nt.counter, self.nt.remaining, self.nt.total, self.nt.first, self.nt.last, self.nt.left, self.nt.left_t, self.nt.right, self.nt.right_t, self.nt.cached, self.nt.cache_hits, self.nt.cache_misses, self.nt.Cache, self.nt.Redo, self.nt.redo_counter + 1, self.nt.remaining_seconds, self.nt.eta)
+            self.flagRedo = True
+            return True
+        else:
+            self.flagRedo = False
+            return False
+
+    def Cache(self, result):
+        if self.oCache == None:
+            return False
+        else:
+            return self.oCache.Cache(self.nt.item, result, self.nt.last)
+
+    def __next__(self):
+        timeNow = time.time()
+        if self.flagRedo:
+            self.flagRedo = False
+            return self.nt
+        if self.index < self.total - 1:
+            self.index += 1
+            first = self.index == 0
+            last = self.index == self.total - 1
+            if first:
+                left = None
+                left_t = None
+                self.item = self.iterable[self.index]
+                self.item_t = self.function(self.item)
+            else:
+                left = self.item
+                left_t = self.item_t
+                self.item = self.right
+                self.item_t = self.right_t
+            if last:
+                self.right = None
+                self.right_t = None
+            else:
+                self.right = self.iterable[self.index + 1]
+                self.right_t = self.function(self.right)
+            if self.oCache == None:
+                cachedResult = None
+            else:
+                cachedResult = self.oCache.Retrieve(self.item)
+            if cachedResult == None:
+                self.cache_misses += 1
+            else:
+                self.cache_hits += 1
+            try:
+                remainingSeconds = (self.total - self.index - 1) / (self.cache_misses / (timeNow - self.timeStart))
+            except ZeroDivisionError:
+                remainingSeconds = 0
+            eta = FormatTime(time.time() + remainingSeconds)
+            self.nt = self.namedTuple(self.item, self.item_t, self.index, self.index + 1, self.total - self.index - 1, self.total, first, last, left, left_t, self.right, self.right_t, cachedResult, self.cache_hits, self.cache_misses, self.Cache, self.Redo, 0, remainingSeconds, eta)
+            return self.nt
+        raise StopIteration
+
+class cMagicValue(object):
+    def __init__(self, data):
+        self.data = data[:4]
+        self.hexadecimal = binascii.b2a_hex(self.data).decode()
+        self.printable = ''.join([chr(byte) if byte >= 32 and byte < 127 else '.' for byte in self.data])
+        self.both = self.printable + ' ' + self.hexadecimal
+
+class cHashCRC32():
+    def __init__(self):
+        self.crc32 = None
+
+    def update(self, data):
+        self.crc32 = zlib.crc32(data)
+
+    def hexdigest(self):
+        return '%08x' % (self.crc32 & 0xffffffff)
+
+class cHashChecksum8():
+    def __init__(self):
+        self.sum = 0
+
+    def update(self, data):
+        if sys.version_info[0] >= 3:
+            self.sum += sum(data)
+        else:
+            self.sum += sum(map(ord, data))
+
+    def hexdigest(self):
+        return '%08x' % (self.sum)
+
+dSpecialHashes = {'crc32': cHashCRC32, 'checksum8': cHashChecksum8}
+
+def GetHashObjects(algorithms):
+    global dSpecialHashes
+
+    dHashes = {}
+
+    if algorithms == '':
+        algorithms = os.getenv('DSS_DEFAULT_HASH_ALGORITHMS', 'md5')
+    if ',' in algorithms:
+        hashes = algorithms.split(',')
+    else:
+        hashes = algorithms.split(';')
+    for name in hashes:
+        if not name in dSpecialHashes.keys() and not name in hashlib.algorithms_available:
+            print('Error: unknown hash algorithm: %s' % name)
+            print('Available hash algorithms: ' + ' '.join([name for name in list(hashlib.algorithms_available)] + list(dSpecialHashes.keys())))
+            return [], {}
+        elif name in dSpecialHashes.keys():
+            dHashes[name] = dSpecialHashes[name]()
+        else:
+            dHashes[name] = hashlib.new(name)
+
+    return hashes, dHashes
+
+def CalculateChosenHash(data):
+    hashes, dHashes = GetHashObjects('')
+    dHashes[hashes[0]].update(data)
+    return dHashes[hashes[0]].hexdigest(), hashes[0]
+
+def GetDumpOption(options, default=None):
+    dPossibleOptions = {
+        'asciidump': 'a',
+        'hexdump': 'x',
+        'dump': 'd',
+        'asciidumprle': 'A',
+        'hexdumpnows': 'X',
+        'base64': 'b',
+        'base64nows': 'B',
+    }
+
+    for attribute, option in dPossibleOptions.items():
+        if hasattr(options, attribute) and getattr(options, attribute):
+            return option
+    return default
+
+def DoDump(data, options, oOutput, default='a'):
+    if hasattr(options, 'dump') and options.dump:
+        oOutput.WriteBinary(data)
+    else:
+        oOutput.Line(cDump(data).DumpOption(GetDumpOption(options, default)))
+
+class cStartsWithGetRemainder():
+
+    def __init__(self, strIn, strStart):
+        self.strIn = strIn
+        self.strStart = strStart
+        self.match = False
+        self.remainder = None
+        if self.strIn.startswith(self.strStart):
+            self.match = True
+            self.remainder = self.strIn[len(self.strStart):]
+
+class cWriteProcessedFile():
+
+    def __init__(self, mode, source, destination):
+        self.mode = mode # '' 'replace' 'bak' 'copytree'
+        self.source = source
+        self. destination =  destination
+
+    def PrepareNewName(self, filename):
+        if self.mode == '':
+            return ''
+        elif self.mode == 'replace':
+            return filename
+        elif self.mode == 'bak':
+            os.replace(filename, filename + '.bak')
+            return filename
+        elif self.mode == 'copytree':
+            oStartsWithGetRemainder = cStartsWithGetRemainder(filename.lower(), self.source.lower())
+            if oStartsWithGetRemainder.match:
+                newfilename = self.destination + oStartsWithGetRemainder.remainder
+                os.makedirs(os.path.dirname(newfilename), exist_ok=True)
+                return newfilename
+            return ''
+        else:
+            raise Exception('cWriteProcessedFile')
+
+    def WriteAccordingToMode(self, filename, data):
+        newfilename = self.PrepareNewName(filename)
+        if newfilename != '':
+            with open(newfilename, 'wb') as fOut:
+                fOut.write(data)
+        return newfilename
+
+def YARACompile(ruledata):
+    if ruledata.startswith('#'):
+        if ruledata.startswith('#h#'):
+            rule = binascii.a2b_hex(ruledata[3:])
+        elif ruledata.startswith('#b#'):
+            rule = binascii.a2b_base64(ruledata[3:])
+        elif ruledata.startswith('#s#'):
+            rule = 'rule string {strings: $a = "%s" ascii wide nocase condition: $a}' % ruledata[3:]
+        elif ruledata.startswith('#q#'):
+            rule = ruledata[3:].replace("'", '"')
+        elif ruledata.startswith('#x#'):
+            rule = 'rule hexadecimal {strings: $a = { %s } condition: $a}' % ruledata[3:]
+        elif ruledata.startswith('#r#'):
+            rule = 'rule regex {strings: $a = /%s/ ascii wide nocase condition: $a}' % ruledata[3:]
+        else:
+            rule = ruledata[1:]
+        return yara.compile(source=rule)
+    else:
+        dFilepaths = {}
+        if os.path.isdir(ruledata):
+            for root, dirs, files in os.walk(ruledata):
+                for file in files:
+                    filename = os.path.join(root, file)
+                    dFilepaths[filename] = filename
+        else:
+            for filename in ProcessAt(ruledata):
+                dFilepaths[filename] = filename
+        return yara.compile(filepaths=dFilepaths)
+
+def FormatTimeUTC(epoch=None):
+    if epoch == None:
+        epoch = time.time()
+    return '%04d/%02d/%02d %02d:%02d:%02d' % time.gmtime(epoch)[0:6]
+
+#https://en.wikipedia.org/wiki/Binary_prefix
+def ParseIntegerIEC(argument):
+    oMatch = re.match('(.*[0-9]+)([a-z]+)$', argument, re.I)
+    if oMatch == None:
+        return ParseInteger(argument)
+
+    dSuffix = {
+        'k': 2 ** 10,
+        'm': 2 ** 20,
+        'g': 2 ** 30,
+        'kib': 2 ** 10,
+        'mib': 2 ** 20,
+        'gib': 2 ** 30,
+        'kb': 1000,
+        'mb': 1000 ** 2,
+        'gb': 1000 ** 3,
+    }
+
+    return ParseInteger(oMatch.groups()[0]) * dSuffix[oMatch.groups()[1].lower()]
+
+def XORGenerator(data):
+    for key in range(256):
+        yield [['xor', key], bytes([byte ^ key for byte in data])]
+
+def ADDGenerator(data):
+    for key in range(1, 256):
+        yield [['add', key], bytes([(byte + key) % 256 for byte in data])]
+
+def ROLGenerator(data):
+    for key in range(1, 8):
+        yield [['rol', key], bytes([(byte << key | byte >> (8 - key)) % 256 for byte in data])]
+
+def ROT(byte, key):
+    if byte >= 65 and byte <= 90:
+        byte += key
+        if byte > 90:
+            byte -= 26
+    elif byte >= 97 and byte <= 122:
+        byte += key
+        if byte > 122:
+            byte -= 26
+    return byte
+
+def ROTGenerator(data):
+    for key in range(1, 26):
+        yield [['rot', key], bytes([ROT(byte, key) for byte in data])]
+
+GENERATORS = [XORGenerator, ADDGenerator, ROLGenerator, ROTGenerator]
+
+def IsPrintable(data):
     for byte in data:
-        if byte < 0x20 or byte >= 0x7F:
+        if byte < 0x20 or byte > 0x7F:
             return False
     return True
 
-def ContentCheck(data, type):
-    return ContentCheckIsPrintable(data)
+def IsPrintableOrWhitespace(data):
+    for byte in data:
+        if not byte in [0x09, 0x0a, 0x0b, 0x0c, 0x0d] and (byte < 0x20 or byte > 0x7F):
+            return False
+    return True
 
-def StartsWithGetRemainder(strIn, strStart):
-    if strIn.startswith(strStart):
-        return True, strIn[len(strStart):]
-    else:
-        return False, None
-    
-def ProcessBinaryFile(filename, content, cutexpression, flag, oOutput, oLogfile, options, oParserFlag):
+def ProcessBinaryFile(filename, content, cutexpression, flag, oRules, dResults, oOutput, oLogfile, options, oParserFlag):
     if content == None:
         try:
             oBinaryFile = cBinaryFile(filename, C2BIP3(options.password), options.noextraction, options.literalfilenames)
@@ -1432,31 +2001,42 @@ def ProcessBinaryFile(filename, content, cutexpression, flag, oOutput, oLogfile,
             return
         data = CutData(data, cutexpression)[0]
         oBinaryFile.close()
+        extracted = oBinaryFile.extracted
     else:
         data = content
+        extracted = False
 
     (flagoptions, flagargs) = oParserFlag.parse_args(flag.split(' '))
 
     try:
         # ----- Put your data processing code here -----
-        if options.type == 'printable':
-            oOutput.Line('File: %s%s' % (filename, IFF(oBinaryFile.extracted, ' (extracted)', '')))
-            for key in range(0, 0x100):
-                dataDecoded = bytes([byte ^ key for byte in data])
-                if ContentCheck(dataDecoded, 'printable'):
-                    oOutput.Line('XOR 0x%02x: %s' % (key, repr(dataDecoded[:40])))
+        if options.python != '':
+            pythonfunction = eval(options.python)
         else:
-            check, operand = StartsWithGetRemainder(options.decode.lower(), 'xor 0x')
-            if not check:
-                oOutput.Line('Supported decode command: "XOR 0x??"')
-                return
-            key = int(operand, 16)
-            dataDecoded = bytes([byte ^ key for byte in data])
-            oOutput.Line(dataDecoded.decode())
-                
-#        if flagoptions.length:
-#            oOutput.Line('%s len(data) = %d' % (filename, len(data)))
-#        oOutput.Line(cDump(data[0:0x100]).HexAsciiDump())
+            pythonfunction = None
+        for Function in GENERATORS:
+            for operation, encoded in Function(data):
+                if oRules != None:
+                    for result in oRules.match(data=encoded):
+                        if not options.yarastringsraw:
+                            row = [filename, operation[0], '0x%02x' % operation[1], result.namespace, result.rule]
+                            oOutput.CSVWriteRow(row)
+                        if options.yarastrings:
+                            for yaramatch in result.strings:
+                                for instance in yaramatch.instances:
+                                    row = ['', yaramatch.identifier, instance]
+                                    oOutput.CSVWriteRow(row)
+                        elif options.yarastringsraw:
+                            for yaramatch in result.strings:
+                                for instance in yaramatch.instances:
+                                    row = [instance]
+                                    oOutput.CSVWriteRow(row)
+                elif pythonfunction != None:
+                    if pythonfunction(encoded):
+                        row = [filename, operation[0], '0x%02x' % operation[1]]
+                        oOutput.CSVWriteRow(row)
+                        if GetDumpOption(options) != None:
+                            DoDump(encoded, options, oOutput)
         # ----------------------------------------------
     except:
         oLogfile.LineError('Processing file %s %s' % (filename, repr(sys.exc_info()[1])))
@@ -1465,22 +2045,88 @@ def ProcessBinaryFile(filename, content, cutexpression, flag, oOutput, oLogfile,
 
 #    data = CutData(cBinaryFile(filename, C2BIP3(options.password), options.noextraction, options.literalfilenames).Data(), cutexpression)[0]
 
+def ProduceJSON(items):
+    for item in items:
+        item['content'] = binascii.b2a_base64(item['content']).decode().strip('\n')
+
+    return json.dumps({'version': 2, 'id': 'didierstevens.com', 'type': 'content', 'fields': ['id', 'name', 'content'], 'items': items})
+
+def OutputJSON(items, oOutput, options):
+    index = 0
+    itemsoutput = []
+    for item in items:
+        for Function in GENERATORS:
+            for operation, encoded in Function(item['content']):
+                itemsoutput.append({'id': index, 'name': '%s[%s 0x%02x]' % (item['name'], operation[0], operation[1]), 'content': encoded})
+                index += 1
+    oOutput.Line(ProduceJSON(itemsoutput))
+
+def Files2MyJSON(filenames, options):
+    items = []
+    id = 1
+    for filename, cutexpression, flag in filenames:
+        oBinaryFile = cBinaryFile(filename, C2BIP3(options.password), options.noextraction, options.literalfilenames)
+        data = oBinaryFile.read()
+        data = CutData(data, cutexpression)[0]
+        oBinaryFile.close()
+        items.append({'id': id, 'name': filename, 'content': data})
+        id += 1
+    return items
+
+def RemoveFilesFromPriorRuns(filenames, filenamedatabase):
+    jsonfilename = 'filenamedatabase-%s.json' % filenamedatabase
+    if not os.path.exists(jsonfilename):
+        return filenames, {}
+
+    dDatabase = json.load(open(jsonfilename, 'r'))
+    return [filename for filename in filenames if filename[0] not in dDatabase.keys()], dDatabase
+
+def AddFilesToPriorRunsDatabase(dDatabase, filenamedatabase):
+    jsonfilename = 'filenamedatabase-%s.json' % filenamedatabase
+    json.dump(dDatabase, open(jsonfilename, 'w'))
+
 def ProcessBinaryFiles(filenames, oLogfile, options, oParserFlag):
+    if options.yara != '':
+        if not 'yara' in sys.modules:
+            print('Error: option yara requires the YARA Python module.')
+            return
+        oRules = YARACompile(options.yara)
+    else:
+        oRules = None
+
+    dResults = {}
     oOutput = InstantiateCOutput(options)
     index = 0
-    if options.jsoninput:
+    if options.jsonoutput:
+        if options.jsoninput:
+            items = CheckJSON(sys.stdin.read())
+            if items == None:
+                return
+        else:
+            items = Files2MyJSON(filenames, options)
+        OutputJSON(items, oOutput, options)
+    elif options.jsoninput:
         items = CheckJSON(sys.stdin.read())
         if items == None:
             return
         for item in items:
             oOutput.Filename(item['name'], index, len(items))
             index += 1
-            ProcessBinaryFile(item['name'], item['content'], '', '', oOutput, oLogfile, options, oParserFlag)
+            ProcessBinaryFile(item['name'], item['content'], '', '', oRules, dResults, oOutput, oLogfile, options, oParserFlag)
     else:
+        if options.filenamedatabase != '':
+            filenames, dDatabaseFilenames = RemoveFilesFromPriorRuns(filenames, options.filenamedatabase)
+        else:
+            dDatabaseFilenames = {}
+
         for filename, cutexpression, flag in filenames:
             oOutput.Filename(filename, index, len(filenames))
             index += 1
-            ProcessBinaryFile(filename, None, cutexpression, flag, oOutput, oLogfile, options, oParserFlag)
+            dDatabaseFilenames[filename] = time.time()
+            ProcessBinaryFile(filename, None, cutexpression, flag, oRules, dResults, oOutput, oLogfile, options, oParserFlag)
+
+        if options.filenamedatabase != '':
+            AddFilesToPriorRunsDatabase(dDatabaseFilenames, options.filenamedatabase)
 
 def Main():
     moredesc = '''
@@ -1494,18 +2140,36 @@ https://DidierStevens.com'''
 
     oParser = optparse.OptionParser(usage='usage: %prog [options] [[@]file|cut-expression|flag-expression ...]\n' + __description__ + moredesc, version='%prog ' + __version__, epilog='This tool also accepts flag arguments (#f#), read the man page (-m) for more info.')
     oParser.add_option('-m', '--man', action='store_true', default=False, help='Print manual')
-    oParser.add_option('-d', '--decode', type=str, default='', help='Decode (XOR key)')
-    oParser.add_option('-t', '--type', type=str, default='', help='Content type (printable)')
     oParser.add_option('-o', '--output', type=str, default='', help='Output to file (# supported)')
+    oParser.add_option('-j', '--jsoninput', action='store_true', default=False, help='Consume JSON from stdin')
+    oParser.add_option('-J', '--jsonoutput', action='store_true', default=False, help='Produce JSON output')
+    oParser.add_option('-y', '--yara', type=str, default='', help="YARA rule file (or directory or @file or adhoc file) to check files")
+    oParser.add_option('--yarastrings', action='store_true', default=False, help='Print YARA strings')
+    oParser.add_option('--yarastringsraw', action='store_true', default=False, help='Print only YARA strings')
+    oParser.add_option('-P', '--python', type=str, default='', help="Python function to check results")
+    oParser.add_option('-s', '--script', default='', help='Script with definitions to include')
     oParser.add_option('-p', '--password', default='infected', help='The ZIP password to be used (default infected)')
     oParser.add_option('-n', '--noextraction', action='store_true', default=False, help='Do not extract from archive file')
     oParser.add_option('-l', '--literalfilenames', action='store_true', default=False, help='Do not interpret filenames')
     oParser.add_option('-r', '--recursedir', action='store_true', default=False, help='Recurse directories (wildcards and here files (@...) allowed)')
     oParser.add_option('--checkfilenames', action='store_true', default=False, help='Perform check if files exist prior to file processing')
-    oParser.add_option('-j', '--jsoninput', action='store_true', default=False, help='Consume JSON from stdin')
     oParser.add_option('--logfile', type=str, default='', help='Create logfile with given keyword')
     oParser.add_option('--logcomment', type=str, default='', help='A string with comments to be included in the log file')
     oParser.add_option('--ignoreprocessingerrors', action='store_true', default=False, help='Ignore errors during file processing')
+    oParser.add_option('--filenamedatabase', type=str, default='', help='Use this to skip files that have been processed in prior runs')
+    oParser.add_option('--excludefilenames', type=str, default='', help='Filenames to exclude (comma separated, @file supported)')
+    oParser.add_option('--writemode', type=str, default='', help='Define writemode')
+    oParser.add_option('--writesource', type=str, default='', help='Part of the sourcepath to replace')
+    oParser.add_option('--writedestination', type=str, default='', help='Replacement for part of the sourcepath (--writesource)')
+
+    oParser.add_option('-d', '--dump', action='store_true', default=False, help='perform dump')
+    oParser.add_option('-x', '--hexdump', action='store_true', default=False, help='perform hex dump')
+    oParser.add_option('-X', '--hexdumpnows', action='store_true', default=False, help='perform hex dump without whitespace')
+    oParser.add_option('-a', '--asciidump', action='store_true', default=False, help='perform ascii dump')
+    oParser.add_option('-A', '--asciidumprle', action='store_true', default=False, help='perform ascii dump with RLE')
+    oParser.add_option('-b', '--base64', action='store_true', default=False, help='perform BASE64 dump')
+    oParser.add_option('-B', '--base64nows', action='store_true', default=False, help='perform BASE64 dump without whitespace')
+
     (options, args) = oParser.parse_args()
 
     if options.man:
@@ -1518,16 +2182,11 @@ https://DidierStevens.com'''
         print('Error: option -j can not be used with files')
         return
 
-    if options.decode == '' and options.type == '' or options.decode != '' and options.type != '':
-        print('Use option -t or -d')
-        return
-
-    if options.type != '' and options.type != 'printable':
-        print('Only "printable" is supported for option -t in this version')
-        return
+    if options.script != '':
+        exec(open(options.script, 'r').read(), globals())
 
     oLogfile = cLogfile(options.logfile, options.logcomment)
-    oExpandFilenameArguments = cExpandFilenameArguments(args, options.literalfilenames, options.recursedir, options.checkfilenames, '#c#', '#f#')
+    oExpandFilenameArguments = cExpandFilenameArguments(args, options.literalfilenames, options.recursedir, options.excludefilenames, options.checkfilenames, '#c#', '#f#')
     oLogfile.Line('FilesCount', str(len(oExpandFilenameArguments.Filenames())))
     oLogfile.Line('Files', repr(oExpandFilenameArguments.Filenames()))
     if oExpandFilenameArguments.warning:
