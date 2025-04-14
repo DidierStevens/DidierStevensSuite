@@ -4,8 +4,8 @@ from __future__ import print_function
 
 __description__ = 'XORsearch in Python'
 __author__ = 'Didier Stevens'
-__version__ = '0.0.2'
-__date__ = '2025/04/13'
+__version__ = '0.0.3'
+__date__ = '2025/04/14'
 
 """
 Source code put in the public domain by Didier Stevens, no Copyright
@@ -17,6 +17,7 @@ History:
   2024/09/23: 0.0.2 rewrite
   2025/04/04: continue
   2025/04/13: man
+  2025/04/14: 0.0.3 added option verbose
 
 Todo:
   Document flag arguments in man page
@@ -1907,7 +1908,7 @@ def YARACompile(ruledata):
             rule = 'rule regex {strings: $a = /%s/ ascii wide nocase condition: $a}' % ruledata[3:]
         else:
             rule = ruledata[1:]
-        return yara.compile(source=rule)
+        return yara.compile(source=rule), rule
     else:
         dFilepaths = {}
         if os.path.isdir(ruledata):
@@ -1918,7 +1919,7 @@ def YARACompile(ruledata):
         else:
             for filename in ProcessAt(ruledata):
                 dFilepaths[filename] = filename
-        return yara.compile(filepaths=dFilepaths)
+        return yara.compile(filepaths=dFilepaths), ','.join(dFilepaths.values())
 
 def FormatTimeUTC(epoch=None):
     if epoch == None:
@@ -2021,6 +2022,8 @@ def ProcessBinaryFile(filename, content, cutexpression, flag, oRules, dResults, 
                         if not options.yarastringsraw:
                             row = [filename, operation[0], '0x%02x' % operation[1], result.namespace, result.rule]
                             oOutput.CSVWriteRow(row)
+                            if GetDumpOption(options) != None:
+                                DoDump(encoded, options, oOutput)
                         if options.yarastrings:
                             for yaramatch in result.strings:
                                 for instance in yaramatch.instances:
@@ -2090,7 +2093,9 @@ def ProcessBinaryFiles(filenames, oLogfile, options, oParserFlag):
         if not 'yara' in sys.modules:
             print('Error: option yara requires the YARA Python module.')
             return
-        oRules = YARACompile(options.yara)
+        oRules, rulesVerbose = YARACompile(options.yara)
+        if options.verbose:
+            print(rulesVerbose)
     else:
         oRules = None
 
@@ -2161,6 +2166,7 @@ https://DidierStevens.com'''
     oParser.add_option('--writemode', type=str, default='', help='Define writemode')
     oParser.add_option('--writesource', type=str, default='', help='Part of the sourcepath to replace')
     oParser.add_option('--writedestination', type=str, default='', help='Replacement for part of the sourcepath (--writesource)')
+    oParser.add_option('-V', '--verbose', action='store_true', default=False, help='verbose output with YARA rules')
 
     oParser.add_option('-d', '--dump', action='store_true', default=False, help='perform dump')
     oParser.add_option('-x', '--hexdump', action='store_true', default=False, help='perform hex dump')
