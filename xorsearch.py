@@ -4,8 +4,8 @@ from __future__ import print_function
 
 __description__ = 'XORsearch in Python'
 __author__ = 'Didier Stevens'
-__version__ = '0.0.3'
-__date__ = '2025/04/14'
+__version__ = '0.0.4'
+__date__ = '2025/04/21'
 
 """
 Source code put in the public domain by Didier Stevens, no Copyright
@@ -18,6 +18,7 @@ History:
   2025/04/04: continue
   2025/04/13: man
   2025/04/14: 0.0.3 added option verbose
+  2025/04/21: 0.0.4 bugfix YARACompile
 
 Todo:
   Document flag arguments in man page
@@ -1895,9 +1896,9 @@ class cWriteProcessedFile():
 def YARACompile(ruledata):
     if ruledata.startswith('#'):
         if ruledata.startswith('#h#'):
-            rule = binascii.a2b_hex(ruledata[3:])
+            rule = binascii.a2b_hex(ruledata[3:]).decode('latin')
         elif ruledata.startswith('#b#'):
-            rule = binascii.a2b_base64(ruledata[3:])
+            rule = binascii.a2b_base64(ruledata[3:]).decode('latin')
         elif ruledata.startswith('#s#'):
             rule = 'rule string {strings: $a = "%s" ascii wide nocase condition: $a}' % ruledata[3:]
         elif ruledata.startswith('#q#'):
