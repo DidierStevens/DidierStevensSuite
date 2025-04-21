@@ -2,8 +2,8 @@
 
 __description__ = 'pdf-parser, use it to parse a PDF document'
 __author__ = 'Didier Stevens'
-__version__ = '0.7.11'
-__date__ = '2025/03/04'
+__version__ = '0.7.12'
+__date__ = '2025/04/21'
 __minimum_python_version__ = (2, 5, 1)
 __maximum_python_version__ = (3, 12, 2)
 
@@ -78,6 +78,7 @@ History:
   2024/10/25: V0.7.10 /ObjStm fix (x9090 PR)
   2024/10/26: added pyzipper support
   2025/03/04: V0.7.11 regex string fix Python 3.12 xambroz
+  2025/04/21: V0.7.12 bugfix YARACompile
 
 Todo:
   - handle printf todo
@@ -1210,9 +1211,9 @@ def ProcessAt(argument):
 def YARACompile(ruledata):
     if ruledata.startswith('#'):
         if ruledata.startswith('#h#'):
-            rule = binascii.a2b_hex(ruledata[3:])
+            rule = binascii.a2b_hex(ruledata[3:]).decode('latin')
         elif ruledata.startswith('#b#'):
-            rule = binascii.a2b_base64(ruledata[3:])
+            rule = binascii.a2b_base64(ruledata[3:]).decode('latin')
         elif ruledata.startswith('#s#'):
             rule = 'rule string {strings: $a = "%s" ascii wide nocase condition: $a}' % ruledata[3:]
         elif ruledata.startswith('#q#'):

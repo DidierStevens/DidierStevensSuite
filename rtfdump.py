@@ -2,8 +2,8 @@
 
 __description__ = 'Analyze RTF files'
 __author__ = 'Didier Stevens'
-__version__ = '0.0.12'
-__date__ = '2022/10/22'
+__version__ = '0.0.13'
+__date__ = '2025/04/21'
 
 """
 
@@ -46,6 +46,7 @@ History:
   2022/08/06: 0.0.11 added option -F
   2022/09/27: added --jsonoutput for -F and -O
   2022/10/22: 0.0.12 added CreateZipFileObject
+  2025/04/21: 0.0.13 bugfix YARACompile
 
 Todo:
 """
@@ -1053,9 +1054,9 @@ def RTFSub(oBytesIO, prefix, rules, options):
 def YARACompile(ruledata):
     if ruledata.startswith('#'):
         if ruledata.startswith('#h#'):
-            rule = binascii.a2b_hex(ruledata[3:])
+            rule = binascii.a2b_hex(ruledata[3:]).decode('latin')
         elif ruledata.startswith('#b#'):
-            rule = binascii.a2b_base64(ruledata[3:])
+            rule = binascii.a2b_base64(ruledata[3:]).decode('latin')
         elif ruledata.startswith('#s#'):
             rule = 'rule string {strings: $a = "%s" ascii wide nocase condition: $a}' % ruledata[3:]
         elif ruledata.startswith('#q#'):

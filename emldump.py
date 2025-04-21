@@ -2,8 +2,8 @@
 
 __description__ = 'EML dump utility'
 __author__ = 'Didier Stevens'
-__version__ = '0.0.14'
-__date__ = '2024/06/18'
+__version__ = '0.0.15'
+__date__ = '2025/04/21'
 
 """
 
@@ -33,6 +33,7 @@ History:
   2023/08/29: 0.0.12 bug fixes; added option -F
   2023/09/18: 0.0.13 added option --jsonoutput
   2024/06/18: 0.0.14: changed encoding from utf8 to utf-8-sig
+  2025/04/21: 0.0.15 bugfix YARACompile
 
 Todo:
 """
@@ -298,9 +299,9 @@ def IsNumeric(str):
 def YARACompile(ruledata):
     if ruledata.startswith('#'):
         if ruledata.startswith('#h#'):
-            rule = binascii.a2b_hex(ruledata[3:])
+            rule = binascii.a2b_hex(ruledata[3:]).decode('latin')
         elif ruledata.startswith('#b#'):
-            rule = binascii.a2b_base64(ruledata[3:])
+            rule = binascii.a2b_base64(ruledata[3:]).decode('latin')
         elif ruledata.startswith('#s#'):
             rule = 'rule string {strings: $a = "%s" ascii wide nocase condition: $a}' % ruledata[3:]
         elif ruledata.startswith('#q#'):

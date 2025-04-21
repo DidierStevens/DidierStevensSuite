@@ -2,8 +2,8 @@
 
 __description__ = 'Extract base64 strings from file'
 __author__ = 'Didier Stevens'
-__version__ = '0.0.27'
-__date__ = '2024/11/24'
+__version__ = '0.0.28'
+__date__ = '2025/04/21'
 
 """
 
@@ -46,6 +46,7 @@ History:
   2024/04/16: 0.0.25 added selection of original; ExtractLongestString; --sort
   2024/11/19: 0.0.26 bugfix ExtractStrings
   2024/11/24: 0.0.27 added select option A
+  2025/04/21: 0.0.28 bugfix YARACompile
 
 Todo:
   add base64 url
@@ -1163,9 +1164,9 @@ def DecodeDataNETBIOSLowercase(items, PreProcessFunction, PostProcessFunction):
 def YARACompile(ruledata):
     if ruledata.startswith('#'):
         if ruledata.startswith('#h#'):
-            rule = binascii.a2b_hex(ruledata[3:])
+            rule = binascii.a2b_hex(ruledata[3:]).decode('latin')
         elif ruledata.startswith('#b#'):
-            rule = binascii.a2b_base64(ruledata[3:])
+            rule = binascii.a2b_base64(ruledata[3:]).decode('latin')
         elif ruledata.startswith('#s#'):
             rule = 'rule string {strings: $a = "%s" ascii wide nocase condition: $a}' % ruledata[3:]
         elif ruledata.startswith('#q#'):

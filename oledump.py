@@ -2,8 +2,8 @@
 
 __description__ = 'Analyze OLE files (Compound Binary Files)'
 __author__ = 'Didier Stevens'
-__version__ = '0.0.79'
-__date__ = '2025/03/04'
+__version__ = '0.0.80'
+__date__ = '2025/04/21'
 
 """
 
@@ -128,6 +128,7 @@ History:
   2024/07/11: 0.0.77 bumping version for update to plugin(s), no changes to oledump.py
   2024/12/24: 0.0.78 Python 3.12 fix mattew124
   2025/03/04: 0.0.79 fixed URL in man page kristofbaute
+  2025/04/21: 0.0.80 bugfix YARACompile
 
 Todo:
 
@@ -2158,9 +2159,9 @@ def OLESub(ole, data, prefix, rules, options):
 def YARACompile(ruledata):
     if ruledata.startswith('#'):
         if ruledata.startswith('#h#'):
-            rule = binascii.a2b_hex(ruledata[3:])
+            rule = binascii.a2b_hex(ruledata[3:]).decode('latin')
         elif ruledata.startswith('#b#'):
-            rule = binascii.a2b_base64(ruledata[3:])
+            rule = binascii.a2b_base64(ruledata[3:]).decode('latin')
         elif ruledata.startswith('#s#'):
             rule = 'rule string {strings: $a = "%s" ascii wide nocase condition: $a}' % ruledata[3:]
         elif ruledata.startswith('#q#'):

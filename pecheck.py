@@ -2,8 +2,8 @@
 
 __description__ = 'Tool for displaying PE file info'
 __author__ = 'Didier Stevens'
-__version__ = '0.7.16'
-__date__ = '2023/06/18'
+__version__ = '0.7.17'
+__date__ = '2025/04/21'
 
 """
 
@@ -58,6 +58,7 @@ History:
   2023/05/26: 0.7.16 added pyzipper support and extra statistics
   2023/05/28: added locate options valid values PE and PO
   2023/06/18: updated man
+  2025/04/21: 0.7.17 bugfix YARACompile
 
 Todo:
 """
@@ -278,9 +279,9 @@ def ReadFile(filename):
 def YARACompile(ruledata):
     if ruledata.startswith('#'):
         if ruledata.startswith('#h#'):
-            rule = binascii.a2b_hex(ruledata[3:])
+            rule = binascii.a2b_hex(ruledata[3:]).decode('latin')
         elif ruledata.startswith('#b#'):
-            rule = binascii.a2b_base64(ruledata[3:])
+            rule = binascii.a2b_base64(ruledata[3:]).decode('latin')
         elif ruledata.startswith('#s#'):
             rule = 'rule string {strings: $a = "%s" ascii wide nocase condition: $a}' % ruledata[3:]
         elif ruledata.startswith('#q#'):
@@ -474,30 +475,24 @@ def CalculateByteStatistics(dPrevalence=None, data=None):
             lengthBASE64String = 0
             lengthHEXString = 0
             for byte in data:
-                byte = C2IIP2(byte)
                 dPrevalence[byte] += 1
                 if previous != None:
                     sumDifferences += abs(byte - previous)
-                    if byte >= 0x20 and byte < 0x7F:
-                        lengthString += 1
-                    else:
-                        longestString = max(longestString, lengthString)
-                        lengthString = 0
-                    if byte in base64digits:
-                        lengthBASE64String += 1
-                    else:
-                        longestBASE64String = max(longestBASE64String, lengthBASE64String)
-                        lengthBASE64String = 0
-                    if byte in hexdigits:
-                        lengthHEXString += 1
-                    else:
-                        longestHEXString = max(longestHEXString, lengthHEXString)
-                        lengthHEXString = 0
-                else:
-                    if byte >= 0x20 and byte < 0x7F:
-                        lengthString = 1
-                    if byte in hexdigits:
-                        lengthHEXString = 1
+                if byte >= 0x20 and byte < 0x7F:
+                    lengthString += 1
+                elif lengthString != 0:
+                    longestString = max(longestString, lengthString)
+                    lengthString = 0
+                if byte in base64digits:
+                    lengthBASE64String += 1
+                elif lengthBASE64String != 0:
+                    longestBASE64String = max(longestBASE64String, lengthBASE64String)
+                    lengthBASE64String = 0
+                if byte in hexdigits:
+                    lengthHEXString += 1
+                elif lengthHEXString != 0:
+                    longestHEXString = max(longestHEXString, lengthHEXString)
+                    lengthHEXString = 0
                 previous = byte
             averageConsecutiveByteDifference = sumDifferences /float(len(data)-1)
             longestString = max(longestString, lengthString)
