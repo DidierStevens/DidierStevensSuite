@@ -2,8 +2,8 @@
 
 __description__ = "Program to use Python's re.findall on files"
 __author__ = 'Didier Stevens'
-__version__ = '0.0.22'
-__date__ = '2023/04/01'
+__version__ = '0.0.23'
+__date__ = '2025/02/09'
 
 """
 
@@ -55,6 +55,8 @@ History:
   2022/07/24: 0.0.21 added UNC regex
   2023/02/17: 0.0.22 added hash regexes
   2023/04/01: added str-s regexes
+  2024/02/14: 0.0.23 added tab (\t) support for separator
+  2025/02/09: added options --recursedir, literalfilenames and checkfilenames
 
 Todo:
   add hostname to header
@@ -72,6 +74,7 @@ import textwrap
 import csv
 import binascii
 import gzip
+import fnmatch
 
 try:
     import reextra
@@ -262,6 +265,12 @@ re-search.py requires module reextra, which is part of the re-search package.
 
 Option -F can be used to filter matched strings. Use option -F ? to get a list of available filters.
 
+The content of folders can be processed too: use option --recursedir and provide folder names as argument. Wildcards and here files (for folder names) can be used too.
+
+To prevent the tool from processing file arguments with wildcard characters or special initial characters (@ and #) differently, but to process them as normal files, use option --literalfilenames.
+
+Use --checkfilenames to test the existance of files before processing.
+
 '''
     for line in manual.split('\n'):
         print(textwrap.fill(line))
@@ -326,6 +335,9 @@ def IFF(expression, valueTrue, valueFalse):
         return CIC(valueTrue)
     else:
         return CIC(valueFalse)
+
+def PrintError(*args, **kwargs):
+    print(*args, file=sys.stderr, **kwargs)
 
 #Fix for http://bugs.python.org/issue11395
 def StdoutWriteChunked(data):
@@ -704,6 +716,94 @@ def ApplyFilter(result, options):
         return dFilters[options.filter][1](result)
     raise Exception('Unknown filter: %' % options.filter)
 
+class cExpandFilenameArguments():
+    def __init__(self, filenames, literalfilenames=False, recursedir=False, checkfilenames=False, expressionprefix=None):
+        self.containsUnixShellStyleWildcards = False
+        self.warning = False
+        self.message = ''
+        self.filenameexpressions = []
+        self.expressionprefix = expressionprefix
+        self.literalfilenames = literalfilenames
+
+        expression = ''
+        if len(filenames) == 0:
+            self.filenameexpressions = [['', '']]
+        elif literalfilenames:
+            self.filenameexpressions = [[filename, ''] for filename in filenames]
+        elif recursedir:
+            for dirwildcard in filenames:
+                if expressionprefix != None and dirwildcard.startswith(expressionprefix):
+                    expression = dirwildcard[len(expressionprefix):]
+                else:
+                    if dirwildcard.startswith('@'):
+                        for filename in ProcessAt(dirwildcard):
+                            self.filenameexpressions.append([filename, expression])
+                    elif os.path.isfile(dirwildcard):
+                        self.filenameexpressions.append([dirwildcard, expression])
+                    else:
+                        if os.path.isdir(dirwildcard):
+                            dirname = dirwildcard
+                            basename = '*'
+                        else:
+                            dirname, basename = os.path.split(dirwildcard)
+                            if dirname == '':
+                                dirname = '.'
+                        for path, dirs, files in os.walk(dirname):
+                            for filename in fnmatch.filter(files, basename):
+                                self.filenameexpressions.append([os.path.join(path, filename), expression])
+        else:
+            for filename in list(collections.OrderedDict.fromkeys(sum(map(self.Glob, sum(map(ProcessAt, filenames), [])), []))):
+                if expressionprefix != None and filename.startswith(expressionprefix):
+                    expression = filename[len(expressionprefix):]
+                else:
+                    self.filenameexpressions.append([filename, expression])
+            self.warning = self.containsUnixShellStyleWildcards and len(self.filenameexpressions) == 0
+            if self.warning:
+                self.message = "Your filename argument(s) contain Unix shell-style wildcards, but no files were matched.\nCheck your wildcard patterns or use option literalfilenames if you don't want wildcard pattern matching."
+                return
+        if self.filenameexpressions == [] and expression != '':
+            self.filenameexpressions = [['', expression]]
+        if checkfilenames:
+            self.CheckIfFilesAreValid()
+
+    def Glob(self, filename):
+        if not ('?' in filename or '*' in filename or ('[' in filename and ']' in filename)):
+            return [filename]
+        self.containsUnixShellStyleWildcards = True
+        return glob.glob(filename)
+
+    def CheckIfFilesAreValid(self):
+        valid = []
+        doesnotexist = []
+        isnotafile = []
+        for filename, expression in self.filenameexpressions:
+            hashfile = False
+            try:
+                hashfile = FilenameCheckHash(filename, self.literalfilenames)[0] == FCH_DATA
+            except:
+                pass
+            if filename == '' or hashfile:
+                valid.append([filename, expression])
+            elif not os.path.exists(filename):
+                doesnotexist.append(filename)
+            elif not os.path.isfile(filename):
+                isnotafile.append(filename)
+            else:
+                valid.append([filename, expression])
+        self.filenameexpressions = valid
+        if len(doesnotexist) > 0:
+            self.warning = True
+            self.message += 'The following files do not exist and will be skipped: ' + ' '.join(doesnotexist) + '\n'
+        if len(isnotafile) > 0:
+            self.warning = True
+            self.message += 'The following files are not regular files and will be skipped: ' + ' '.join(isnotafile) + '\n'
+
+    def Filenames(self):
+        if self.expressionprefix == None:
+            return [filename for filename, expression in self.filenameexpressions]
+        else:
+            return self.filenameexpressions
+
 def Main():
     global dLibrary
 
@@ -750,12 +850,18 @@ https://DidierStevens.com'''
     oParser.add_option('--script', default='', help='Python script file with definitions to include')
     oParser.add_option('--execute', default='', help='Python commands to execute')
     oParser.add_option('--encoding', type=str, default='', help='Encoding for file open')
+    oParser.add_option('--literalfilenames', action='store_true', default=False, help='Do not interpret filenames')
+    oParser.add_option('--recursedir', action='store_true', default=False, help='Recurse directories (wildcards and here files (@...) allowed)')
+    oParser.add_option('--checkfilenames', action='store_true', default=False, help='Perform check if files exist prior to file processing')
     (options, args) = oParser.parse_args()
 
     if options.man:
         oParser.print_help()
         PrintManual()
         return
+
+    if options.separatorcsv == r'\t':
+        options.separatorcsv = '\t'
 
     if options.filter != '' and not options.filter in dFilters:
         if options.filter != '?':
@@ -770,7 +876,11 @@ https://DidierStevens.com'''
     elif len(args) == 1:
         RESearch(args[0], [''], options)
     else:
-        RESearch(args[0], ExpandFilenameArguments(args[1:]), options)
+        oExpandFilenameArguments = cExpandFilenameArguments(args[1:], options.literalfilenames, options.recursedir, options.checkfilenames)
+        if oExpandFilenameArguments.warning:
+            PrintError('\nWarning:')
+            PrintError(oExpandFilenameArguments.message)
+        RESearch(args[0], oExpandFilenameArguments.Filenames(), options)
 
 if __name__ == '__main__':
     Main()
