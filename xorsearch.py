@@ -4,8 +4,8 @@ from __future__ import print_function
 
 __description__ = 'XORsearch in Python'
 __author__ = 'Didier Stevens'
-__version__ = '0.0.4'
-__date__ = '2025/04/21'
+__version__ = '0.0.5'
+__date__ = '2025/04/27'
 
 """
 Source code put in the public domain by Didier Stevens, no Copyright
@@ -19,6 +19,7 @@ History:
   2025/04/13: man
   2025/04/14: 0.0.3 added option verbose
   2025/04/21: 0.0.4 bugfix YARACompile
+  2025/04/27: 0.0.5 bugfix and added option dumpnl
 
 Todo:
   Document flag arguments in man page
@@ -1833,6 +1834,7 @@ def GetDumpOption(options, default=None):
         'asciidump': 'a',
         'hexdump': 'x',
         'dump': 'd',
+        'dumpnl': 'D',
         'asciidumprle': 'A',
         'hexdumpnows': 'X',
         'base64': 'b',
@@ -1847,6 +1849,8 @@ def GetDumpOption(options, default=None):
 def DoDump(data, options, oOutput, default='a'):
     if hasattr(options, 'dump') and options.dump:
         oOutput.WriteBinary(data)
+    elif hasattr(options, 'dumpnl') and options.dumpnl:
+        oOutput.WriteBinary(data + b'\n')
     else:
         oOutput.Line(cDump(data).DumpOption(GetDumpOption(options, default)))
 
@@ -1978,7 +1982,7 @@ GENERATORS = [XORGenerator, ADDGenerator, ROLGenerator, ROTGenerator]
 
 def IsPrintable(data):
     for byte in data:
-        if byte < 0x20 or byte > 0x7F:
+        if byte < 0x20 or byte >= 0x7F:
             return False
     return True
 
@@ -2170,6 +2174,7 @@ https://DidierStevens.com'''
     oParser.add_option('-V', '--verbose', action='store_true', default=False, help='verbose output with YARA rules')
 
     oParser.add_option('-d', '--dump', action='store_true', default=False, help='perform dump')
+    oParser.add_option('-D', '--dumpnl', action='store_true', default=False, help='perform dump and end with newline')
     oParser.add_option('-x', '--hexdump', action='store_true', default=False, help='perform hex dump')
     oParser.add_option('-X', '--hexdumpnows', action='store_true', default=False, help='perform hex dump without whitespace')
     oParser.add_option('-a', '--asciidump', action='store_true', default=False, help='perform ascii dump')
