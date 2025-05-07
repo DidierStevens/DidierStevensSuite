@@ -2,8 +2,8 @@
 
 __description__ = 'Analyze OLE files (Compound Binary Files)'
 __author__ = 'Didier Stevens'
-__version__ = '0.0.80'
-__date__ = '2025/04/21'
+__version__ = '0.0.81'
+__date__ = '2025/05/07'
 
 """
 
@@ -129,6 +129,7 @@ History:
   2024/12/24: 0.0.78 Python 3.12 fix mattew124
   2025/03/04: 0.0.79 fixed URL in man page kristofbaute
   2025/04/21: 0.0.80 bugfix YARACompile
+  2025/05/07: 0.0.81 bumping version for update to plugin(s), no changes to oledump.py
 
 Todo:
 

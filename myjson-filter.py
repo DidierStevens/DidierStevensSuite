@@ -4,8 +4,8 @@ from __future__ import print_function
 
 __description__ = 'myjson-filter'
 __author__ = 'Didier Stevens'
-__version__ = '0.0.6'
-__date__ = '2024/04/14'
+__version__ = '0.0.7'
+__date__ = '2025/05/04'
 
 """
 Source code put in the public domain by Didier Stevens, no Copyright
@@ -20,6 +20,9 @@ History:
   2023/03/29: 0.0.4 added option -W
   2023/09/17: 0.0.5 added YARA support
   2024/04/14: 0.0.6 added HASHEXT
+  2025/03/04: 0.0.7 added option -P
+  2025/04/21: bugfix YARACompile; option --pythonfilter
+  2025/05/04: added plugin options
 
 Todo:
 """
@@ -33,6 +36,7 @@ import textwrap
 import hashlib
 import string
 import os.path
+import subprocess
 
 try:
     import yara
@@ -70,7 +74,15 @@ Flags can be i (ignore case) and v (reverse selection).
 
 Option -y (--yarafilter) can be used to filter items with YARA rules matching the item's content.
 
+Option -P (--pythonfilter) can be used to filter items with a Python function. This function takes 4 arguments: Function(id, name, magic, content) and returns True to select items.
+
+Option -s is used to load Python definitions.
+
+Option -p is used to run plugins on the items.
+
 Use option -l to list the selected items, in stead of outputing JSON data.
+
+Option -r (--process) is used to launch a process per item and pass the content of the item via stdin.
 
 Use option -W to write the selected items to files, in stead of outputing JSON data.
 Valid options for -W are:
@@ -222,9 +234,9 @@ def ProcessAt(argument):
 def YARACompile(ruledata):
     if ruledata.startswith('#'):
         if ruledata.startswith('#h#'):
-            rule = binascii.a2b_hex(ruledata[3:])
+            rule = binascii.a2b_hex(ruledata[3:]).decode('latin')
         elif ruledata.startswith('#b#'):
-            rule = binascii.a2b_base64(ruledata[3:])
+            rule = binascii.a2b_base64(ruledata[3:]).decode('latin')
         elif ruledata.startswith('#s#'):
             rule = 'rule string {strings: $a = "%s" ascii wide nocase condition: $a}' % ruledata[3:]
         elif ruledata.startswith('#q#'):
@@ -248,7 +260,77 @@ def YARACompile(ruledata):
                 dFilepaths[filename] = filename
         return yara.compile(filepaths=dFilepaths), ','.join(dFilepaths.values())
 
+def LoadScriptIfExists(filename):
+    if os.path.exists(filename):
+        exec(open(filename, 'r').read(), globals(), globals())
+
+def IsPrintable(id, name, magic, data):
+    for byte in data:
+        if byte < 0x20 or byte > 0x7F:
+            return False
+    return True
+
+def IsPrintableOrWhitespace(id, name, magic, data):
+    for byte in data:
+        if not byte in [0x09, 0x0a, 0x0b, 0x0c, 0x0d] and (byte < 0x20 or byte > 0x7F):
+            return False
+    return True
+
+def GetScriptPath():
+    if getattr(sys, 'frozen', False):
+        return os.path.dirname(sys.executable)
+    else:
+        return os.path.dirname(sys.argv[0])
+
+def LoadPlugins(plugins, plugindir, verbose):
+    if plugins == '':
+        return
+
+    if plugindir == '':
+        scriptPath = GetScriptPath()
+    else:
+        scriptPath = plugindir
+
+    for plugin in sum(map(ProcessAt, plugins.split(',')), []):
+        try:
+            if not plugin.lower().endswith('.py'):
+                plugin += '.py'
+            if os.path.dirname(plugin) == '':
+                if not os.path.exists(plugin):
+                    scriptPlugin = os.path.join(scriptPath, plugin)
+                    if os.path.exists(scriptPlugin):
+                        plugin = scriptPlugin
+            exec(open(plugin, 'r').read(), globals(), globals())
+        except Exception as e:
+            print('Error loading plugin: %s' % plugin)
+            if verbose:
+                raise e
+
+def AddPlugin(cClass):
+    global plugins
+
+    plugins.append(cClass)
+
+
+class cPluginParent():
+
+    def __init__(self, options):
+        self.options = options
+
+    def PreProcess(self):
+        pass
+
+    def Process(self, id, name, magic, data):
+        pass
+
+    def PostProcess(self):
+        pass
+
+
 def MyJSONFilter(options):
+    global plugins
+    plugins = []
+
     items = CheckJSON(sys.stdin.read())
 
     if items == None:
@@ -305,11 +387,31 @@ def MyJSONFilter(options):
                 selectedItems.append(item)
         items = selectedItems
 
+    if options.pythonfilter != '':
+        Function = eval(options.pythonfilter)
+        selectedItems = []
+        for item in items:
+            if Function(item.get('id', None), item.get('name', None), item.get('magic', None), item.get('content', None)):
+                selectedItems.append(item)
+        items = selectedItems
+
     if options.list:
         for item in items:
             print('%3d: %s%s' % (item['id'], item['name'], PrefixIfNeeded(item.get('magic', ''))))
             if options.content:
                 print(item['content'])
+    elif options.plugins != '':
+        LoadPlugins(options.plugins, options.plugindir, True)
+        for cPlugin in plugins:
+            oPlugin = cPlugin(options.pluginoptions)
+            oPlugin.PreProcess()
+            for item in items:
+                oPlugin.Process(item['id'], item['name'], item.get('magic', None), item['content'])
+            oPlugin.PostProcess()
+    elif options.process != '':
+        for item in items:
+            print('%d: %s%s' % (item['id'], item['name'], PrefixIfNeeded(item.get('magic', ''))))
+            subprocess.run(options.process, input=item['content'])
     elif options.write != '':
         WriteFiles(items, options)
     else:
@@ -328,15 +430,24 @@ https://DidierStevens.com'''
     oParser.add_option('-c', '--contentfilter', type=str, default='', help='Regular expression to filter for the content')
     oParser.add_option('-t', '--typefilter', type=str, default='', help='Regular expression to filter for the type')
     oParser.add_option('-y', '--yarafilter', type=str, default='', help="YARA rule-file, @file, directory or #rule to check")
+    oParser.add_option('-P', '--pythonfilter', type=str, default='', help='Python function to filter')
+    oParser.add_option('-p', '--plugins', type=str, default='', help='Plugin to analyze each item')
+    oParser.add_option('--pluginoptions', type=str, default='', help='options for the plugin')
+    oParser.add_option('--plugindir', type=str, default='', help='directory for the plugin')
+    oParser.add_option('-s', '--script', type=str, default='', help='Script with definitions to include')
     oParser.add_option('-l', '--list', action='store_true', default=False, help='List selected items')
     oParser.add_option('-C', '--content', action='store_true', default=False, help='List also content when option -l is used')
     oParser.add_option('-W', '--write', type=str, default='', help='Write all files to disk')
+    oParser.add_option('-r', '--process', type=str, default='', help='Command to create process for')
     (options, args) = oParser.parse_args()
 
     if options.man:
         oParser.print_help()
         PrintManual()
         return
+
+    if options.script != '':
+        LoadScriptIfExists(options.script)
 
     if len(args) != 0:
         print('Error: this tool expects input from stdin')
