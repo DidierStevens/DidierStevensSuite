@@ -2,8 +2,8 @@
 
 __description__ = 'VBA dir stream parser for oledump.py'
 __author__ = 'Didier Stevens'
-__version__ = '0.0.1'
-__date__ = '2023/04/23'
+__version__ = '0.0.2'
+__date__ = '2025/05/21'
 
 """
 
@@ -13,6 +13,7 @@ Use at your own risk
 
 History:
   2023/04/23: start
+  2025/05/21: 0.0.2 added option force
 
 Todo:
   write parser for REFERENCECONTROL
@@ -66,7 +67,11 @@ class cVBADir(cPluginParent):
     def Analyze(self):
         result = []
 
-        if self.streamname[-1].lower() == 'dir':
+        oParser = optparse.OptionParser()
+        oParser.add_option('-f', '--force', action='store_true', default=False, help='Force analysis of all streams/data')
+        (options, args) = oParser.parse_args(self.options.split(' '))
+
+        if options.force or self.streamname[-1].lower() == 'dir':
 
             PROJECTSYSKIND              = 0x0001
             PROJECTLCID                 = 0x0002

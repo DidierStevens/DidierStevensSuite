@@ -2,8 +2,8 @@
 
 __description__ = 'Analyze OLE files (Compound Binary Files)'
 __author__ = 'Didier Stevens'
-__version__ = '0.0.81'
-__date__ = '2025/05/07'
+__version__ = '0.0.82'
+__date__ = '2025/05/25'
 
 """
 
@@ -130,6 +130,7 @@ History:
   2025/03/04: 0.0.79 fixed URL in man page kristofbaute
   2025/04/21: 0.0.80 bugfix YARACompile
   2025/05/07: 0.0.81 bumping version for update to plugin(s), no changes to oledump.py
+  2025/05/25: 0.0.82 added option --trimnull
 
 Todo:
 
@@ -373,6 +374,8 @@ C:\Demo>oledump.py -s 7s Book2-vba.xls
 000000A0: 75 73 74 6F 6D 0C 69 7A  04 44 03 32              ustom.iz.D.2
 
 Option -r can be used together with option -v to decompress a VBA macro stream that was extracted through some other mean than oledump. In such case, you provide the file that contains the compressed macro, instead of the OLE file.
+
+Use option --trimnull to trim the output up to the first 0x00 byte.
 
 ole files can contain streams that are not connected to the root entry. This can happen when a maldoc is cleaned by anti-virus. oledump will mark such streams as orphaned:
 C:\Demo>oledump.py Book2-vba.xls
@@ -2282,11 +2285,19 @@ def OLEDump(filename, options):
                 for position in positions:
                     result = SearchAndDecompress(data[position - 3:], None, skipAttributes=options.vbadecompressskipattributes)
                     if result != None:
+                        if options.trimnull:
+                            position = result.find('\x00')
+                            if position != -1:
+                                result = result[:position]
                         vba += result
             else:
                 for position in positions:
                     result = SearchAndDecompress(data[position - 3:], skipAttributes=options.vbadecompressskipattributes) + '\n\n'
                     if result != None:
+                        if options.trimnull:
+                            position = result.find('\x00')
+                            if position != -1:
+                                result = result[:position]
                         vba += result
             if options.plugins == '':
                 print(vba)
@@ -2494,6 +2505,7 @@ def Main():
     oParser.add_option('-j', '--jsonoutput', action='store_true', default=False, help='produce json output')
     oParser.add_option('-u', '--unuseddata', action='store_true', default=False, help='Include unused data after end of stream')
     oParser.add_option('--password', default=MALWARE_PASSWORD, help='The ZIP password to be used (default %s)' % MALWARE_PASSWORD)
+    oParser.add_option('--trimnull', action='store_true', default=False, help='Trim starting at first null byte')
     (options, args) = oParser.parse_args()
 
     if options.man:
