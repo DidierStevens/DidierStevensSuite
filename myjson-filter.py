@@ -4,8 +4,8 @@ from __future__ import print_function
 
 __description__ = 'myjson-filter'
 __author__ = 'Didier Stevens'
-__version__ = '0.0.7'
-__date__ = '2025/05/04'
+__version__ = '0.0.8'
+__date__ = '2025/05/25'
 
 """
 Source code put in the public domain by Didier Stevens, no Copyright
@@ -23,6 +23,7 @@ History:
   2025/03/04: 0.0.7 added option -P
   2025/04/21: bugfix YARACompile; option --pythonfilter
   2025/05/04: added plugin options
+  2025/05/25: 0.0.8 added NAMEEXT
 
 Todo:
 """
@@ -48,6 +49,7 @@ WRITE_HASH = 'hash'
 WRITE_HASHVIR = 'hashvir'
 WRITE_IDVIR = 'idvir'
 WRITE_HASHEXT = 'hashext'
+WRITE_NAMEEXT = 'nameext'
 
 dValidWriteValues = {
   WRITE_VIR: 'filename is item name + extension vir',
@@ -55,6 +57,7 @@ dValidWriteValues = {
   WRITE_HASHVIR: 'filename is sha256 hash + extension vir',
   WRITE_IDVIR: 'filename is item id + extension vir',
   WRITE_HASHEXT: 'filename is sha256 hash + provided extension',
+  WRITE_NAMEEXT: 'filename is name + provided extension',
 }
 
 def PrintManual():
@@ -200,9 +203,12 @@ def WriteFiles(items, options):
             memberFilename = str(item['id']) + '.vir'
         else:
             memberFilename = hashlib.sha256(item['content']).hexdigest()
-            oStartsWithGetRemainder = cStartsWithGetRemainder(options.write, WRITE_HASHEXT)
-            if oStartsWithGetRemainder.match:
-                memberFilename += '.' + oStartsWithGetRemainder.remainder[1:]
+            oStartsWithGetRemainderHASHEXT = cStartsWithGetRemainder(options.write, WRITE_HASHEXT + ':')
+            oStartsWithGetRemainderNAMEEXT = cStartsWithGetRemainder(options.write, WRITE_NAMEEXT + ':')
+            if oStartsWithGetRemainderHASHEXT.match:
+                memberFilename += '.' + oStartsWithGetRemainderHASHEXT.remainder
+            elif oStartsWithGetRemainderNAMEEXT.match:
+                memberFilename = CleanName(item['name']) + '.' + oStartsWithGetRemainderNAMEEXT.remainder
             elif options.write == WRITE_HASHVIR:
                 memberFilename += '.vir'
         print('Writing: %s' % memberFilename)
