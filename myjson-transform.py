@@ -426,7 +426,7 @@ def CutData(stream, cutArgument):
 
 def MyJSONTransform(options):
     if options.cut != '':
-        options.function = "lambda data: CutData(data, '%s')[0]" % options.cut
+        options.function = "lambda data: CutData(data, %s)[0]" % repr(options.cut)
     items = CheckJSON(sys.stdin.read())
     if options.script != '':
         transformed = Transform(items, options)
