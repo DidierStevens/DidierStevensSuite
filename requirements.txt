@@ -24,3 +24,8 @@ python-registry
 pyzipper
 requests
 yara-python
+aiodns
+bitstruct
+pycares
+simplejson
+win_inet_pton
