@@ -1,0 +1,26 @@
+BeautifulSoup4
+PySocks
+compressed_rtf
+dnslib
+dpkt
+javaobj-py3
+minidump
+msoffcrypto-tool
+olefile
+oletools
+paramiko
+pathlab
+pefile
+peutils
+pfp
+ppdeep
+pyasn1
+pycryptodome
+pydivert
+pyshark
+#on Linux, replace python-magic-bin with python-magic
+python-magic-bin
+python-registry
+pyzipper
+requests
+yara-python
