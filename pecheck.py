@@ -2,8 +2,8 @@
 
 __description__ = 'Tool for displaying PE file info'
 __author__ = 'Didier Stevens'
-__version__ = '0.7.17'
-__date__ = '2025/04/21'
+__version__ = '0.7.18'
+__date__ = '2025/05/13'
 
 """
 
@@ -59,6 +59,7 @@ History:
   2023/05/28: added locate options valid values PE and PO
   2023/06/18: updated man
   2025/04/21: 0.7.17 bugfix YARACompile
+  2025/05/13: 0.7.18 bugfix
 
 Todo:
 """
@@ -1098,6 +1099,7 @@ def CalculateChosenHash(data):
 def GetInfoCarvedFile(data, position, extractfile):
     try:
         info = ''
+        lengthStripped = 0
         oPEtemp = pefile.PE(data=data[position:])
         if oPEtemp.is_dll():
             info = 'DLL'
