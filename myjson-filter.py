@@ -4,8 +4,8 @@ from __future__ import print_function
 
 __description__ = 'myjson-filter'
 __author__ = 'Didier Stevens'
-__version__ = '0.0.8'
-__date__ = '2025/05/25'
+__version__ = '0.0.9'
+__date__ = '2025/06/12'
 
 """
 Source code put in the public domain by Didier Stevens, no Copyright
@@ -24,6 +24,7 @@ History:
   2025/04/21: bugfix YARACompile; option --pythonfilter
   2025/05/04: added plugin options
   2025/05/25: 0.0.8 added NAMEEXT
+  2025/06/12: 0.0.9 added STDOUT
 
 Todo:
 """
@@ -38,6 +39,7 @@ import hashlib
 import string
 import os.path
 import subprocess
+import ast
 
 try:
     import yara
@@ -50,6 +52,7 @@ WRITE_HASHVIR = 'hashvir'
 WRITE_IDVIR = 'idvir'
 WRITE_HASHEXT = 'hashext'
 WRITE_NAMEEXT = 'nameext'
+WRITE_STDOUT = 'stdout'
 
 dValidWriteValues = {
   WRITE_VIR: 'filename is item name + extension vir',
@@ -58,6 +61,7 @@ dValidWriteValues = {
   WRITE_IDVIR: 'filename is item id + extension vir',
   WRITE_HASHEXT: 'filename is sha256 hash + provided extension',
   WRITE_NAMEEXT: 'filename is name + provided extension',
+  WRITE_STDOUT: 'write to stdout and use given string as terminator',
 }
 
 def PrintManual():
@@ -93,6 +97,15 @@ Valid options for -W are:
 
     for item in dValidWriteValues.items():
         manual += ' %s: %s\n' % item
+
+    manual += r'''
+-W stdout: will write all items to stdout (binary) without any end-of-line.
+To include an end-of-line, specify a Python string, like this:
+-W stdout:'\n' this will add a newline to the end of the item
+-W stdout:'\r' this will add a carriage return to the end of the item
+-W stdout:'\r\n' this will add a carriage return and newline to the end of the item
+ 
+'''
 
     for line in manual.split('\n'):
         print(textwrap.fill(line, 79))
@@ -197,23 +210,29 @@ class cStartsWithGetRemainder():
 
 def WriteFiles(items, options):
     for item in items:
-        if options.write == WRITE_VIR:
-            memberFilename = CleanName(item['name']) + '.vir'
-        elif options.write == WRITE_IDVIR:
-            memberFilename = str(item['id']) + '.vir'
+        oStartsWithGetRemainderSTDOUT = cStartsWithGetRemainder(options.write, WRITE_STDOUT + ':')
+        if oStartsWithGetRemainderSTDOUT.match:
+            sys.stdout.buffer.write(item['content'])
+            if oStartsWithGetRemainderSTDOUT.remainder != '':
+                sys.stdout.buffer.write(ast.literal_eval(oStartsWithGetRemainderSTDOUT.remainder).encode('latin'))
         else:
-            memberFilename = hashlib.sha256(item['content']).hexdigest()
-            oStartsWithGetRemainderHASHEXT = cStartsWithGetRemainder(options.write, WRITE_HASHEXT + ':')
-            oStartsWithGetRemainderNAMEEXT = cStartsWithGetRemainder(options.write, WRITE_NAMEEXT + ':')
-            if oStartsWithGetRemainderHASHEXT.match:
-                memberFilename += '.' + oStartsWithGetRemainderHASHEXT.remainder
-            elif oStartsWithGetRemainderNAMEEXT.match:
-                memberFilename = CleanName(item['name']) + '.' + oStartsWithGetRemainderNAMEEXT.remainder
-            elif options.write == WRITE_HASHVIR:
-                memberFilename += '.vir'
-        print('Writing: %s' % memberFilename)
-        with open(memberFilename, 'wb') as fWrite:
-            fWrite.write(item['content'])
+            if options.write == WRITE_VIR:
+                memberFilename = CleanName(item['name']) + '.vir'
+            elif options.write == WRITE_IDVIR:
+                memberFilename = str(item['id']) + '.vir'
+            else:
+                memberFilename = hashlib.sha256(item['content']).hexdigest()
+                oStartsWithGetRemainderHASHEXT = cStartsWithGetRemainder(options.write, WRITE_HASHEXT + ':')
+                oStartsWithGetRemainderNAMEEXT = cStartsWithGetRemainder(options.write, WRITE_NAMEEXT + ':')
+                if oStartsWithGetRemainderHASHEXT.match:
+                    memberFilename += '.' + oStartsWithGetRemainderHASHEXT.remainder
+                elif oStartsWithGetRemainderNAMEEXT.match:
+                    memberFilename = CleanName(item['name']) + '.' + oStartsWithGetRemainderNAMEEXT.remainder
+                elif options.write == WRITE_HASHVIR:
+                    memberFilename += '.vir'
+            print('Writing: %s' % memberFilename)
+            with open(memberFilename, 'wb') as fWrite:
+                fWrite.write(item['content'])
 
 def File2Strings(filename):
     try:
