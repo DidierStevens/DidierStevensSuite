@@ -4,8 +4,8 @@ from __future__ import print_function
 
 __description__ = 'Save binary data while piping it from stdin to stdout. Like the tee command, but plus.'
 __author__ = 'Didier Stevens'
-__version__ = '0.0.1'
-__date__ = '2022/12/18'
+__version__ = '0.0.2'
+__date__ = '2025/06/19'
 
 """
 Source code put in the public domain by Didier Stevens, no Copyright
@@ -14,6 +14,7 @@ Use at your own risk
 
 History:
   2022/12/18: start from binary template
+  2025/06/19: 0.0.2 added option -t
 
 Todo:
 
@@ -43,6 +44,7 @@ The log filename can also be generated with option -g. The string provided with 
 For example, "-g malware" generates this log filename: "teeplus-malware.log".
 Option -n can be used to prevent that the stdin input is piped to stdout.
 Use this option if no further processing is needed (just logging and storing). Or redirect to /dev/null.
+Use option -t to use a timestamp as filename.
 
 ''' % (DEFAULT_EXTENSION, DEFAULT_EXTENSION, DEFAULT_LOG_FILENAME)
     for line in manual.split('\n'):
@@ -90,8 +92,15 @@ def Teeplus(options):
 
     sha256 = hashlib.sha256(data).hexdigest()
 
+    if options.timestamp:
+        filename = nowUTCISO.replace(':', '_')
+        if options.generate != '':
+            filename = options.generate + '-' + filename
+    else:
+        filename = sha256
+    filename += options.extension
     try:
-        with open(sha256 + options.extension, 'wb') as fSave:
+        with open(filename, 'wb') as fSave:
             fSave.write(data)
     except Exception as e:
         error = e
@@ -121,6 +130,7 @@ https://DidierStevens.com'''
     oParser.add_option('-l', '--log', type=str, default=DEFAULT_LOG_FILENAME, help='Name of log file (default %s)' % DEFAULT_LOG_FILENAME)
     oParser.add_option('-g', '--generate', type=str, default='', help='Keyword to generate logfilename with')
     oParser.add_option('-n', '--nooutput', action='store_true', default=False, help='Do not produce output to stdout')
+    oParser.add_option('-t', '--timestamp', action='store_true', default=False, help='Filename is timestamp')
     (options, args) = oParser.parse_args()
 
     if options.man:
