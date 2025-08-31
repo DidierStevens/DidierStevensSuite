@@ -2,8 +2,8 @@
 
 __description__ = 'pdf-parser, use it to parse a PDF document'
 __author__ = 'Didier Stevens'
-__version__ = '0.7.12'
-__date__ = '2025/04/21'
+__version__ = '0.7.13'
+__date__ = '2025/08/31'
 __minimum_python_version__ = (2, 5, 1)
 __maximum_python_version__ = (3, 12, 2)
 
@@ -79,6 +79,7 @@ History:
   2024/10/26: added pyzipper support
   2025/03/04: V0.7.11 regex string fix Python 3.12 xambroz
   2025/04/21: V0.7.12 bugfix YARACompile
+  2025/08/31: V0.7.13 bugfix user report
 
 Todo:
   - handle printf todo
@@ -891,7 +892,7 @@ def FormatOutput(data, raw):
 #Fix for http://bugs.python.org/issue11395
 def StdoutWriteChunked(data):
     if sys.version_info[0] > 2:
-        sys.stdout.buffer.write(data)
+        sys.stdout.buffer.write(C2BIP3(data))
     else:
         while data != '':
             sys.stdout.write(data[0:10000])
