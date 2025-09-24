@@ -2,8 +2,8 @@
 
 __description__ = 'Analyze OLE files (Compound Binary Files)'
 __author__ = 'Didier Stevens'
-__version__ = '0.0.82'
-__date__ = '2025/05/25'
+__version__ = '0.0.83'
+__date__ = '2025/09/24'
 
 """
 
@@ -131,6 +131,7 @@ History:
   2025/04/21: 0.0.80 bugfix YARACompile
   2025/05/07: 0.0.81 bumping version for update to plugin(s), no changes to oledump.py
   2025/05/25: 0.0.82 added option --trimnull
+  2025/09/24: 0.0.83 MSO bugfix
 
 Todo:
 
@@ -2432,6 +2433,8 @@ def OLEDump(filename, options):
                         except binascii.Error:
                             data = ''
                         except UnicodeEncodeError:
+                            data = ''
+                        except ValueError:
                             data = ''
                         content = C2BIP3(data)
                         if content.startswith(ACTIVEMIME_MAGIC):
