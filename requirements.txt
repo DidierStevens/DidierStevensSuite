@@ -18,8 +18,8 @@ pyasn1
 pycryptodome
 pydivert
 pyshark
-#on Linux, replace python-magic-bin with python-magic
-python-magic-bin
+python-magic ; sys_platform != "win32"
+python-magic-bin ; sys_platform == "win32"
 python-registry
 pyzipper
 requests
