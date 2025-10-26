@@ -4,8 +4,8 @@ from __future__ import print_function
 
 __description__ = 'DNS server for serving files, exfiltration, tracking, wildcards, rcode testing, resolving and forwarding'
 __author__ = 'Didier Stevens'
-__version__ = '0.0.3'
-__date__ = '2023/04/01'
+__version__ = '0.0.4'
+__date__ = '2025/09/16'
 
 """
 
@@ -35,6 +35,7 @@ History:
   2022/12/04: finished forwarder
   2023/03/16: 0.0.3 label *
   2023/04/01: updated man; added ParseAnswerValue
+  2025/09/16: 0.0.4 added function argument to resolve command; added option -s
 
 Todo:
 add option to control TCP size
@@ -239,6 +240,7 @@ A resolve command takes the following key-value pairs:
   label=
   answer=
   logging=
+  function=
 
 The label is mandatory: just like the payload command, it will be used to match queries.
 Key-value pair logging is optional. If it is provided, DNS resolver will create a log with the value for key logging as keyword. For example, if the value is test, the logfile will be named test-TIMESTAMP.log, e.g. test-20190813-182220.log.
@@ -259,6 +261,8 @@ will result in an A record reply with IPv4 address 127.0.0.1.
 A second, identical query (nslookup roundrobin.example.com) will result in an A record reply with IPv4 address 127.0.0.2.
 A third, identical query (nslookup roundrobin.example.com) will result in an A record reply with IPv4 address 127.0.0.1.
 And so on ...
+
+Key-value pair function is optional. If provided, the value will be interpreted as a Python function and called when there is a match. The function must inspect the request and update the reply. Arguments to the function are request, reply and dCommand. The function must return a list with 2 values: first one is True when NXDOMAIN must be returned (and False if there is an answer), second one is an intiger with the rcode value, it must be None if there is no rcode set by the function.
 
 A forwarder command takes the following key-value pairs:
   type=forwarder
@@ -283,7 +287,7 @@ This command is usually combined with other commands, for example:
 
 In this example, a DNS A request for example.com is replied with 127.0.0.1, and all other requests are forwarded to 8.8.8.8
 
-
+An extra Python script (for example with function definitions) can be loaded using option -s.
 
 Options --log and --log-prefix can be used to increase log details.
 
@@ -323,6 +327,7 @@ LOGGING = 'logging'
 INDEX = 'index'
 SERVER = 'server'
 ENABLED = 'enabled'
+FUNCTION = 'function'
 
 def File2String(filename):
     try:
@@ -424,12 +429,16 @@ def ValidateWildcard(dCommand):
 
 def ValidateResolve(dCommand):
     for name, value in dCommand.items():
-        if name != ANSWER:
+        if name == FUNCTION:
+            dCommand[FUNCTION] = globals().get(value)
+        elif name != ANSWER:
             dCommand[name] = value.lower().strip()
     if not LABEL in dCommand:
         raise Exception('Error resolve: label missing')
     if not ANSWER in dCommand:
         dCommand[ANSWER] = ''
+    if not FUNCTION in dCommand:
+        dCommand[FUNCTION] = None
     dCommand[ANSWER] = [ParseAnswerValue(answer) for answer in dCommand[ANSWER].split(';')]
     dCommand[INDEX] = 0
     return dCommand
@@ -747,7 +756,9 @@ class cMyResolver(dnslib.server.BaseResolver):
                 if LOGGING in self.resolves[label]:
                     with open(self.resolves[label][LOGGING], 'a') as f:
                         print('%s %s:%d %d %s' % (FormatTimeUTC(), handler.client_address[0], handler.client_address[1], position, '.'.join(labelsNormalized).encode('utf8').decode()), file=f)
-                if request.q.qtype == dnslib.QTYPE.A:
+                if self.resolves[label][FUNCTION] != None:
+                    replyNXDOMAIN, rcode = self.resolves[label][FUNCTION](request, reply, self.resolves[label])
+                elif request.q.qtype == dnslib.QTYPE.A:
                     qname = request.q.qname
                     answer = self.resolves[label][ANSWER][self.resolves[label][INDEX]]
                     self.resolves[label][INDEX] = (self.resolves[label][INDEX] + 1) % len(self.resolves[label][ANSWER])
@@ -765,6 +776,10 @@ class cMyResolver(dnslib.server.BaseResolver):
             reply.header.rcode = rcode
         return reply
 
+def LoadScriptIfExists(filename):
+    if os.path.exists(filename):
+        exec(open(filename, 'r').read(), globals(), globals())
+
 def Main():
     moredesc = '''
 
@@ -779,6 +794,7 @@ https://DidierStevens.com'''
     oArgumentParser.add_argument('-p', '--port', type=int, default=53, metavar='<port>', help='Server port (default:53)')
     oArgumentParser.add_argument('-a', '--address', default='', metavar='<address>', help='Listen address (default:all)')
     oArgumentParser.add_argument('-u', '--udplen', type=int, default=0, metavar='<udplen>', help='Max UDP packet length (default:0)')
+    oArgumentParser.add_argument('-s', '--script', default='', metavar='<script>', help='Script with definitions to include')
     oArgumentParser.add_argument('--tcp', action='store_true', default=False, help='TCP server (default: UDP only)')
     oArgumentParser.add_argument('--log', default='request,reply,truncated,error', help='Log hooks to enable (default: +request,+reply,+truncated,+error,-recv,-send,-data)')
     oArgumentParser.add_argument('--log-prefix', action='store_true',default=False, help='Log prefix (timestamp/handler/resolver) (default: False)')
@@ -793,6 +809,9 @@ https://DidierStevens.com'''
     if len(args.commands) == 0:
         print('Please provide a command!')
         return
+
+    if args.script != '':
+        LoadScriptIfExists(args.script)
 
     oMyResolver = cMyResolver(args)
     oDNSLogger = dnslib.server.DNSLogger(args.log, args.log_prefix)
