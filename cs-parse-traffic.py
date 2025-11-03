@@ -50,6 +50,7 @@ import struct
 import hashlib
 import hmac
 import base64
+from io import StringIO
 try:
     import pyshark
 except ImportError:
@@ -260,6 +261,9 @@ class cStruct(object):
     def Length(self):
         return len(self.data)
 
+    def Remainder(self):
+        return self.data
+
 class cCSInstructions(object):
     CS_INSTRUCTION_TYPE_INPUT = 'Input'
     CS_INSTRUCTION_TYPE_OUTPUT = 'Output'
@@ -393,6 +397,115 @@ class cCSInstructions(object):
             else:
                 raise Exception('Unknown instruction opcode: %d' % opcode)
         return data
+
+def DecodeDriveLetters(number):
+    drives = []
+    for iter in range(26):
+        if number & (2 ** iter) == 2 ** iter:
+            drives.append(chr(ord('A') + iter))
+    return drives
+
+# CIC: Call If Callable
+def CIC(expression):
+    if callable(expression):
+        return expression()
+    else:
+        return expression
+
+# IFF: IF Function
+def IFF(expression, valueTrue, valueFalse):
+    if expression:
+        return CIC(valueTrue)
+    else:
+        return CIC(valueFalse)
+
+class cDump():
+    def __init__(self, data, prefix='', offset=0, dumplinelength=16):
+        self.data = data
+        self.prefix = prefix
+        self.offset = offset
+        self.dumplinelength = dumplinelength
+
+    def HexDump(self):
+        oDumpStream = self.cDumpStream(self.prefix)
+        hexDump = ''
+        for i, b in enumerate(self.data):
+            if i % self.dumplinelength == 0 and hexDump != '':
+                oDumpStream.Addline(hexDump)
+                hexDump = ''
+            hexDump += IFF(hexDump == '', '', ' ') + '%02X' % self.C2IIP2(b)
+        oDumpStream.Addline(hexDump)
+        return oDumpStream.Content()
+
+    def CombineHexAscii(self, hexDump, asciiDump):
+        if hexDump == '':
+            return ''
+        countSpaces = 3 * (self.dumplinelength - len(asciiDump))
+        if len(asciiDump) <= self.dumplinelength / 2:
+            countSpaces += 1
+        return hexDump + '  ' + (' ' * countSpaces) + asciiDump
+
+    def HexAsciiDump(self, rle=False):
+        oDumpStream = self.cDumpStream(self.prefix)
+        position = ''
+        hexDump = ''
+        asciiDump = ''
+        previousLine = None
+        countRLE = 0
+        for i, b in enumerate(self.data):
+            b = self.C2IIP2(b)
+            if i % self.dumplinelength == 0:
+                if hexDump != '':
+                    line = self.CombineHexAscii(hexDump, asciiDump)
+                    if not rle or line != previousLine:
+                        if countRLE > 0:
+                            oDumpStream.Addline('* %d 0x%02x' % (countRLE, countRLE * self.dumplinelength))
+                        oDumpStream.Addline(position + line)
+                        countRLE = 0
+                    else:
+                        countRLE += 1
+                    previousLine = line
+                position = '%08X:' % (i + self.offset)
+                hexDump = ''
+                asciiDump = ''
+            if i % self.dumplinelength == self.dumplinelength / 2:
+                hexDump += ' '
+            hexDump += ' %02X' % b
+            asciiDump += IFF(b >= 32 and b < 128, chr(b), '.')
+        if countRLE > 0:
+            oDumpStream.Addline('* %d 0x%02x' % (countRLE, countRLE * self.dumplinelength))
+        oDumpStream.Addline(self.CombineHexAscii(position + hexDump, asciiDump))
+        return oDumpStream.Content()
+
+    def Base64Dump(self, nowhitespace=False):
+        encoded = binascii.b2a_base64(self.data)
+        if nowhitespace:
+            return encoded
+        encoded = encoded.strip()
+        oDumpStream = self.cDumpStream(self.prefix)
+        length = 64
+        for i in range(0, len(encoded), length):
+            oDumpStream.Addline(encoded[0+i:length+i])
+        return oDumpStream.Content()
+
+    class cDumpStream():
+        def __init__(self, prefix=''):
+            self.oStringIO = StringIO()
+            self.prefix = prefix
+
+        def Addline(self, line):
+            if line != '':
+                self.oStringIO.write(self.prefix + line + '\n')
+
+        def Content(self):
+            return self.oStringIO.getvalue()
+
+    @staticmethod
+    def C2IIP2(data):
+        if sys.version_info[0] > 2:
+            return data
+        else:
+            return ord(data)
 
 class cCSParser(object):
     BEACON_COMMAND_SLEEP = 4
@@ -596,13 +709,14 @@ class cCSParser(object):
         'CALLBACK_OUTPUT_UTF8' : 32
     }
 
-    def __init__(self, rawkey, hmacaeskeys, hexadecimal, postdataIsMultipartFormat, transform, extract, oOutput):
+    def __init__(self, rawkey, hmacaeskeys, hexadecimal, postdataIsMultipartFormat, transform, extract, verbose, oOutput):
         self.rawkey = rawkey
         self.hmacaeskeys = hmacaeskeys
         self.hexadecimal = hexadecimal
         self.postdataIsMultipartFormat = postdataIsMultipartFormat
         self.transform = transform
         self.extract = extract
+        self.verbose = verbose
         self.oOutput = oOutput
         self.dCommandsSummary = {}
         self.dCallbacksSummary = {}
@@ -656,10 +770,18 @@ class cCSParser(object):
             self.oOutput.Line(callbackdata.decode())
             self.oOutput.Line('-' * 100)
         elif callback == 22:
-            self.oOutput.Line(repr(callbackdata[:4]))
-            self.oOutput.Line('-' * 100)
-            self.oOutput.Line(callbackdata[4:].decode('latin'))
-            self.oOutput.Line('-' * 100)
+            if callbackdata[:4] == b'\xFF\xFF\xFF\xFF':
+                self.oOutput.Line('Drives:')
+                self.oOutput.Line('-' * 100)
+                intDrives = int(callbackdata[4:].decode('latin'))
+                self.oOutput.Line('%d' % intDrives)
+                self.oOutput.Line(DecodeDriveLetters(intDrives))
+                self.oOutput.Line('-' * 100)
+            else:
+                self.oOutput.Line(repr(callbackdata[:4]))
+                self.oOutput.Line('-' * 100)
+                self.oOutput.Line(callbackdata[4:].decode('latin'))
+                self.oOutput.Line('-' * 100)
         elif callback == 2:
             parameter1, length = oStructCallbackdataToParse.Unpack('>II')
             filenameDownload = oStructCallbackdataToParse.GetBytes()
@@ -732,6 +854,8 @@ class cCSParser(object):
             self.oOutput.Line(' MD5: ' + hashlib.md5(data).hexdigest())
             self.ExtractPayload(data)
         else:
+            if self.verbose:
+                self.oOutput.Line(cDump(data).HexAsciiDump())
             oStructData = cStruct(data)
             timestamp, datasize = oStructData.Unpack('>II')
             self.oOutput.Line('Timestamp: %d %s' % (timestamp, self.FormatTime(timestamp)))
@@ -772,7 +896,7 @@ class cCSParser(object):
 
 def AnalyzeCaptureHTTP(filename, options):
     oOutput = InstantiateCOutput(options)
-    oCSParser = cCSParser(options.rawkey, options.hmacaeskeys, True, True, options.transform, options.extract, oOutput)
+    oCSParser = cCSParser(options.rawkey, options.hmacaeskeys, True, True, options.transform, options.extract, options.verbose, oOutput)
     dMethods = {}
 
     capture = pyshark.FileCapture(filename, display_filter=options.displayfilter, use_json=True, include_raw=True)
@@ -958,7 +1082,7 @@ def CheckForBeacon(labels, dBeacons):
 
 def AnalyzeCaptureDNS(filename, options):
     oOutput = InstantiateCOutput(options)
-    oCSParser = cCSParser(options.rawkey, options.hmacaeskeys, True, False, '', options.extract, oOutput)
+    oCSParser = cCSParser(options.rawkey, options.hmacaeskeys, True, False, '', options.extract, options.verbose, oOutput)
 
     dBeacons = {}
     oPartsLabels = cPartsLabels()
@@ -977,7 +1101,7 @@ def AnalyzeCaptureDNS(filename, options):
         if not hasattr(packet.dns, 'flags'):
             continue
 
-        linePacket = 'Packet: %s %d' % (packet.sniff_time, packet.number)
+        linePacket = 'Packet: %s %d' % (packet.sniff_timestamp, packet.number)
         if int(packet.dns.flags, 16) & 0x8000 == 0x0000:
             if hasattr(packet.dns, 'Queries'):
                 name = ''
@@ -1107,17 +1231,17 @@ def AnalyzeCaptureDNS(filename, options):
 
 def AnalyzeCaptureCallback(hexdata, options):
     oOutput = InstantiateCOutput(options)
-    oCSParser = cCSParser(options.rawkey, options.hmacaeskeys, True, True, '', options.extract, oOutput)
+    oCSParser = cCSParser(options.rawkey, options.hmacaeskeys, True, True, '', options.extract, options.verbose, oOutput)
     oCSParser.ProcessPostPacketData(hexdata)
 
 def AnalyzeCaptureCallbackSingle(hexdata, options):
     oOutput = InstantiateCOutput(options)
-    oCSParser = cCSParser(options.rawkey, options.hmacaeskeys, True, False, '', options.extract, oOutput)
+    oCSParser = cCSParser(options.rawkey, options.hmacaeskeys, True, False, '', options.extract, options.verbose, oOutput)
     oCSParser.ProcessPostPacketData(hexdata)
 
 def AnalyzeCaptureTask(hexdata, options):
     oOutput = InstantiateCOutput(options)
-    oCSParser = cCSParser(options.rawkey, options.hmacaeskeys, True, False, '', options.extract, oOutput)
+    oCSParser = cCSParser(options.rawkey, options.hmacaeskeys, True, False, '', options.extract, options.verbose, oOutput)
     oCSParser.ProcessReplyPacketData(hexdata)
 
 def AnalyzeCapture(filename, options):
@@ -1163,6 +1287,7 @@ https://DidierStevens.com'''
     oParser.add_option('-t', '--transform', type=str, default='', help='Transformation instructions')
     oParser.add_option('-i', '--dnsidle', type=str, default='', help="DNS idle value")
     oParser.add_option('-b', '--beaconid', type=str, default='', help="Beacond ID (hexadecimal)")
+    oParser.add_option('-V', '--verbose', action='store_true', default=False, help='Verbose output')
     (options, args) = oParser.parse_args()
 
     if options.man:
