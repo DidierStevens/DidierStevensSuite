@@ -2,8 +2,8 @@
 
 __description__ = "Program to convert decimal numbers into hex numbers"
 __author__ = 'Didier Stevens'
-__version__ = '0.0.3'
-__date__ = '2016/05/03'
+__version__ = '0.0.4'
+__date__ = '2025/11/14'
 
 """
 
@@ -16,6 +16,7 @@ History:
   2016/01/06: wrote man; added option -i
   2016/02/02: 0.0.2 bugfix
   2016/05/03: 0.0.3 added option -n and -s
+  2025/11/14: 0.0.4 added option -e
 
 Todo:
 """
@@ -34,6 +35,7 @@ Manual:
 This program reads lines from the given file(s) or standard input, and then extracts decimal numbers from each line. A decimal number is a sequence of digits (optionally prefixed with a dash - for negative numbers). All numbers found in a line are converted to hexadecimal and outputed as a line. Hexadecimal numbers are separated by a space character. If a number is smaller than 0 or larger than 255/0xFF, an error is generated, except when option -i is used.
 Option -s (--signed) indicates that the input numbers are signed bytes: -1 is 0xFF, -2 is 0xFE, ...
 Option -n NUMBER (--number) requires that at least NUMBER numbers are present in the input line (the default is 1 number).
+Use option -e to parse simple expressions like a + b.
 
 The hexadecimal numbers are written to standard output, except when option -o is used. When option -o is used, the numbers are written to the file specified by option -o.
 '''
@@ -120,8 +122,29 @@ def ProcessFile(fIn, fullread):
         for line in fIn:
             yield line.strip('\n')
 
+def ParseExpressions(line):
+    numbers = []
+    oRE = re.compile(r'(?:-?\d+ *[+*/-] *-?\d+|-?\d+)')
+    for e in oRE.findall(line):
+        oMatch = re.match(r'(-?\d+) *([+*/-]) *(-?\d+)', e)
+        if oMatch == None:
+            numbers.append(int(e))
+        else:
+            if oMatch.groups()[1] == '+':
+                number = int(oMatch.groups()[0]) + int(oMatch.groups()[2])
+            elif oMatch.groups()[1] == '-':
+                number = int(oMatch.groups()[0]) - int(oMatch.groups()[2])
+            elif oMatch.groups()[1] == '*':
+                number = int(oMatch.groups()[0]) * int(oMatch.groups()[2])
+            elif oMatch.groups()[1] == '/':
+                number = int(oMatch.groups()[0]) / int(oMatch.groups()[2])
+            else:
+                raise Exception(f'expression: {e}')
+            numbers.append(number)
+    return numbers
+
 def NumbersToHexSingle(filenames, oOutput, options):
-    oRE = re.compile('-?\d+')
+    oRE = re.compile(r'-?\d+')
     numberTooLarge = False
     for filename in filenames:
         if filename == '':
@@ -129,7 +152,10 @@ def NumbersToHexSingle(filenames, oOutput, options):
         else:
             fIn = open(filename, 'r')
         for line in ProcessFile(fIn, False):
-            numbers = [int(number) for number in oRE.findall(line)]
+            if options.expression:
+                numbers = ParseExpressions(line)
+            else:
+                numbers = [int(number) for number in oRE.findall(line)]
             if options.signed:
             	  numbers = [IFF(number < 0, number + 256, number) for number in numbers]
             if len(numbers) >= options.number:
@@ -169,6 +195,7 @@ https://DidierStevens.com'''
     oParser.add_option('-i', '--ignore', action='store_true', default=False, help='Do not generate an error when a number larger than 255 is found')
     oParser.add_option('-n', '--number', type=int, default=1, help='Minimum number of numbers per line (1 by default)')
     oParser.add_option('-s', '--signed', action='store_true', default=False, help='Numbers are signed bytes: add 256 if negative')
+    oParser.add_option('-e', '--expression', action='store_true', default=False, help='Handle simple expressions')
     (options, args) = oParser.parse_args()
 
     if options.man:
