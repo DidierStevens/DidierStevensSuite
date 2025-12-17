@@ -2,8 +2,8 @@
 
 __description__ = 'Tool for displaying PE file info'
 __author__ = 'Didier Stevens'
-__version__ = '0.7.18'
-__date__ = '2025/05/13'
+__version__ = '0.7.19'
+__date__ = '2025/12/17'
 
 """
 
@@ -60,6 +60,7 @@ History:
   2023/06/18: updated man
   2025/04/21: 0.7.17 bugfix YARACompile
   2025/05/13: 0.7.18 bugfix
+  2025/12/17: 0.7.19 fix escape sequence warning
 
 Todo:
 """
@@ -114,7 +115,7 @@ This manual is a work in progress.
 Use option -l to locate and select PE files embedded inside the provided file.
 Use -l P to get an overview of all embedded PE files, like this:
 
-C:\Demo>pecheck.py -l P sample.png.vir
+C:\\Demo>pecheck.py -l P sample.png.vir
   1: 0x00002ebb DLL 32-bit 0x00016eba 3bd4fcbee95711392260549669df7236 0x000270ba (EOF) b'' b'module.dll'
   2: 0x00016ebb DLL 64-bit 0x000270ba 6eede113112f85b0ae99a2210e07cdd0 0x000270ba (EOF) b'' b'init.dll'
 
@@ -124,7 +125,7 @@ Like this: set DSS_DEFAULT_HASH_ALGORITHMS=sha256
 
 After producing an overview of embedded PE files (with option -l P), select an embedded PE file for further analysis, like this:
 
-C:\Demo>pecheck.py -l 2 sample.png.vir
+C:\\Demo>pecheck.py -l 2 sample.png.vir
 
 Use option -g o (o = overlay) to extract the overlay, and -g s (s = stripped) to extract the PE file without overlay.
 
