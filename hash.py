@@ -2,8 +2,8 @@
 
 __description__ = 'This is essentialy a wrapper for the hashlib module'
 __author__ = 'Didier Stevens'
-__version__ = '0.0.13'
-__date__ = '2024/07/03'
+__version__ = '0.0.14'
+__date__ = '2026/01/17'
 
 """
 Source code put in public domain by Didier Stevens, no Copyright
@@ -30,6 +30,7 @@ History:
   2024/02/10: added sorted for unvalidatedhashes
   2024/05/28: 0.0.12 added --jsoninput
   2024/07/03: 0.0.13 map fix
+  2026/01/17: 0.0.14 bug fix
 
 Todo:
 """
@@ -1301,7 +1302,7 @@ def HashSingle(filename, cutexpression, prefix, dFileHashes, skipHashes, validat
         for name in hashes:
             if len(dBlockHashes[name]) == 1:
                 print('%sSummary %s values: all blocks are identical (%d blocks in total)' % (prefix, name, countBlocks))
-                print('%s %s' % (prefix, dBlockHashes[name].keys()[0]))
+                print('%s %s' % (prefix, list(dBlockHashes[name].keys())[0]))
             elif len(dBlockHashes[name]) == countBlocks:
                 print('%sSummary %s values: all %d blocks are different' % (prefix, name, countBlocks))
             else:
