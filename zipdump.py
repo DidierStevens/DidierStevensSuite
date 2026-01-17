@@ -2,8 +2,8 @@
 
 __description__ = 'ZIP dump utility'
 __author__ = 'Didier Stevens'
-__version__ = '0.0.32'
-__date__ = '2025/04/21'
+__version__ = '0.0.33'
+__date__ = '2026/01/16'
 
 """
 
@@ -75,6 +75,7 @@ History:
   2025/03/12: 0.0.31 bugfix File2Strings
   2025/03/14: added alphanumpathhashvir
   2025/04/21: 0.0.32 bugfix YARACompile
+  2026/01/16: 0.0.33 added sha256 to option -E
 
 Todo:
 """
@@ -539,6 +540,11 @@ C:\Demo>zipdump.py -f l -E !version,crc double-suffix
    2 0x0000794d PK0506 end
    s 0x00007963 data 31075:58120l
 
+Pseudo-field sha256 can be used to calculate the sha256 hash of the content (compressed or decompressed):
+-E sha256:data
+-E sha256:data:decompress
+-E sha256:decompress
+-E sha256:extra
 
 Option -c (--cut) allows for the partial selection of a file. Use this option to "cut out" part of the file.
 The --cut option takes an argument to specify which section of bytes to select from the file. This argument is composed of 2 terms separated by a colon (:), like this:
@@ -5523,6 +5529,22 @@ class cPKRecord(object):
         for iter in range(len(self.formatDescription)):
             if self.formatDescription[iter] in toselect:
                 line.append(self.FieldPrintable(iter))
+        for term in toselect:
+            if term.startswith('sha256:'):
+                dSelect = ParsePKRecordSelect(term.split(':', 1)[1].replace(':', ','))
+                if dSelect[PARSE_SELECT_SOURCE] == PARSE_SELECT_DATA:
+                    recordData = self.data
+                elif dSelect[PARSE_SELECT_SOURCE] == PARSE_SELECT_EXTRA:
+                    try:
+                        recordData = self.extra
+                    except AttributeError:
+                        recordData = None
+                if recordData == None:
+                    line.append(term + ':N/A')
+                else:
+                    if dSelect[PARSE_SELECT_DECOMPRESS] and self.fields[4] == 8:
+                        recordData = zlib.decompress(recordData, -zlib.MAX_WBITS)
+                    line.append(term + ':' + hashlib.sha256(recordData).hexdigest())
         if multiplelines:
             return line
         else:
