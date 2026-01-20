@@ -1032,7 +1032,12 @@ def ASCII85Decode(data):
   return out
 
 def ASCIIHexDecode(data):
-    return binascii.unhexlify(''.join([c for c in data if c not in ' \t\n\r']).rstrip('>'))
+    hexstr = ''
+    for c in data:
+        if chr(c) not in ' \t\n\r':
+            hexstr+=chr(c)
+    hexstr = hexstr.rstrip('>')
+    return binascii.unhexlify(hexstr)
 
 # if inflating fails, we try to inflate byte per byte (sample 4da299d6e52bbb79c0ac00bad6a1d51d4d5fe42965a8d94e88a359e5277117e2)
 def FlateDecode(data):
