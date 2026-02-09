@@ -2,8 +2,8 @@
 
 __description__ = 'Analyze RTF files'
 __author__ = 'Didier Stevens'
-__version__ = '0.0.13'
-__date__ = '2025/04/21'
+__version__ = '0.0.14'
+__date__ = '2026/02/08'
 
 """
 
@@ -29,7 +29,7 @@ History:
   2016/07/30: 0.0.3 added option recursionlimit
   2016/08/09: 0.0.4 refactoring
   2016/08/12: continue
-  2017/02/11: 0.0.5 added \dde000... handling; added option -E
+  2017/02/11: 0.0.5 added \\dde000... handling; added option -E
   2017/12/09: 0.0.6 added longestContiguousHexstring; extra info -f O
   2017/12/10: cDump & YARACompile
   2017/12/24: 0.0.7 made changes level 0 -> remainder
@@ -47,6 +47,7 @@ History:
   2022/09/27: added --jsonoutput for -F and -O
   2022/10/22: 0.0.12 added CreateZipFileObject
   2025/04/21: 0.0.13 bugfix YARACompile
+  2026/02/08: 0.0.14 added option --combinations
 
 Todo:
 """
@@ -62,6 +63,7 @@ import hashlib
 import json
 import zlib
 import struct
+import  math
 try:
     import pyzipper as zipfile
 except ImportError:
@@ -807,6 +809,11 @@ def Scan(hexstring, rules, options):
     options.hexshift = saveHexshift
     return result
 
+def RoundUpToPowerOf10(n: int) -> int:
+    if n <= 1:
+        return 1
+    return 10 ** math.ceil(math.log10(n))
+
 def RTFSub(oBytesIO, prefix, rules, options):
     returnCode = 0
 
@@ -966,14 +973,29 @@ def RTFSub(oBytesIO, prefix, rules, options):
                 StdoutWriteChunked(HeadTail(DumpFunction(CutData(dObjects[key][0], options.cut)[0]), options.headtail))
     elif options.jsonoutput:
         object = []
-        for counter in range(1, len(dAnalysis) + 1):
-            data = HexDecodeIfRequested(dAnalysis[counter], options)
-            if options.extract and len(data) > 0:
-                try:
-                    data = ExtractPackage(data)
-                except:
-                    data = b''
-            object.append({'id': counter, 'name': str(counter), 'content': binascii.b2a_base64(data).decode().strip('\n')})
+        if options.combinations:
+            power10 = RoundUpToPowerOf10(len(dAnalysis))
+            for counter in range(1, len(dAnalysis) + 1):
+                object.append({'id': counter, 'name': str(counter), 'content': binascii.b2a_base64(dAnalysis[counter].content).decode().strip('\n')})
+
+                saveHexshift = options.hexshift
+        
+                options.hexshift = False
+                object.append({'id': counter + power10, 'name': str(counter) + '-hex', 'content': binascii.b2a_base64(HexDecode(dAnalysis[counter].hexstring, options)).decode().strip('\n')})
+        
+                options.hexshift = True
+                object.append({'id': counter + 2 * power10, 'name': str(counter) + '-hex+shift', 'content': binascii.b2a_base64(HexDecode(dAnalysis[counter].hexstring, options)).decode().strip('\n')})
+        
+                options.hexshift = saveHexshift
+        else:
+            for counter in range(1, len(dAnalysis) + 1):
+                data = HexDecodeIfRequested(dAnalysis[counter], options)
+                if options.extract and len(data) > 0:
+                    try:
+                        data = ExtractPackage(data)
+                    except:
+                        data = b''
+                object.append({'id': counter, 'name': str(counter), 'content': binascii.b2a_base64(data).decode().strip('\n')})
         print(json.dumps({'version': 2, 'id': 'didierstevens.com', 'type': 'content', 'fields': ['id', 'name', 'content'], 'items': object}))
     else:
         if options.select == '':
@@ -1140,6 +1162,7 @@ def Main():
     oParser.add_option('-I', '--ignore', type=str, default='', help='control words to ignore')
     oParser.add_option('--recursionlimit', type=int, default=2000, help='set recursionlimit for Python (default 2000)')
     oParser.add_option('-j', '--jsonoutput', action='store_true', default=False, help='produce json output')
+    oParser.add_option('-C', '--combinations', action='store_true', default=False, help='All combinations with JSON output')
     oParser.add_option('-V', '--verbose', action='store_true', default=False, help='verbose output with decoder errors and YARA rules')
     (options, args) = oParser.parse_args()
 
