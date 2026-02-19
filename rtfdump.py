@@ -2,8 +2,8 @@
 
 __description__ = 'Analyze RTF files'
 __author__ = 'Didier Stevens'
-__version__ = '0.0.14'
-__date__ = '2026/02/08'
+__version__ = '0.0.15'
+__date__ = '2026/02/19'
 
 """
 
@@ -48,6 +48,7 @@ History:
   2022/10/22: 0.0.12 added CreateZipFileObject
   2025/04/21: 0.0.13 bugfix YARACompile
   2026/02/08: 0.0.14 added option --combinations
+  2026/02/19: 0.0.15 update for yara.StringMatch
 
 Todo:
 """
@@ -1040,10 +1041,11 @@ def RTFSub(oBytesIO, prefix, rules, options):
                                 linePrinted = True
                             print('               YARA rule: %s' % result.rule)
                             if options.yarastrings:
-                                for stringdata in result.strings:
-                                    print('               %06x %s:' % (stringdata[0], stringdata[1]))
-                                    print('                %s' % binascii.hexlify(C2BIP3(stringdata[2])))
-                                    print('                %s' % repr(stringdata[2]))
+                                for oStringMatch in result.strings:
+                                    for oStringMatchInstance in oStringMatch.instances:
+                                        print('               %06x %02x %s:' % (oStringMatchInstance.offset, oStringMatchInstance.xor_key, oStringMatch.identifier))
+                                        print('                %s' % binascii.hexlify(oStringMatchInstance.plaintext()).decode())
+                                        print('                %s' % repr(oStringMatchInstance.plaintext()))
         else:
             if options.dump:
                 DumpFunction = lambda x:x
