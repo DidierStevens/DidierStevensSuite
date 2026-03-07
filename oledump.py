@@ -2,8 +2,8 @@
 
 __description__ = 'Analyze OLE files (Compound Binary Files)'
 __author__ = 'Didier Stevens'
-__version__ = '0.0.83'
-__date__ = '2025/09/24'
+__version__ = '0.0.84'
+__date__ = '2026/03/07'
 
 """
 
@@ -132,6 +132,8 @@ History:
   2025/05/07: 0.0.81 bumping version for update to plugin(s), no changes to oledump.py
   2025/05/25: 0.0.82 added option --trimnull
   2025/09/24: 0.0.83 MSO bugfix
+  2026/03/07: 0.0.84 update for yara.StringMatch
+
 
 Todo:
 
@@ -2085,10 +2087,11 @@ def OLESub(ole, data, prefix, rules, options):
                         for result in rules.match(data=oDecoder.Decode(), externals={'streamname': PrintableName(fname), 'VBA': False}):
                             print('               YARA rule%s: %s' % (IFF(oDecoder.Name() == '', '', ' (stream decoder: %s)' % oDecoder.Name()), result.rule))
                             if options.yarastrings:
-                                for stringdata in result.strings:
-                                    print('               %06x %s:' % (stringdata[0], stringdata[1]))
-                                    print('                %s' % binascii.hexlify(C2BIP3(stringdata[2])))
-                                    print('                %s' % repr(stringdata[2]))
+                                for oStringMatch in result.strings:
+                                    for oStringMatchInstance in oStringMatch.instances:
+                                        print('               %06x %02x %s:' % (oStringMatchInstance.offset, oStringMatchInstance.xor_key, oStringMatch.identifier))
+                                        print('                %s' % binascii.hexlify(oStringMatchInstance.plaintext()).decode())
+                                        print('                %s' % repr(oStringMatchInstance.plaintext()))
             if indicator.lower() == 'm':
                 vbaConcatenate += SearchAndDecompress(stream) + '\n'
 
@@ -2097,10 +2100,11 @@ def OLESub(ole, data, prefix, rules, options):
             for result in rules.match(data=vbaConcatenate, externals={'streamname': '', 'VBA': True}):
                 print('               YARA rule: %s' % result.rule)
                 if options.yarastrings:
-                    for stringdata in result.strings:
-                        print('               %06x %s:' % (stringdata[0], stringdata[1]))
-                        print('                %s' % binascii.hexlify(C2BIP3(stringdata[2])))
-                        print('                %s' % repr(stringdata[2]))
+                    for oStringMatch in result.strings:
+                        for oStringMatchInstance in oStringMatch.instances:
+                            print('               %06x %02x %s:' % (oStringMatchInstance.offset, oStringMatchInstance.xor_key, oStringMatch.identifier))
+                            print('                %s' % binascii.hexlify(oStringMatchInstance.plaintext()).decode())
+                            print('                %s' % repr(oStringMatchInstance.plaintext()))
 
         for oPluginOle in objectsPluginOle:
             oPluginOle.PostProcess()

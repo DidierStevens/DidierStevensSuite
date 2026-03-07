@@ -2,10 +2,10 @@
 
 __description__ = 'pdf-parser, use it to parse a PDF document'
 __author__ = 'Didier Stevens'
-__version__ = '0.7.13'
-__date__ = '2025/08/31'
+__version__ = '0.7.14'
+__date__ = '2026/03/07'
 __minimum_python_version__ = (2, 5, 1)
-__maximum_python_version__ = (3, 12, 2)
+__maximum_python_version__ = (3, 13, 9)
 
 """
 Source code put in public domain by Didier Stevens, no Copyright
@@ -80,6 +80,7 @@ History:
   2025/03/04: V0.7.11 regex string fix Python 3.12 xambroz
   2025/04/21: V0.7.12 bugfix YARACompile
   2025/08/31: V0.7.13 bugfix user report
+  2026/03/07: V0.7.14 update for yara.StringMatch
 
 Todo:
   - handle printf todo
@@ -1734,10 +1735,11 @@ def Main():
                                     for yaraResult in result[1]:
                                         print('YARA rule%s: %s (%s)' % (IFF(result[0] == '', '', ' (stream decoder: %s)' % result[0]), yaraResult.rule, yaraResult.namespace))
                                         if options.yarastrings:
-                                            for stringdata in yaraResult.strings:
-                                                print('%06x %s:' % (stringdata[0], stringdata[1]))
-                                                print(' %s' % binascii.hexlify(C2BIP3(stringdata[2])))
-                                                print(' %s' % repr(stringdata[2]))
+                                            for oStringMatch in yaraResult.strings:
+                                                for oStringMatchInstance in oStringMatch.instances:
+                                                    print('%06x %02x %s:' % (oStringMatchInstance.offset, oStringMatchInstance.xor_key, oStringMatch.identifier))
+                                                    print(' %s' % binascii.hexlify(oStringMatchInstance.plaintext()).decode())
+                                                    print(' %s' % repr(oStringMatchInstance.plaintext()))
                                     PrintObject(object, options)
                         elif options.generateembedded != 0:
                             if object.id == options.generateembedded:

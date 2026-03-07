@@ -2,8 +2,8 @@
 
 __description__ = 'Tool for displaying PE file info'
 __author__ = 'Didier Stevens'
-__version__ = '0.7.19'
-__date__ = '2025/12/17'
+__version__ = '0.7.20'
+__date__ = '2026/03/07'
 
 """
 
@@ -61,6 +61,7 @@ History:
   2025/04/21: 0.7.17 bugfix YARACompile
   2025/05/13: 0.7.18 bugfix
   2025/12/17: 0.7.19 fix escape sequence warning
+  2026/03/07: 0.7.20 update for yara.StringMatch
 
 Todo:
 """
@@ -621,10 +622,11 @@ def SingleFileInfo(filename, data, signatures, options):
         for result in rules.match(data=str(raw)):
             print(' Rule: %s' % result.rule)
             if options.yarastrings:
-                for stringdata in result.strings:
-                    print('  %06x %s:' % (stringdata[0], stringdata[1]))
-                    print('   %s' % binascii.hexlify(C2BIP3(stringdata[2])))
-                    print('   %s' % repr(stringdata[2]))
+                for oStringMatch in result.strings:
+                    for oStringMatchInstance in oStringMatch.instances:
+                        print('               %06x %02x %s:' % (oStringMatchInstance.offset, oStringMatchInstance.xor_key, oStringMatch.identifier))
+                        print('                %s' % binascii.hexlify(oStringMatchInstance.plaintext()).decode())
+                        print('                %s' % repr(oStringMatchInstance.plaintext()))
 
 class cDump():
     def __init__(self, data, prefix='', offset=0, dumplinelength=16):
@@ -1011,10 +1013,11 @@ def Sections(data, options):
                 for result in rules.match(data=section.get_data()):
                     print(' YARA rule: %s' % result.rule)
                     if options.yarastrings:
-                        for stringdata in result.strings:
-                            print('  %06x %s:' % (stringdata[0], stringdata[1]))
-                            print('   %s' % binascii.hexlify(C2BIP3(stringdata[2])))
-                            print('   %s' % repr(stringdata[2]))
+                        for oStringMatch in result.strings:
+                            for oStringMatchInstance in oStringMatch.instances:
+                                print('               %06x %02x %s:' % (oStringMatchInstance.offset, oStringMatchInstance.xor_key, oStringMatch.identifier))
+                                print('                %s' % binascii.hexlify(oStringMatchInstance.plaintext()).decode())
+                                print('                %s' % repr(oStringMatchInstance.plaintext()))
         elif int(options.getdata) == counter:
             StdoutWriteChunked(DumpFunction(section.get_data()))
         counter += 1

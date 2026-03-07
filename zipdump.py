@@ -2,8 +2,8 @@
 
 __description__ = 'ZIP dump utility'
 __author__ = 'Didier Stevens'
-__version__ = '0.0.33'
-__date__ = '2026/01/16'
+__version__ = '0.0.34'
+__date__ = '2026/03/07'
 
 """
 
@@ -76,6 +76,7 @@ History:
   2025/03/14: added alphanumpathhashvir
   2025/04/21: 0.0.32 bugfix YARACompile
   2026/01/16: 0.0.33 added sha256 to option -E
+  2026/03/07: 0.0.4 update for yara.StringMatch
 
 Todo:
 """
@@ -5477,20 +5478,22 @@ def ZIPDump(zipfilename, options, data=None):
                         while oDecoder.Available():
                             for result in rules.match(data=oDecoder.Decode()):
                                 if options.yarastringsraw:
-                                    for stringdata in result.strings:
-                                        outputExtraInfo.append('')
-                                        outputRows.append([stringdata[2]])
+                                    for oStringMatch in result.strings:
+                                        for oStringMatchInstance in oStringMatch.instances:
+                                            outputExtraInfo.append('')
+                                            outputRows.append([oStringMatchInstance.plaintext()])
                                 else:
                                     row = [oZipInfo.filename, oDecoder.Name(), result.namespace, result.rule]
                                     if options.zipfilename:
                                         row.insert(0, zipfilename)
                                     row.insert(0, counter)
                                     if options.yarastrings:
-                                        for stringdata in result.strings:
-                                            row.append('%06x' % stringdata[0])
-                                            row.append(stringdata[1])
-                                            row.append(binascii.hexlify(stringdata[2]))
-                                            row.append(repr(stringdata[2]))
+                                        for oStringMatch in result.strings:
+                                            for oStringMatchInstance in oStringMatch.instances:
+                                                row.append('%06x' % oStringMatchInstance.offset)
+                                                row.append(oStringMatch.identifier)
+                                                row.append(binascii.hexlify(oStringMatchInstance.plaintext()))
+                                                row.append(repr(oStringMatchInstance.plaintext()))
                                     outputExtraInfo.append('')
                                     outputRows.append(row)
 
