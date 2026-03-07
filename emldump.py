@@ -2,8 +2,8 @@
 
 __description__ = 'EML dump utility'
 __author__ = 'Didier Stevens'
-__version__ = '0.0.15'
-__date__ = '2025/04/21'
+__version__ = '0.0.16'
+__date__ = '2026/03/07'
 
 """
 
@@ -34,6 +34,7 @@ History:
   2023/09/18: 0.0.13 added option --jsonoutput
   2024/06/18: 0.0.14: changed encoding from utf8 to utf-8-sig
   2025/04/21: 0.0.15 bugfix YARACompile
+  2026/03/07: 0.0.16 update for yara.StringMatch
 
 Todo:
 """
@@ -100,7 +101,7 @@ emldump.py sample.vir -s 2
 ...
 
 When a part is selected, by default the content of the part is dumped in HEX/ASCII format (option -a). An hexdump can be obtained with option -x, like in this example:
- 
+
 emldump.py sample.vir -s 2 -x
 20 20 20 0D 0A 20 20 20 41 20 63 6F 70 79 20 6F
 66 20 79 6F 75 72 20 41 44 50 20 54 6F 74 61 6C
@@ -134,7 +135,7 @@ emldump.py -y contains_pe_file.yara --yarastrings example.eml
  000010 $a 4d5a 'MZ'
  0004e4 $a 4d5a 'MZ'
  01189f $a 4d5a 'MZ'
- 
+
 YARA rule contains_pe_file detects PE files by finding string MZ followed by string PE at the correct offset (AddressOfNewExeHeader).
 The rule looks like this:
 rule Contains_PE_File
@@ -191,7 +192,7 @@ Finally, search string expressions (ASCII and hexadecimal) can be followed by an
 Examples:
 This argument can be used to dump the first 256 bytes of a PE file located inside the stream: ['MZ']:0x100l
 This argument can be used to dump the OLE file located inside the stream: [d0cf11e0]:
-When this option is not used, the complete stream is selected. 
+When this option is not used, the complete stream is selected.
 
 Option -E (extra) calculates extra information. This option takes a parameter describing the extra data that needs to be calculated and displayed for each part. The following variables are defined:
   %INDEX%: the index of the part
@@ -224,7 +225,7 @@ Option -E (extra) calculates extra information. This option takes a parameter de
 The parameter for -E may contain other text than the variables, which will be printed. Escape characters \\n and \\t are supported.
 Example displaying the MD5 and SHA256 hash per part, separated by a space character:
 emldump.py -E "%MD5% %SHA256%" example.eml
-1: M         multipart/mixed 
+1: M         multipart/mixed
 2:        32 text/plain  989a168dcc073b3365269f1173a8edb0 d181b815ced40f1bb5738483fec79cb11347c6f4212a45d917ad13ab5d386809
 3:    114704 application/octet-stream  4a8ed6be91d63104f91626ef8db30fe3 1a15d8f44b6549c8b49d067e8793d38628348fffeaab17685d40e3dfa890e442
 
@@ -799,7 +800,7 @@ def Deobfuscate(data):
     if oMatch != None:
         return b'mime-version:' + oMatch.groups()[0]
     return data
-    
+
 class cMyJSONOutput():
 
     def __init__(self):
@@ -947,8 +948,11 @@ def EMLDump(emlfilename, options):
                                     decoderName = ' (%s)' % decoderName
                                 print('%d: %s %s %-20s %s %s%s' % (counter, IFF(oPart.is_multipart(), 'M', ' '), lengthString, oPart.get_content_type(), result.namespace, result.rule, decoderName))
                                 if options.yarastrings:
-                                    for stringdata in result.strings:
-                                        print(' %06x %s %s %s' % (stringdata[0], stringdata[1], binascii.hexlify(stringdata[2]), repr(stringdata[2])))
+                                    for oStringMatch in result.strings:
+                                        for oStringMatchInstance in oStringMatch.instances:
+                                            print('               %06x %02x %s:' % (oStringMatchInstance.offset, oStringMatchInstance.xor_key, oStringMatch.identifier))
+                                            print('                %s' % binascii.hexlify(oStringMatchInstance.plaintext()).decode())
+                                            print('                %s' % repr(oStringMatchInstance.plaintext()))
                 counter += 1
         elif options.jsonoutput:
             oMyJSONOutput = cMyJSONOutput()

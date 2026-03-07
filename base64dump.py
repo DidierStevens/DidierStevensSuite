@@ -2,8 +2,8 @@
 
 __description__ = 'Extract base64 strings from file'
 __author__ = 'Didier Stevens'
-__version__ = '0.0.28'
-__date__ = '2025/04/21'
+__version__ = '0.0.29'
+__date__ = '2026/02/19'
 
 """
 
@@ -47,6 +47,7 @@ History:
   2024/11/19: 0.0.26 bugfix ExtractStrings
   2024/11/24: 0.0.27 added select option A
   2025/04/21: 0.0.28 bugfix YARACompile
+  2026/02/19: 0.0.29 update for yara.StringMatch
 
 Todo:
   add base64 url
@@ -154,7 +155,7 @@ Append o (original) to the ID number to select the unprocessed decoded data (whe
 
 The selected stream can be dumped (-d), hexdumped (-x), ASCII dumped (-a) or dump the strings (-S). Use the dump option (-d) to extract the stream and save it to disk (with file redirection >) or to pipe it (|) into the next command.
 If the dump needs to be processed by a string codec, like utf16, use option -t instead of -d and provide the codec:
-C:\Demo>base64dump.py -s 1 -t utf16 test.bin
+C:\\Demo>base64dump.py -s 1 -t utf16 test.bin
 You can also provide a Python string expression, like .decode('utf16').encode('utf8').
 
 Here is an example of an ascii dump (-s 2 -a):
@@ -188,7 +189,7 @@ hex:    2144    16 6064a1000000008b `d......@.%....f a2ae7b55955262ada177862ceb6
 a85:    2146    18 <6064a1000000008 T.v....q/:..I.#Y 76f1028223f9196c18ea2a0f64f304ef
 b85:    2146    18 <6064a1000000008 .Z..p........?N. a890225330f60c170e2c588fa6e82f90
 b64:    3640    16 48895C2408488974 ..=.-...<.....t. f0384b0c74e9402ab3f1aacc4a270ed3
-hex:    3640    16 48895C2408488974 H.\$.H.t$.H.|$.U 3320b9e508862886d2c3f556cacc67ec
+hex:    3640    16 48895C2408488974 H.\\$.H.t$.H.|$.U 3320b9e508862886d2c3f556cacc67ec
 a85:    3642    18 <48895C240848897 T...?z.uHD.XE'X. 053a28dd24051ea7b2131a95c34b99ee
 b85:    3642    18 <48895C240848897 .H6...DW......VR 5f57fa2b2288577e7844e28d6e9548ca
 b64:  213024    22 5555555566666666 ..y..y........Z. c7ff5e1a5a01698f99f67fd3f0d20d6d
@@ -212,7 +213,7 @@ Using #s#demo will instruct base64dump to generate a rule to search for string d
 All datastreams are scanned with the provided YARA rules, you can not use option -s to select an individual datastream.
 
 Example:
-C:\Demo>base64dump.py -y contains_pe_file.yara malware.zip
+C:\\Demo>base64dump.py -y contains_pe_file.yara malware.zip
 Enc  Size    Encoded          Decoded          MD5 decoded
 ---  ----    -------          -------          -----------
  ah:  256000 &H4d&H5a&H90&H00 MZ.............. 5cd40560a53fda5b32c35adfcdfca3e1
@@ -221,7 +222,7 @@ Enc  Size    Encoded          Decoded          MD5 decoded
 In this example, you use YARA rule contains_pe_file.yara to find PE files (executables) in the decoded data.
 
 If you want more information about what was detected by the YARA rule, use option --yarastrings like in this example:
-C:\Demo>base64dump.py -y contains_pe_file.yara --yarastrings malware.zip
+C:\\Demo>base64dump.py -y contains_pe_file.yara --yarastrings malware.zip
 Enc  Size    Encoded          Decoded          MD5 decoded
 ---  ----    -------          -------          -----------
  ah:  256000 &H4d&H5a&H90&H00 MZ.............. 5cd40560a53fda5b32c35adfcdfca3e1
@@ -249,7 +250,7 @@ Dump options (-a, -x, -S, ...) can be used together with option -y: triggered ru
 When looking for traces of Windows executable code (PE files, shellcode, ...) with YARA rules, one must take into account the fact that the executable code might have been encoded (for example via XOR and a key) to evade detection.
 To deal with this possibility, base64dump supports decoders. A decoder is a type of plugin, that will bruteforce a type of encoding on each datastream. For example, decoder_xor1 will encode each datastream via XOR and a key of 1 byte. So effectively, 256 different encodings of the datastream will be scanned by the YARA rules. 256 encodings because: XOR key 0x00, XOR key 0x01, XOR key 0x02, ..., XOR key 0xFF
 Here is an example:
-C:\Demo>base64dump.py -y contains_pe_file.yara -D decoder_xor1 malware.zip
+C:\\Demo>base64dump.py -y contains_pe_file.yara -D decoder_xor1 malware.zip
 Enc  Size    Encoded          Decoded          MD5 decoded
 ---  ----    -------          -------          -----------
  ah:  256000 &H4d&H5a&H90&H00 MZ.............. 5cd40560a53fda5b32c35adfcdfca3e1
@@ -267,10 +268,10 @@ Such strings are detected using regular expressions, but are then discarded beca
 If you still need to decode such strings, you can use option -p (--process). This option allows you to specify a Python function (that will be evaluated, so use only trusted input for this option) to modify the detected string before it is decoded).
 You can use builtin function L4 (Length 4) for example: function L4 takes a string as input and truncates it if necessary, by removing characters from the end so that the length becomes a multiple of 4.
 Example:
-C:\Demo>base64dump.py -p L4 malformed_base64.vir
+C:\\Demo>base64dump.py -p L4 malformed_base64.vir
 
 You can also provide your own function, for example via a lambda expression:
-C:\Demo>base64dump.py -p "lambda x: x[:-1]" malformed_base64.vir
+C:\\Demo>base64dump.py -p "lambda x: x[:-1]" malformed_base64.vir
 
 In this example, the lambda expression will remove one character from the end of the detected string.
 
@@ -886,7 +887,7 @@ def DecodeDataBase64(items, PreProcessFunction, PostProcessFunction):
 def DecodeDataBase85RFC1924(items, PreProcessFunction, PostProcessFunction):
     for item in items:
         data = item['content']
-        for base85string in re.findall(b'[ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!#$%&()*+\-;<=>?@^_`{|}~]+', data):
+        for base85string in re.findall(b'[ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!#$%&()*+\\-;<=>?@^_`{|}~]+', data):
             base85string = PreProcessFunction(base85string)
             try:
                 decodedOriginal = base64.b85decode(base85string)
@@ -898,7 +899,7 @@ def DecodeDataBase85RFC1924(items, PreProcessFunction, PostProcessFunction):
 def DecodeDataAscii85(items, PreProcessFunction, PostProcessFunction):
     for item in items:
         data = item['content']
-        for ascii85string in re.findall(b'''[!"#$%&'()*+,./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\]^_`abcdefghijklmnopqrstuz-]+''', data):
+        for ascii85string in re.findall(b'''[!"#$%&'()*+,./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]^_`abcdefghijklmnopqrstuz-]+''', data):
             ascii85string = PreProcessFunction(ascii85string)
             try:
                 decodedOriginal = base64.a85decode(ascii85string)
@@ -1471,10 +1472,11 @@ def BASE64Dump(filename, options):
                                 line = None
                             print('     YARA rule%s: %s' % (IFF(oDecoder.Name() == '', '', ' (decoder: %s)' % oDecoder.Name()), result.rule))
                             if options.yarastrings:
-                                for stringdata in result.strings:
-                                    print('     %06x %s:' % (stringdata[0], stringdata[1]))
-                                    print('      %s' % binascii.hexlify(C2BIP3(stringdata[2])))
-                                    print('      %s' % repr(stringdata[2]))
+                                for oStringMatch in result.strings:
+                                    for oStringMatchInstance in oStringMatch.instances:
+                                        print('               %06x %02x %s:' % (oStringMatchInstance.offset, oStringMatchInstance.xor_key, oStringMatch.identifier))
+                                        print('                %s' % binascii.hexlify(oStringMatchInstance.plaintext()).decode())
+                                        print('                %s' % repr(oStringMatchInstance.plaintext()))
                             if DumpFunction != None:
                                 print(DumpFunction(oDecoder.Decode()))
 
