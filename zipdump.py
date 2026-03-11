@@ -2,8 +2,8 @@
 
 __description__ = 'ZIP dump utility'
 __author__ = 'Didier Stevens'
-__version__ = '0.0.34'
-__date__ = '2026/03/07'
+__version__ = '0.0.35'
+__date__ = '2026/03/11'
 
 """
 
@@ -76,7 +76,8 @@ History:
   2025/03/14: added alphanumpathhashvir
   2025/04/21: 0.0.32 bugfix YARACompile
   2026/01/16: 0.0.33 added sha256 to option -E
-  2026/03/07: 0.0.4 update for yara.StringMatch
+  2026/03/07: 0.0.34 update for yara.StringMatch
+  2026/03/11: 0.0.35 added forcedecompress
 
 Todo:
 """
@@ -504,6 +505,8 @@ It's also possible to select data from the extra field: extra.
 Or decompress the data: decompress
 Or decompress the data: data,decompress
 Or decompress the extra data: extra,decompress
+Option decompress will decompress if the compression type is DEFLATED.
+Option forcedecompress will always try to decompress, regardless of the compression type. This may results in an error.
 
 Fields can be selected when listing records, by using option E. All fields (all):
 C:\Demo>zipdump.py -f l -E all double-suffix
@@ -5784,11 +5787,13 @@ PARSE_SELECT_SOURCE = 'source'
 PARSE_SELECT_DATA = 'data'
 PARSE_SELECT_EXTRA = 'extra'
 PARSE_SELECT_DECOMPRESS = 'decompress'
+PARSE_SELECT_FORCEDECOMPRESS = 'forcedecompress'
 
 def ParsePKRecordSelect(select):
     dSelect = {
         PARSE_SELECT_SOURCE: PARSE_SELECT_DATA,
-        PARSE_SELECT_DECOMPRESS: False
+        PARSE_SELECT_DECOMPRESS: False,
+        PARSE_SELECT_FORCEDECOMPRESS: False
     }
 
     for item in select.split(','):
@@ -5798,6 +5803,8 @@ def ParsePKRecordSelect(select):
             dSelect[PARSE_SELECT_SOURCE] = PARSE_SELECT_EXTRA
         elif item == PARSE_SELECT_DECOMPRESS:
             dSelect[PARSE_SELECT_DECOMPRESS] = True
+        elif item == PARSE_SELECT_FORCEDECOMPRESS:
+            dSelect[PARSE_SELECT_FORCEDECOMPRESS] = True
         else:
             raise Exception('Unknown select option: %s' % item)
 
@@ -5883,6 +5890,8 @@ def ZIPFind(zipfilename, options):
                         elif dSelect[PARSE_SELECT_SOURCE] == PARSE_SELECT_EXTRA:
                             recordData = oPKRecord.extra
                         if dSelect[PARSE_SELECT_DECOMPRESS] and oPKRecord.fields[4] == 8:
+                            recordData = zlib.decompress(recordData, -zlib.MAX_WBITS)
+                        elif dSelect[PARSE_SELECT_FORCEDECOMPRESS]:
                             recordData = zlib.decompress(recordData, -zlib.MAX_WBITS)
                         StdoutWriteChunked(DumpFunction(CutData(recordData, options.cut)))
         if not found:
