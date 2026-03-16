@@ -2,8 +2,8 @@
 
 __description__ = 'OLE streams plugin for oledump.py'
 __author__ = 'Didier Stevens'
-__version__ = '0.0.2'
-__date__ = '2022/06/13'
+__version__ = '0.0.3'
+__date__ = '2026/03/16'
 
 """
 
@@ -16,6 +16,7 @@ History:
   2022/06/06: 0.0.2 continue
   2022/06/08: continue
   2022/06/13: continue
+  2026/03/16: 0.0.3 fixed ISO character
 
 Todo:
 """
@@ -486,7 +487,7 @@ class cCLSID(cPluginParent):
         }
         dODTPersist1 = {
             'A': 'reserved1 (1 bit): Undefined and MUST be ignored.',
-            'B': 'fDefHandler (1 bit): If this bit is 1, then the application MUST assume that this OLE object’s class identifier (CLSID) is {00020907-0000-0000-C000-000000000046}.',
+            'B': "fDefHandler (1 bit): If this bit is 1, then the application MUST assume that this OLE object's class identifier (CLSID) is {00020907-0000-0000-C000-000000000046}.",
             'C': 'reserved2 (1 bit): Undefined and MUST be ignored.',
             'D': 'reserved3 (1 bit): Undefined and MUST be ignored.',
             'E': 'fLink (1 bit): A bit that specifies whether this OLE object is a link.',
