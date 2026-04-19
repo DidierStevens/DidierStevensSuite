@@ -2,8 +2,8 @@
 
 __description__ = 'Cut a section of bytes out of a file'
 __author__ = 'Didier Stevens'
-__version__ = '0.0.17'
-__date__ = '2024/06/26'
+__version__ = '0.0.18'
+__date__ = '2026/04/19'
 
 """
 
@@ -37,6 +37,7 @@ History:
   2022/06/27: 0.0.15 Python 3 fix
   2023/02/13: 0.0.16 added options -P and -S; added pyzipper
   2024/06/26: 0.0.17 added support for files to prefix and suffix options
+  2026/04/19: 0.0.18 fixed escape sequence
 
 Todo:
 """
@@ -183,7 +184,7 @@ File arguments that start with #E# are a notational convention for strings with 
 For example: #E#line1\nline2
 
 To process a file that starts with #, prefix it with a relative path to the current directory:
- cut-bytes.py : .\#data
+ cut-bytes.py : .\\#data
 Output:
  Test!
 

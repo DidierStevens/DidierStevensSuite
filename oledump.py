@@ -2,8 +2,8 @@
 
 __description__ = 'Analyze OLE files (Compound Binary Files)'
 __author__ = 'Didier Stevens'
-__version__ = '0.0.84'
-__date__ = '2026/03/07'
+__version__ = '0.0.85'
+__date__ = '2026/03/16'
 
 """
 
@@ -133,6 +133,7 @@ History:
   2025/05/25: 0.0.82 added option --trimnull
   2025/09/24: 0.0.83 MSO bugfix
   2026/03/07: 0.0.84 update for yara.StringMatch
+  2026/03/16: 0.0.85 bumping version for update to plugin(s), no changes to oledump.py
 
 
 Todo:
