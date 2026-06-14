@@ -2,8 +2,8 @@
 
 __description__ = 'Extract base64 strings from file'
 __author__ = 'Didier Stevens'
-__version__ = '0.0.29'
-__date__ = '2026/02/19'
+__version__ = '0.0.30'
+__date__ = '2026/05/06'
 
 """
 
@@ -48,6 +48,7 @@ History:
   2024/11/24: 0.0.27 added select option A
   2025/04/21: 0.0.28 bugfix YARACompile
   2026/02/19: 0.0.29 update for yara.StringMatch
+  2026/05/06: 0.0.30 added option --stats
 
 Todo:
   add base64 url
@@ -1352,6 +1353,8 @@ def BASE64Dump(filename, options):
     global decoders
     global dEncodings
 
+    dStats = {}
+
     if options.encoding == '?' :
         for line in AvailableEncodings():
             print(line)
@@ -1413,7 +1416,7 @@ def BASE64Dump(filename, options):
         columnNames = ('Enc', 'Size', 'Chars', 'Encoded', 'Decoded', '%s decoded' % CalculateChosenHash(b'')[1], 'Item')
         print(formatString % columnNames)
         print(formatString % tuple(['-' * len(s) for s in columnNames]))
-    elif options.select == '' and not options.jsonoutput:
+    elif options.select == '' and not options.jsonoutput and not options.stats:
         formatString = '%-2s  %-7s %-16s %-16s %-32s %s'
         columnNames = ('ID', 'Size', 'Encoded', 'Decoded', '%s decoded' % CalculateChosenHash(b'')[1], 'Item')
         print(formatString % columnNames)
@@ -1517,6 +1520,11 @@ def BASE64Dump(filename, options):
             if options.select == '':
                 if options.jsonoutput:
                     jsonObject.append({'id': counter, 'name': encodeddata[0:16].decode('latin'), 'content': binascii.b2a_base64(decodeddata).strip(b'\n').decode()})
+                elif options.stats:
+                    for byte in encodeddata:
+                        if not byte in dStats:
+                            dStats[byte] = 0
+                        dStats[byte] += 1
                 else:
                     print('%2d: %7d %-16s %-16s %s%s' % (counter, len(encodeddata), encodeddata[0:16].decode('latin'), AsciiDump(decodeddata[0:16]), CalculateChosenHash(decodeddata)[0], PrefixIfNeeded(ProduceJSONName(item))))
             elif ('%s' % counter) == options.select or options.select == 'a' or options.select == 'A':
@@ -1564,6 +1572,26 @@ def BASE64Dump(filename, options):
         print(json.dumps({'version': 2, 'id': 'didierstevens.com', 'type': 'content', 'fields': ['id', 'name', 'content'], 'items': jsonObject}))
     else:
         PrintWarningSelection(options.select, selectionCounter)
+
+    if options.stats:
+        print('Statistics characters:')
+        print('Char Counter')
+        print('---- -------')
+        for key, value in sorted(dStats.items()):
+            print(f'{chr(key)}    {value:5d}')
+        dCharacters = {
+           'b64': '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz+/=',
+           'hex': 'ABCDEFabcdef0123456789',
+           'nb': 'ABCDEFGHIJKLMNOP',
+           'nbl': 'abcdefghijklmnop',
+           'b85': 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!#$%&()*+\\-;<=>?@^_`{|}~',
+           'a85': '''!"#$%&'()*+,./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]^_`abcdefghijklmnopqrstuz-''',
+        }
+        if options.encoding in dCharacters:
+            print('Missing characters:')
+            for char in dCharacters[options.encoding]:
+                if not ord(char) in dStats:
+                    print(char)
 
     return 0
 
@@ -1618,6 +1646,7 @@ def Main():
     oParser.add_option('-p', '--preprocess', type=str, default='', help='Python function to process encodings prior to decoding (like L4, lambda bytes: bytes[:-1], ...)')
     oParser.add_option('-P', '--postprocess', type=str, default='', help='Python function to post-process decodings')
     oParser.add_option('--sort', type=str, default='', help='Sort output')
+    oParser.add_option('--stats', action='store_true', default=False, help='provide statistics for encoded data')
     (options, args) = oParser.parse_args()
 
     if options.man:
