@@ -323,11 +323,12 @@ def DecodeVBE(filename, options):
         content = sys.stdin.read()
     else:
         content = File2StringHash(filename)
-    oMatch = re.search(r'#@~\^......==(.+)......==\^#~@', content)
+    oMatch = re.findall(r'#@~\^......==(.+)......==\^#~@', content)
     if oMatch == None:
         print('No encoded script found!')
     else:
-        StdoutWriteChunked(Decode(oMatch.groups()[0]))
+        for match in oMatch:
+            StdoutWriteChunked(Decode(match))
 
 def Main():
     oParser = optparse.OptionParser(usage='usage: %prog [options] [file]\n' + __description__, version='%prog ' + __version__)
