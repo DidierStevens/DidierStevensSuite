@@ -57,11 +57,11 @@ class cPictureData:
 def Config2List(fileName):
     try:
         configFile = open(fileName, 'r')
-    except:
+    except IOError:
         return None
     try:
         config = [line.rstrip('\n').split('\t') for line in configFile.readlines()]
-    except:
+    except Exception:
         pass
     finally:
         configFile.close()
@@ -70,11 +70,11 @@ def Config2List(fileName):
 def WriteBinaryFile(name, content):
     try:
         fBinary = open(name, 'wb')
-    except:
+    except IOError:
         return False
     try:
         fBinary.write(content)
-    except:
+    except IOError:
         return False
     finally:
         fBinary.close()
@@ -86,11 +86,11 @@ def HTTPRequest(url):
             hPicture = urllib2.urlopen(url, timeout=5)
         else:
             hPicture = urllib2.urlopen(url)
-    except:
+    except urllib2.URLError:
         return None
     try:
         data = hPicture.read()
-    except:
+    except Exception:
         return None
     finally:
         hPicture.close()
@@ -129,11 +129,11 @@ def Serialize(object):
 
     try:
         fPickle = open(PICKLE_FILE, 'wb')
-    except:
+    except IOError:
         return False
     try:
         pickle.dump(object, fPickle)
-    except:
+    except Exception:
         return False
     finally:
         fPickle.close()
@@ -145,11 +145,11 @@ def DeSerialize():
     if os.path.isfile(PICKLE_FILE):
         try:
             fPickle = open(PICKLE_FILE, 'rb')
-        except:
+        except IOError:
             return None
         try:
             object = pickle.load(fPickle)
-        except:
+        except Exception:
             return None
         finally:
             fPickle.close()
@@ -201,14 +201,14 @@ def HTTPWorker(threadName, queue):
             if oPicture.copy != '-':
                 try:
                     shutil.copyfile(fileName, os.path.join(ftpDirectory, oPicture.copy))
-                except:
+                except Exception:
                     pass
             if oPicture.command != None:
                 command = '%s %s' % (oPicture.command, os.path.join(ftpDirectory, oPicture.copy))
                 oSynchroPrint.Print('Launch command: %s' % command)
                 try:
                     subprocess.Popen(command)
-                except:
+                except Exception:
                     oSynchroPrint.Print('Launch failed')
         queue.task_done()
 
