@@ -55,8 +55,8 @@ To Be Completed
 
 Calculate SSH Key Exchange Init (KEI) hash: KEIHash
 
-Errors occuring when opening a file are reported (and logged if logging is turned on), and the program moves on to the next file.
-Errors occuring when reading & processing a file are reported (and logged if logging is turned on), and the program stops unless option ignoreprocessingerrors is used.
+Errors occurring when opening a file are reported (and logged if logging is turned on), and the program moves on to the next file.
+Errors occurring when reading & processing a file are reported (and logged if logging is turned on), and the program stops unless option ignoreprocessingerrors is used.
 
 The lines are written to standard output, except when option -o is used. When option -o is used, the lines are written to the filename specified by option -o.
 Filenames used with option -o starting with # have special meaning.
